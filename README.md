@@ -236,7 +236,7 @@ to proceed.
 ```bash
 make matrix-scaffold   # add transitions the catalog implies; existing rows are kept
 make matrix            # render docs/matrix.md
-make test              # 128 unit tests over the loader, lookup and shipped data
+make test              # unit tests over the loader, lookup and shipped data
 ```
 
 `matrix-scaffold` never overwrites an existing row, so refreshing the catalog
