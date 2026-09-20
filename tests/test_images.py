@@ -143,3 +143,63 @@ def test_catalog_round_trips_through_disk(tmp_path):
     catalog = load_catalog(path)
     assert len(catalog) == 4
     assert catalog.has_pair("15", "2.28") is True
+
+
+# --------------------------------------------------------------------------
+# Image labels: what a tag declares about its own contents
+# --------------------------------------------------------------------------
+
+from tsupgrade.images import ImageLabels, _split_versions  # noqa: E402
+
+
+def _labels(ts=(), pg=(), ts_default=None):
+    return ImageLabels(
+        reference="test:tag",
+        pg_versions=tuple(pg),
+        ts_versions=tuple(ts),
+        pg_default=None,
+        ts_default=ts_default,
+    )
+
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("2.13.0 2.30.1", ("2.13.0", "2.30.1")),
+        ("2.13.0,2.30.1", ("2.13.0", "2.30.1")),
+        ("  2.13.0   2.30.1  ", ("2.13.0", "2.30.1")),
+        ("2.30.1", ("2.30.1",)),
+        ("", ()),
+        (None, ()),
+    ],
+)
+def test_label_version_lists_split_on_whitespace_or_commas(raw, expected):
+    assert _split_versions(raw) == expected
+
+
+def test_label_floor_and_ceiling_sort_numerically_not_lexically():
+    """Lexically '2.9.2' sorts after '2.13.0', which would inverse the range.
+
+    This is the whole point of the floor/ceiling pair, so getting it wrong
+    would make every bridging decision wrong in the same direction.
+    """
+    labels = _labels(ts=["2.13.0", "2.9.2", "2.30.1", "2.20.3"])
+    assert labels.ts_floor == "2.9.2"
+    assert labels.ts_ceiling == "2.30.1"
+
+
+def test_empty_label_has_no_floor_or_ceiling():
+    labels = _labels()
+    assert labels.ts_floor is None
+    assert labels.ts_ceiling is None
+
+
+def test_pg_majors_are_deduplicated_and_sorted():
+    labels = _labels(pg=["15.18", "16.15", "17.11", "15.13"])
+    assert labels.pg_majors == (15, 16, 17)
+
+
+def test_pg_majors_skips_what_it_cannot_parse():
+    """A label format change should lose one entry, not the whole list."""
+    labels = _labels(pg=["15.18", "junk", "16.15"])
+    assert labels.pg_majors == (15, 16)

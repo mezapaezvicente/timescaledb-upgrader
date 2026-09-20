@@ -35,6 +35,8 @@ __all__ = [
     "build_catalog",
     "load_catalog",
     "default_catalog_path",
+    "fetch_image_labels",
+    "ImageLabels",
 ]
 
 DEFAULT_REPOSITORY = "timescale/timescaledb-ha"
@@ -411,3 +413,166 @@ def manifest_exists(reference: str, timeout: float = 15.0) -> Tuple[bool, str]:
         raise RegistryError(
             "timed out after {0}s querying {1}".format(timeout, registry)
         ) from exc
+
+
+# ---------------------------------------------------------------------------
+# What one image *contains*, from its labels
+# ---------------------------------------------------------------------------
+#
+# The HA images carry their own inventory as OCI labels, readable from the
+# config blob -- a few KB behind an anonymous token, with no pull. That matters
+# because the alternative is downloading multi-gigabyte images to answer a
+# question about which extension versions they ship.
+#
+# The labels overstate. They are the union across the whole build, so a pg16
+# image advertises TimescaleDB 2.12.2 even though 2.12 never supported pg16 and
+# the image ships neither its shared object nor its install script. Callers must
+# clamp the floor; see `drift.effective_floor`. Treat what comes back as a
+# prediction that the filesystem can overrule.
+
+_LABEL_PG_AVAILABLE = "com.timescaledb.image.postgresql.available_versions"
+_LABEL_TS_AVAILABLE = "com.timescaledb.image.timescaledb.available_versions"
+_LABEL_TS_DEFAULT = "com.timescaledb.image.timescaledb.version"
+_LABEL_PG_DEFAULT = "com.timescaledb.image.postgresql.version"
+
+_INDEX_TYPES = frozenset(
+    {
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+    }
+)
+
+
+@dataclass(frozen=True)
+class ImageLabels:
+    """The inventory one image tag declares about itself."""
+
+    reference: str
+    pg_versions: Tuple[str, ...]
+    ts_versions: Tuple[str, ...]
+    pg_default: Optional[str]
+    ts_default: Optional[str]
+
+    @property
+    def pg_majors(self) -> Tuple[int, ...]:
+        majors = set()
+        for version in self.pg_versions:
+            try:
+                majors.add(parse_version(version)[0])
+            except InvalidVersion:
+                continue
+        return tuple(sorted(majors))
+
+    @property
+    def ts_floor(self) -> Optional[str]:
+        return self._sorted_ts()[0] if self.ts_versions else None
+
+    @property
+    def ts_ceiling(self) -> Optional[str]:
+        return self._sorted_ts()[-1] if self.ts_versions else None
+
+    def _sorted_ts(self) -> List[str]:
+        def key(v: str):
+            try:
+                return parse_version(v)
+            except InvalidVersion:
+                return (0,)
+
+        return sorted(self.ts_versions, key=key)
+
+
+def _split_versions(value: object) -> Tuple[str, ...]:
+    """Split a label's version list.
+
+    The labels use whitespace, but commas are cheap to tolerate and a label
+    format change should degrade to a short list rather than one long junk
+    string.
+    """
+    if not value:
+        return ()
+    text = str(value).replace(",", " ")
+    return tuple(part for part in text.split() if part)
+
+
+def _registry_token(registry: str, repository: str, timeout: float) -> Optional[str]:
+    """An anonymous pull token, or None if the registry does not require one."""
+    if registry != "registry-1.docker.io":
+        return None
+    doc = _get_json(
+        _AUTH_URL.format(repo=repository), {"User-Agent": _USER_AGENT}, timeout
+    )
+    return doc.get("token") or doc.get("access_token")
+
+
+def _fetch_manifest(url: str, headers: Dict[str, str], timeout: float) -> Any:
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            raise RegistryError("no such image: {0}".format(url)) from exc
+        raise RegistryError(
+            "registry returned HTTP {0} for {1}".format(exc.code, url)
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RegistryError("cannot reach {0}: {1}".format(url, exc.reason)) from exc
+    except TimeoutError as exc:
+        raise RegistryError(
+            "timed out after {0}s querying {1}".format(timeout, url)
+        ) from exc
+    except json.JSONDecodeError as exc:
+        raise RegistryError("registry returned non-JSON from {0}: {1}".format(url, exc)) from exc
+
+
+def fetch_image_labels(reference: str, timeout: float = 15.0) -> ImageLabels:
+    """Read an image's declared contents without pulling it.
+
+    Three round trips: token, manifest (following the multi-arch index to the
+    amd64 entry), then the config blob. The blob is served as a redirect to a
+    CDN, so redirects must be followed -- urllib does that by default, which is
+    the one place this is easier than curl.
+    """
+    registry, repository, tag = parse_image_reference(reference)
+    token = _registry_token(registry, repository, timeout)
+
+    headers = {"Accept": _MANIFEST_ACCEPT, "User-Agent": _USER_AGENT}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+
+    base = "https://{0}/v2/{1}".format(registry, repository)
+    manifest = _fetch_manifest("{0}/manifests/{1}".format(base, tag), headers, timeout)
+
+    if manifest.get("mediaType") in _INDEX_TYPES or "manifests" in manifest:
+        digest = None
+        for entry in manifest.get("manifests", []):
+            platform = entry.get("platform") or {}
+            if platform.get("architecture") == "amd64" and platform.get("os") == "linux":
+                digest = entry.get("digest")
+                break
+        if not digest:
+            raise RegistryError(
+                "{0}: multi-arch index has no linux/amd64 entry".format(reference)
+            )
+        manifest = _fetch_manifest(
+            "{0}/manifests/{1}".format(base, digest), headers, timeout
+        )
+
+    config_digest = (manifest.get("config") or {}).get("digest")
+    if not config_digest:
+        raise RegistryError("{0}: manifest carries no config digest".format(reference))
+
+    blob = _fetch_manifest(
+        "{0}/blobs/{1}".format(base, config_digest),
+        {k: v for k, v in headers.items() if k != "Accept"},
+        timeout,
+    )
+    labels = ((blob.get("config") or {}).get("Labels")) or {}
+
+    return ImageLabels(
+        reference=reference,
+        pg_versions=_split_versions(labels.get(_LABEL_PG_AVAILABLE)),
+        ts_versions=_split_versions(labels.get(_LABEL_TS_AVAILABLE)),
+        pg_default=labels.get(_LABEL_PG_DEFAULT) or None,
+        ts_default=labels.get(_LABEL_TS_DEFAULT) or None,
+    )
