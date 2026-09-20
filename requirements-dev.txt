@@ -1,0 +1,3 @@
+# The toolkit itself has no dependencies and runs from a clone with a plain
+# `python3`. This file is only what the test suite needs.
+pytest>=7.0

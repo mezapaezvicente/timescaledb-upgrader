@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-01-01T00:00:00Z",
+  "note": "Fixture data for the unit tests. The versions here are arbitrary and the source URLs are deliberately unresolvable (example.invalid). Nothing in this file is a real compatibility claim.",
+  "entries": [
+    {
+      "source_pg": "15",
+      "source_ts": "2.20",
+      "target_pg": "15",
+      "target_ts": "2.21",
+      "verdict": "in_place",
+      "reason": "fixture: extension-only move",
+      "steps": [
+        "ALTER EXTENSION timescaledb UPDATE;"
+      ],
+      "source_url": "https://example.invalid/fixture-in-place",
+      "verified": true
+    },
+    {
+      "source_pg": "15",
+      "source_ts": "2.21",
+      "target_pg": "16",
+      "target_ts": "2.21",
+      "verdict": null,
+      "reason": "",
+      "steps": [],
+      "source_url": null,
+      "verified": false
+    },
+    {
+      "source_pg": "13",
+      "source_ts": "2.15",
+      "target_pg": "13",
+      "target_ts": "2.30",
+      "verdict": "no_image",
+      "reason": "fixture: no such tag is published",
+      "steps": [],
+      "source_url": "https://example.invalid/fixture-registry",
+      "verified": true
+    },
+    {
+      "source_pg": "16",
+      "source_ts": "2.28",
+      "target_pg": "17",
+      "target_ts": "2.30",
+      "verdict": "in_place",
+      "reason": "fixture: series-wide row",
+      "steps": [],
+      "source_url": "https://example.invalid/fixture-series",
+      "verified": true
+    },
+    {
+      "source_pg": "16.15",
+      "source_ts": "2.28.3",
+      "target_pg": "17",
+      "target_ts": "2.30",
+      "verdict": "dump_restore",
+      "reason": "fixture: row pinned to one patch release",
+      "steps": [
+        "pg_dump the source",
+        "restore into the target"
+      ],
+      "source_url": "https://example.invalid/fixture-pinned",
+      "verified": true
+    },
+    {
+      "source_pg": "12",
+      "source_ts": "2.11",
+      "target_pg": "16",
+      "target_ts": "2.30",
+      "verdict": "unsupported",
+      "reason": "fixture: not a listed path",
+      "steps": [],
+      "source_url": "https://example.invalid/fixture-unsupported",
+      "verified": true
+    }
+  ]
+}

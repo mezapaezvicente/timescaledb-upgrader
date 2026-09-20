@@ -29,6 +29,13 @@ export ROWS CHUNK_INTERVAL DEVICES
 
 .DEFAULT_GOAL := help
 .PHONY: help up down status psql seed smoke logs load-image clean
+.PHONY: test matrix matrix-scaffold images images-refresh lookup
+
+# Lookup arguments for `make lookup`.
+FROM_PG ?=
+FROM_TS ?=
+TO_PG   ?=
+TO_TS   ?=
 
 help: ## Show this help
 	@echo "timescaledb-upgrader"
@@ -64,3 +71,23 @@ load-image: ## Side-load $(TSDB_IMAGE) from local Docker into the kind node
 
 clean: ## Delete the namespace but keep the kind cluster
 	@bash scripts/clean.sh
+
+# --- version matrix (phase 2) -------------------------------------------------
+
+test: ## Run the unit test suite
+	@bash scripts/test.sh
+
+matrix: ## Render the version matrix to docs/matrix.md
+	@bash scripts/tsupgrade.sh matrix render
+
+matrix-scaffold: ## Add transitions the image catalog implies, keeping existing rows
+	@bash scripts/tsupgrade.sh matrix scaffold
+
+images: ## Summarise which TimescaleDB HA images exist
+	@bash scripts/tsupgrade.sh images show
+
+images-refresh: ## Re-query the registry and regenerate data/images.json
+	@bash scripts/tsupgrade.sh images refresh
+
+lookup: ## Look up one transition: make lookup FROM_PG=16.15 FROM_TS=2.28.3 TO_PG=17 TO_TS=2.30
+	@bash scripts/tsupgrade.sh matrix lookup 	  --from-pg "$(FROM_PG)" --from-ts "$(FROM_TS)" 	  --to-pg "$(TO_PG)" --to-ts "$(TO_TS)"
