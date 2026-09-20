@@ -808,8 +808,15 @@ def check_matrix(
             details.append("{0} : lookup failed: {1}".format(inst.pod, exc))
             continue
 
+        # An empty matrix returns None without ever parsing a version, so this
+        # is the first place a junk server_version could surface. Fall back to
+        # the raw string rather than crashing the whole report over a label.
+        try:
+            source_pg_label = str(parse_version(inst.server_version)[0])
+        except InvalidVersion:
+            source_pg_label = inst.server_version
         label = "pg{0}/ts{1} -> pg{2}/ts{3}".format(
-            parse_version(inst.server_version)[0], source_ts, target_pg, target_ts
+            source_pg_label, source_ts, target_pg, target_ts
         )
 
         if entry is None:

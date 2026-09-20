@@ -212,3 +212,18 @@ def test_report_counts_each_status():
 def test_report_omits_the_unknown_warning_when_there_are_none():
     text = render_report([CheckResult("a", "A", PASS, "")])
     assert "resolve it before upgrading" not in text
+
+
+def test_junk_server_version_does_not_crash_the_report(tmp_path):
+    """An empty matrix skips version parsing, so a junk version reaches the label.
+
+    It must degrade to unknown with the raw string shown, not take down the
+    whole preflight run.
+    """
+    path = tmp_path / "matrix.json"
+    path.write_text('{"entries": []}', encoding="utf-8")
+    inst = Instance(pod="tsdb-0", server_version="not-a-version", extensions={"db": "2.30.1"})
+
+    result = check_matrix(_opts(path), [inst], "17", "2.30")
+    assert result.status == UNKNOWN
+    assert any("not-a-version" in d for d in result.details)
