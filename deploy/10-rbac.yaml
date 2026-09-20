@@ -1,0 +1,51 @@
+# Patroni uses the Kubernetes API as its DCS (distributed configuration store)
+# instead of etcd/Consul. That means it needs to read and write a small set of
+# objects in its own namespace: an Endpoints object per cluster to record the
+# leader, and pod labels to advertise each member's role.
+#
+# Scope is a namespaced Role, never a ClusterRole -- Patroni has no business
+# outside the namespace it runs in.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: __CLUSTER_NAME__-patroni
+  namespace: __NAMESPACE__
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: __CLUSTER_NAME__-patroni
+  namespace: __NAMESPACE__
+rules:
+  # Leader election + cluster state. With kubernetes.use_endpoints=true,
+  # Patroni stores the leader in the Endpoints object named after the scope.
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Patroni falls back to ConfigMaps for cluster config in some code paths.
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Patroni patches each pod's labels to advertise role=primary / role=replica,
+  # which is what the read/write Services select on.
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  # Creating the per-cluster Services on first bootstrap.
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: __CLUSTER_NAME__-patroni
+  namespace: __NAMESPACE__
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: __CLUSTER_NAME__-patroni
+subjects:
+  - kind: ServiceAccount
+    name: __CLUSTER_NAME__-patroni
+    namespace: __NAMESPACE__

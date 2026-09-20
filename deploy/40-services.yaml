@@ -1,0 +1,69 @@
+# Three Services, each with a distinct job.
+---
+# 1. The leader Service. It deliberately has NO selector: Patroni itself writes
+#    the Endpoints object of the same name and points it at whichever pod
+#    currently holds the leader lock. This is what `kubernetes.use_endpoints`
+#    means. Kubernetes does not garbage-collect endpoints for selector-less
+#    Services, so Patroni's writes survive.
+#
+#    Connect here for read/write traffic. It follows failover automatically.
+apiVersion: v1
+kind: Service
+metadata:
+  name: __CLUSTER_NAME__
+  namespace: __NAMESPACE__
+  labels:
+    app.kubernetes.io/part-of: timescaledb-upgrader
+    cluster-name: __CLUSTER_NAME__
+spec:
+  type: ClusterIP
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+---
+# 2. Headless Service backing the StatefulSet, giving each pod stable DNS
+#    (<pod>.<cluster>-headless.<ns>.svc). publishNotReadyAddresses is required:
+#    Patroni members must find each other *before* any of them is ready, or a
+#    fresh cluster can never elect its first leader.
+apiVersion: v1
+kind: Service
+metadata:
+  name: __CLUSTER_NAME__-headless
+  namespace: __NAMESPACE__
+  labels:
+    app.kubernetes.io/part-of: timescaledb-upgrader
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    application: patroni
+    cluster-name: __CLUSTER_NAME__
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+    - name: patroni
+      port: 8008
+      targetPort: 8008
+---
+# 3. Read-only Service selecting replicas by the role label Patroni maintains.
+#    With replicas=1 this Service has no endpoints, which is correct and not an
+#    error: a single-member cluster has no standby to read from.
+apiVersion: v1
+kind: Service
+metadata:
+  name: __CLUSTER_NAME__-replica
+  namespace: __NAMESPACE__
+  labels:
+    app.kubernetes.io/part-of: timescaledb-upgrader
+spec:
+  type: ClusterIP
+  selector:
+    application: patroni
+    cluster-name: __CLUSTER_NAME__
+    role: replica
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432

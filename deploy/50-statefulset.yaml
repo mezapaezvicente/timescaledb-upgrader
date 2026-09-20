@@ -1,0 +1,149 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: __CLUSTER_NAME__
+  namespace: __NAMESPACE__
+  labels:
+    app.kubernetes.io/part-of: timescaledb-upgrader
+    application: patroni
+    cluster-name: __CLUSTER_NAME__
+spec:
+  serviceName: __CLUSTER_NAME__-headless
+  replicas: __REPLICAS__
+  podManagementPolicy: OrderedReady
+  updateStrategy:
+    type: OnDelete
+  selector:
+    matchLabels:
+      application: patroni
+      cluster-name: __CLUSTER_NAME__
+  template:
+    metadata:
+      labels:
+        application: patroni
+        cluster-name: __CLUSTER_NAME__
+        app.kubernetes.io/part-of: timescaledb-upgrader
+    spec:
+      serviceAccountName: __CLUSTER_NAME__-patroni
+      # The image runs as uid/gid 1000 (postgres). fsGroup makes the freshly
+      # provisioned PersistentVolume group-writable for that user, which is what
+      # lets initdb succeed on first boot.
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+      terminationGracePeriodSeconds: 60
+      affinity:
+        podAntiAffinity:
+          # Soft, not required: spreading members across nodes is right on a real
+          # cluster, but a single-node kind cluster must still be able to
+          # schedule every replica.
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    application: patroni
+                    cluster-name: __CLUSTER_NAME__
+      containers:
+        - name: timescaledb
+          image: __IMAGE__
+          imagePullPolicy: IfNotPresent
+          # Replace the image's own entrypoint: Patroni owns the PostgreSQL
+          # lifecycle here, including initdb, promotion and failover.
+          command: ["/usr/bin/patroni", "/etc/patroni/patroni.yml"]
+          ports:
+            - name: postgresql
+              containerPort: 5432
+            - name: patroni
+              containerPort: 8008
+          env:
+            # POD_IP must be declared before the vars that interpolate it;
+            # Kubernetes expands $(VAR) only against earlier entries.
+            - name: POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: PATRONI_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: PATRONI_KUBERNETES_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: PATRONI_KUBERNETES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: PATRONI_POSTGRESQL_CONNECT_ADDRESS
+              value: "$(POD_IP):5432"
+            - name: PATRONI_RESTAPI_CONNECT_ADDRESS
+              value: "$(POD_IP):8008"
+            - name: PATRONI_SUPERUSER_USERNAME
+              value: "postgres"
+            - name: PATRONI_SUPERUSER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: __CLUSTER_NAME__-credentials
+                  key: superuser-password
+            - name: PATRONI_REPLICATION_USERNAME
+              value: "replicator"
+            - name: PATRONI_REPLICATION_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: __CLUSTER_NAME__-credentials
+                  key: replication-password
+            # Lets `kubectl exec ... patronictl list` work with no extra flags.
+            - name: PATRONICTL_CONFIG_FILE
+              value: /etc/patroni/patroni.yml
+          volumeMounts:
+            - name: pgdata
+              mountPath: /home/postgres/pgdata
+            - name: patroni-config
+              mountPath: /etc/patroni
+              readOnly: true
+          # First boot has to pull a multi-GB image and run initdb, so failure is
+          # gated behind a startupProbe with a long budget. Once started, the
+          # liveness/readiness probes react quickly.
+          startupProbe:
+            httpGet:
+              path: /liveness
+              port: 8008
+            periodSeconds: 10
+            failureThreshold: 60
+          livenessProbe:
+            httpGet:
+              path: /liveness
+              port: 8008
+            periodSeconds: 10
+            failureThreshold: 6
+          readinessProbe:
+            # Patroni returns 200 on /readiness only when this member is a
+            # healthy primary or a streaming replica.
+            httpGet:
+              path: /readiness
+              port: 8008
+            periodSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              memory: "2Gi"
+      volumes:
+        - name: patroni-config
+          configMap:
+            name: __CLUSTER_NAME__-patroni
+  volumeClaimTemplates:
+    - metadata:
+        name: pgdata
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        # storageClassName is intentionally omitted so the cluster's default
+        # class is used. kind ships rancher.io/local-path as the default.
+        resources:
+          requests:
+            storage: __STORAGE__
