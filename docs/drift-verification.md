@@ -149,12 +149,108 @@ table that omits it, and clamping to 2.10 would make the two-hop rescue above
 unrepresentable — the very case the bridge search exists for. The disagreement
 is reported in the command's output rather than resolved silently.
 
+## The test suite
+
+261 tests, no cluster and no network. Everything above that needed real
+infrastructure is reproduced here as a scripted fixture, so the decisions stay
+covered on a laptop with Docker switched off.
+
+| File | Tests | Covers |
+|---|---|---|
+| `test_drift.py` | 49 | the four states, what an image can install, floor clamping, bridging |
+| `test_gates.py` | 37 | gate applicability, catalog probes, clear vs. could-not-tell |
+| `test_support.py` | 36 | the ABI table, the support matrix, registry/table disagreement |
+| `test_images.py` | 32 | tag parsing, catalog queries, label parsing |
+| `test_matrix.py` | 42 | matrix loader and lookup |
+| `test_versions.py` | 30 | version parsing and match rules |
+| `test_preflight.py` | 27 | status precedence, df parsing, matrix verdicts |
+| `test_shipped_data.py` | 8 | the shipped JSON obeys its own rules |
+
+### How the database is faked
+
+`gates.py` takes its query runner as an argument — `(database, sql) -> (rc,
+stdout, stderr)` — specifically so the gates can be driven without a cluster.
+`tests/test_gates.py` supplies a `FakeDB` that answers column probes from a set
+of `(table, column)` pairs and everything else from substring-keyed rows, with
+`fail_on` to make a named query fail. That is what makes it possible to test
+the cases that matter most and are hardest to stage for real: a catalog missing
+the column a gate wants to read.
+
+The same shape is why `preflight.check_gates` can hand in its existing
+read-only psql path unchanged.
+
+### What the tests are actually defending
+
+Most of them are ordinary. These are the ones that encode something that was
+got wrong at least once, or that would fail silently:
+
+- **Numeric, not lexical, version comparison.** As text `2.9.2` sorts *after*
+  `2.13.0`. A database at 2.9.2 on a 2.13-default image is lagging; compared as
+  strings it looks `ahead`, which reports an outage and advises rolling the
+  image *forward* — the opposite of the truth, in the one case that matters.
+  Pinned in `test_versions_compare_numerically_not_lexically` and again for the
+  offline path and the label floor/ceiling.
+- **A missing column is not a tripped gate.** Three separate tests assert that
+  an absent `replication_factor`, `finalized` or `bucket_func` yields `clear` or
+  a different query — never `blocked`, never a bare failure.
+- **A missing column must not blank its siblings.**
+  `test_missing_column_does_not_blank_the_other_two_triggers` stages an absent
+  `replication_factor` *and* a real foreign server, and requires the gate to
+  still block. This is why the multi-node check runs three statements rather
+  than one.
+- **A failed query is never `clear`.** `fail_on` drives each gate into an error
+  and asserts `indeterminate`.
+- **Unreadable is never `stranded`.** A stranded database and an unreachable
+  one look identical from outside; conflating them invents an outage.
+- **`ahead` outranks `stranded`.** Both are outages, but the remedies point in
+  opposite directions — forward vs. back — so the precedence is pinned.
+- **The 2.24.0 boundary is exclusive.** The upstream guard is `VERSION_GREATER`,
+  so a source at exactly 2.24.0 is still exposed, and a series-only `"2.24"`
+  is treated as exposed too because it pins less.
+- **Support-matrix gaps stay gaps.** `documented_pg_majors("2.11")` is `None`,
+  not `()` and not `False`.
+- **Bridging terminates.** A candidate that accepts a version without raising
+  it, a target offered as its own bridge, and an `ahead` version that cannot be
+  bridged upward all return a problem rather than looping or inventing a chain.
+
+One test caught a bug in *itself* rather than the code: asserting that the
+legacy path never mentions `bucket_func` failed, because the table is named
+`continuous_aggs_bucket_function` and the substring matches. The assertion now
+checks the column reference `bf.bucket_func`.
+
+### Two claims the suite deliberately does not make
+
+- **`time_bucket_ng` has no positive fixture.** Creating such an aggregate is
+  already refused at 2.13.0 (*"continuous aggregate view must include a valid
+  time bucket function"*), so no positive case could be built on this image.
+  The detection query is read from the shipped SQL — graded [R], not [E] — and
+  the tests cover the dual-schema *dispatch*, not a real blocked upgrade.
+- **Nothing asserts an upgrade is safe.** Every gate answers what blocks an
+  upgrade. A `clear` result means no known blocker was found, which is not the
+  same claim, and the matrix loader's rule is untouched: runtime findings are
+  check results and never get written back into `data/upgrade-matrix.json`.
+
 ## Re-running
+
+Unit tests need nothing installed beyond Python:
+
+```sh
+bash scripts/test.sh                 # 261 tests, no cluster, no network
+```
+
+Offline drift needs only network access to the registry:
+
+```sh
+bash scripts/tsupgrade.sh drift \
+  --image     timescale/timescaledb-ha:pg15-ts2.28-all \
+  --installed 2.9.2 --pg-major 15 \
+  --via       timescale/timescaledb-ha:pg15-ts2.20
+```
+
+The live checks need Docker, or the kind harness for the in-cluster paths:
 
 ```sh
 docker run -d --name tsdrift -e POSTGRES_PASSWORD=x \
   timescale/timescaledb-ha:pg16.15-ts2.30.1
-bash scripts/test.sh                       # 179 unit tests, no cluster, no network
-bash scripts/tsupgrade.sh drift --image … --installed … --via …   # offline
-bash scripts/preflight.sh                  # online, needs the kind harness
+make up && make preflight TARGET_IMAGE=timescale/timescaledb-ha:pg16.15-ts2.30.1
 ```
