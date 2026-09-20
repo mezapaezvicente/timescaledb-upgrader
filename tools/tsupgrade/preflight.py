@@ -31,6 +31,7 @@ from .images import (
     parse_release_tag,
 )
 from .matrix import Matrix, MatrixError, load_matrix
+from .support import ABI_BROKEN, ABI_BROKEN_SOURCE, abi_break_for
 from .versions import InvalidVersion, parse_version
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "run_preflight",
     "render_report",
     "worst_status",
+    "check_abi_break",
 ]
 
 PASS = "pass"
@@ -757,6 +759,64 @@ def check_permissions(
     )
 
 
+def check_abi_break(instances: Sequence[Instance]) -> CheckResult:
+    """Refuse the six PostgreSQL patch releases that cannot load TimescaleDB.
+
+    PostgreSQL 17.1, 16.5, 15.9, 14.14, 13.17 and 12.21 grew
+    ``struct ResultRelInfo`` by accident, breaking the ABI the extension is
+    compiled against. The change was reverted in the next patch release each.
+
+    This is a property of the running server, not of any transition, so it is
+    checked against what was discovered rather than looked up in the matrix. It
+    fails rather than warns: on these releases the extension does not load, so
+    there is no upgrade to plan.
+    """
+    details: List[str] = []
+    statuses: List[str] = []
+
+    usable = [i for i in instances if not i.error and i.server_version]
+    if not usable:
+        return CheckResult(
+            "abi_break",
+            "PostgreSQL ABI-break patch levels",
+            UNKNOWN,
+            "no instance reported a server version",
+            details,
+        )
+
+    for inst in usable:
+        fixed = abi_break_for(inst.server_version)
+        if fixed is None:
+            statuses.append(PASS)
+            details.append(
+                "{0} : PostgreSQL {1} is not one of the affected releases".format(
+                    inst.pod, inst.server_version
+                )
+            )
+            continue
+        statuses.append(FAIL)
+        details.append(
+            "{0} : PostgreSQL {1} shipped the ResultRelInfo ABI break; "
+            "TimescaleDB cannot load. Move to {2} or later first.".format(
+                inst.pod, inst.server_version, fixed
+            )
+        )
+
+    details.append("affected : " + ", ".join(
+        "{0}.{1} (fixed in {2})".format(major, minor, fixed)
+        for (major, minor), fixed in sorted(ABI_BROKEN.items(), reverse=True)
+    ))
+    details.append("source   : {0}".format(ABI_BROKEN_SOURCE))
+
+    return CheckResult(
+        "abi_break",
+        "PostgreSQL ABI-break patch levels",
+        worst_status(statuses),
+        "checked {0} instance(s)".format(len(usable)),
+        details,
+    )
+
+
 def check_matrix(
     opts: PreflightOptions,
     instances: Sequence[Instance],
@@ -887,6 +947,7 @@ def run_preflight(opts: PreflightOptions) -> List[CheckResult]:
 
     instances, instances_result = discover_instances(kube, opts)
     results.append(instances_result)
+    results.append(check_abi_break(instances))
     results.append(check_disk_headroom(kube, opts, instances))
     results.append(check_permissions(kube, opts, instances))
     results.append(check_matrix(opts, instances, target_pg, target_ts))
