@@ -30,7 +30,7 @@ export TARGET_IMAGE
 
 .DEFAULT_GOAL := help
 .PHONY: help up down status psql seed smoke logs load-image clean
-.PHONY: test matrix matrix-scaffold images images-refresh lookup preflight
+.PHONY: test matrix matrix-scaffold images images-refresh lookup preflight drift
 
 # Lookup arguments for `make lookup`.
 TARGET_IMAGE ?=
@@ -38,6 +38,12 @@ FROM_PG ?=
 FROM_TS ?=
 TO_PG   ?=
 TO_TS   ?=
+
+# Arguments for `make drift`. VIA may list several images.
+IMAGE     ?=
+INSTALLED ?=
+PG_MAJOR  ?=
+VIA       ?=
 
 help: ## Show this help
 	@echo "timescaledb-upgrader"
@@ -98,3 +104,11 @@ lookup: ## Look up one transition: make lookup FROM_PG=16.15 FROM_TS=2.28.3 TO_P
 
 preflight: ## Read-only pre-upgrade checks: make preflight TARGET_IMAGE=<image>
 	@bash scripts/preflight.sh
+
+# --- drift (phase 4) ----------------------------------------------------------
+
+# Offline: asks whether rolling out an image would strand a database, using
+# only registry labels. Worth running *before* the rollout, because afterwards
+# the answer is an incident.
+drift: ## Would an image strand a version? make drift IMAGE=<ref> INSTALLED=<ver> [PG_MAJOR=15] [VIA=<ref>]
+	@bash scripts/tsupgrade.sh drift --image "$(IMAGE)" --installed "$(INSTALLED)" 	  $(if $(PG_MAJOR),--pg-major "$(PG_MAJOR)",) $(foreach v,$(VIA),--via "$(v)")

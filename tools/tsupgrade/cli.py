@@ -7,6 +7,7 @@ Subcommands
 ``matrix scaffold``   add missing transitions to ``data/upgrade-matrix.json``
 ``matrix render``     render the matrix to Markdown
 ``matrix lookup``     look up one transition
+``drift``             classify databases against what their image can install
 
 Exit codes for ``matrix lookup`` are meant to be scripted against:
 0 a verified verdict, 3 an entry with no established verdict, 4 no entry at all,
@@ -21,10 +22,19 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from .drift import (
+    AHEAD,
+    STRANDED,
+    bridge,
+    classify_offline,
+    plan_chain,
+    profile_from_labels,
+)
 from .images import (
     RegistryError,
     build_catalog,
     default_catalog_path,
+    fetch_image_labels,
     fetch_tags,
     load_catalog,
 )
@@ -232,6 +242,100 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _profile(reference: str, pg_major, catalog, timeout: float):
+    return profile_from_labels(
+        fetch_image_labels(reference, timeout=timeout), pg_major, catalog
+    )
+
+
+def cmd_drift(args: argparse.Namespace) -> int:
+    """Offline drift: would this image strand a database at this version?
+
+    The online counterpart lives in ``preflight``, which has the cluster in
+    hand. This mode exists because the question is only useful *before* the
+    rollout -- afterwards the answer is an incident -- and because a stranded
+    database may be exactly the one that cannot be queried.
+    """
+    try:
+        catalog = load_catalog(args.catalog)
+    except RegistryError:
+        catalog = None
+
+    pg_major = int(args.pg_major) if args.pg_major else None
+
+    try:
+        target = _profile(args.image, pg_major, catalog, args.registry_timeout)
+    except RegistryError as exc:
+        print("error: {0}".format(exc), file=sys.stderr)
+        return EXIT_ERROR
+
+    verdict = classify_offline(args.installed, target)
+
+    if args.json:
+        doc = {
+            "image": target.reference,
+            "pg_majors": list(target.pg_majors),
+            "ts_floor": target.ts_floor,
+            "ts_ceiling": target.ts_ceiling,
+            "ts_default": target.ts_default,
+            "installed": args.installed,
+            "state": verdict.state,
+            "summary": verdict.summary,
+            "remedy": verdict.remedy,
+            "notes": list(target.notes),
+        }
+    else:
+        print("image      : {0}".format(target.reference))
+        print("serves pg  : {0}".format(", ".join(str(m) for m in target.pg_majors)))
+        print("ships ts   : {0} .. {1} (default {2})".format(
+            target.ts_floor, target.ts_ceiling, target.ts_default or "?"))
+        print("installed  : {0}".format(args.installed))
+        print("state      : {0}".format(verdict.state.upper()))
+        print("summary    : {0}".format(verdict.summary))
+        if verdict.remedy:
+            print("remedy     : {0}".format(verdict.remedy))
+        for note in target.notes:
+            print("note       : {0}".format(note))
+
+    hops = []
+    problem = None
+    if verdict.state == STRANDED and args.via:
+        major = pg_major or (max(target.pg_majors) if target.pg_majors else None)
+        candidates = []
+        for ref in args.via:
+            try:
+                candidates.append(_profile(ref, major, catalog, args.registry_timeout))
+            except RegistryError as exc:
+                print("warning: {0}".format(exc), file=sys.stderr)
+        hops, problem = plan_chain(args.installed, target, candidates, major)
+
+        if args.json:
+            doc["bridge"] = {
+                "problem": problem,
+                "hops": [
+                    {"image": h.image, "from": h.from_version, "to": h.to_version}
+                    for h in hops
+                ],
+            }
+        else:
+            print()
+            if problem:
+                print("bridge     : {0}".format(problem))
+            else:
+                print("bridge     : {0} image rollout(s)".format(len(hops)))
+                for i, hop in enumerate(hops, 1):
+                    print("  {0}. roll to {1}".format(i, hop.image))
+                    print("     then ALTER EXTENSION timescaledb UPDATE: {0} -> {1}".format(
+                        hop.from_version, hop.to_version))
+
+    if args.json:
+        print(json.dumps(doc, indent=2))
+
+    if verdict.state in (STRANDED, AHEAD):
+        return EXIT_CHECK_FAILED
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tsupgrade",
@@ -325,6 +429,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pre.add_argument("--json", action="store_true")
     pre.set_defaults(func=cmd_preflight)
+
+    # --- drift ---
+    drift = sub.add_parser(
+        "drift",
+        help="would this image strand a database at this extension version?",
+    )
+    drift.add_argument(
+        "--image", required=True, help="the image reference you intend to roll out"
+    )
+    drift.add_argument(
+        "--installed",
+        required=True,
+        help="the extension version the database currently has",
+    )
+    drift.add_argument(
+        "--pg-major",
+        default=None,
+        dest="pg_major",
+        help="which PostgreSQL major to evaluate for multi-PG (-all) images",
+    )
+    drift.add_argument(
+        "--via",
+        action="append",
+        default=[],
+        metavar="IMAGE",
+        help="a candidate bridging image; repeat to offer several",
+    )
+    drift.add_argument("--catalog", default=None)
+    drift.add_argument(
+        "--registry-timeout", type=float, default=15.0, dest="registry_timeout"
+    )
+    drift.add_argument("--json", action="store_true")
+    drift.set_defaults(func=cmd_drift)
 
     return parser
 
