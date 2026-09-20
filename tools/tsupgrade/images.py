@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import re
 import urllib.error
+import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -25,6 +26,8 @@ from .versions import InvalidVersion, parse_version
 
 __all__ = [
     "DEFAULT_REPOSITORY",
+    "manifest_exists",
+    "parse_image_reference",
     "RegistryError",
     "ImageCatalog",
     "parse_release_tag",
@@ -255,3 +258,156 @@ def load_catalog(path: Optional[object] = None) -> ImageCatalog:
     if not isinstance(doc, dict):
         raise RegistryError("{0}: expected a JSON object".format(target))
     return ImageCatalog(doc)
+
+
+# ---------------------------------------------------------------------------
+# Existence of one specific image, for preflight
+# ---------------------------------------------------------------------------
+
+_DOCKER_HUB_HOSTS = {"docker.io", "index.docker.io", "registry-1.docker.io"}
+
+
+def parse_image_reference(reference: str) -> Tuple[str, str, str]:
+    """Split ``registry/repository:tag`` into its parts.
+
+    Defaults follow the usual Docker conventions: no registry means Docker Hub,
+    a single-segment repository on Docker Hub means ``library/``, and no tag
+    means ``latest``.
+    """
+    ref = str(reference).strip()
+    if not ref:
+        raise RegistryError("empty image reference")
+    if "@" in ref:
+        # A digest pins the image outright; splitting it as a tag would be wrong.
+        raise RegistryError(
+            "digest-pinned references are not supported here: {0}".format(ref)
+        )
+
+    remainder = ref
+    registry = "registry-1.docker.io"
+
+    head, slash, tail = ref.partition("/")
+    # A first segment is a registry only if it looks like a host.
+    if slash and ("." in head or ":" in head or head == "localhost"):
+        registry = head
+        remainder = tail
+
+    repository, colon, tag = remainder.rpartition(":")
+    if not colon or "/" in tag:
+        repository, tag = remainder, "latest"
+
+    if not repository:
+        raise RegistryError("no repository in image reference: {0}".format(ref))
+
+    if registry in _DOCKER_HUB_HOSTS:
+        registry = "registry-1.docker.io"
+        if "/" not in repository:
+            repository = "library/" + repository
+
+    return registry, repository, tag
+
+
+_MANIFEST_ACCEPT = ", ".join(
+    [
+        "application/vnd.oci.image.index.v1+json",
+        "application/vnd.oci.image.manifest.v1+json",
+        "application/vnd.docker.distribution.manifest.list.v2+json",
+        "application/vnd.docker.distribution.manifest.v2+json",
+    ]
+)
+
+
+def _parse_auth_challenge(header: str) -> Dict[str, str]:
+    """Pull realm/service/scope out of a WWW-Authenticate: Bearer header."""
+    fields: Dict[str, str] = {}
+    if not header:
+        return fields
+    _, _, rest = header.partition(" ")
+    for part in rest.split(","):
+        key, _, value = part.strip().partition("=")
+        if key:
+            fields[key.strip()] = value.strip().strip('"')
+    return fields
+
+
+def manifest_exists(reference: str, timeout: float = 15.0) -> Tuple[bool, str]:
+    """Whether the registry serves a manifest for ``reference``.
+
+    Returns ``(exists, detail)``. A missing tag is a normal ``False``; anything
+    else -- a refused token, a network failure, a timeout -- raises
+    ``RegistryError``. A registry that will not answer must never be recorded as
+    a registry that has no such image.
+
+    Every request carries an explicit timeout, so this fails loudly instead of
+    hanging a maintenance window.
+    """
+    registry, repository, tag = parse_image_reference(reference)
+    url = "https://{0}/v2/{1}/manifests/{2}".format(registry, repository, tag)
+    headers = {"Accept": _MANIFEST_ACCEPT, "User-Agent": _USER_AGENT}
+
+    def attempt(extra: Optional[Dict[str, str]] = None):
+        request = urllib.request.Request(url, headers=dict(headers, **(extra or {})))
+        request.get_method = lambda: "GET"
+        return urllib.request.urlopen(request, timeout=timeout)
+
+    try:
+        try:
+            with attempt() as response:
+                return response.status == 200, "{0} responded {1}".format(
+                    registry, response.status
+                )
+        except urllib.error.HTTPError as exc:
+            if exc.code != 401:
+                raise
+            # Standard registry auth: follow the Bearer challenge once.
+            challenge = _parse_auth_challenge(exc.headers.get("WWW-Authenticate", ""))
+            realm = challenge.get("realm")
+            if not realm:
+                raise RegistryError(
+                    "{0} requires authentication and offered no token realm; "
+                    "log in or supply credentials".format(registry)
+                ) from exc
+
+            query = []
+            if challenge.get("service"):
+                query.append("service=" + urllib.parse.quote(challenge["service"]))
+            query.append(
+                "scope="
+                + urllib.parse.quote("repository:{0}:pull".format(repository))
+            )
+            token_url = realm + "?" + "&".join(query)
+            token_doc = _get_json(token_url, {"User-Agent": _USER_AGENT}, timeout)
+            token = token_doc.get("token") or token_doc.get("access_token")
+            if not token:
+                raise RegistryError(
+                    "{0} issued no pull token for {1}".format(registry, repository)
+                ) from exc
+
+            with attempt({"Authorization": "Bearer " + token}) as response:
+                return response.status == 200, "{0} responded {1}".format(
+                    registry, response.status
+                )
+
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            return False, "{0} has no tag {1} for {2}".format(registry, tag, repository)
+        if exc.code in (401, 403):
+            raise RegistryError(
+                "{0} refused access to {1}:{2} (HTTP {3}); this is an auth "
+                "failure, not a missing image".format(
+                    registry, repository, tag, exc.code
+                )
+            ) from exc
+        raise RegistryError(
+            "{0} returned HTTP {1} for {2}:{3}".format(
+                registry, exc.code, repository, tag
+            )
+        ) from exc
+    except urllib.error.URLError as exc:
+        raise RegistryError(
+            "cannot reach {0}: {1}".format(registry, exc.reason)
+        ) from exc
+    except TimeoutError as exc:
+        raise RegistryError(
+            "timed out after {0}s querying {1}".format(timeout, registry)
+        ) from exc

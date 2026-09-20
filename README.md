@@ -10,7 +10,7 @@ fork of them. Nothing here depends on those charts. The tooling talks to a live
 cluster and a live database, so it works the same whether your StatefulSet came
 from a chart, a fork, Kustomize, or hand-written YAML.
 
-> **Status:** Phases 1 and 2 are complete. The upgrade and rollback paths
+> **Status:** Phases 1–3 are complete. The upgrade and rollback paths
 > themselves are not implemented yet — see [Roadmap](#roadmap).
 
 ---
@@ -236,12 +236,71 @@ to proceed.
 ```bash
 make matrix-scaffold   # add transitions the catalog implies; existing rows are kept
 make matrix            # render docs/matrix.md
-make test              # 102 unit tests over the loader, lookup and shipped data
+make test              # 128 unit tests over the loader, lookup and shipped data
 ```
 
 `matrix-scaffold` never overwrites an existing row, so refreshing the catalog
 after a new TimescaleDB release adds the newly possible transitions and leaves
 verified work alone.
+
+---
+
+## Preflight
+
+One command, run before you touch anything:
+
+```bash
+make preflight TARGET_IMAGE=timescale/timescaledb-ha:pg17.11-ts2.30.1
+```
+
+It answers, for the cluster you are actually pointed at:
+
+| Check | What it establishes |
+|---|---|
+| Cluster and namespace | Echoes back the context, API server, Kubernetes version and namespace, so you can confirm you are where you think you are. |
+| Target image exists | Queries the target's registry for the manifest. |
+| Target image on nodes | Whether the image is already cached on each node. |
+| Running versions, per instance | PostgreSQL and TimescaleDB versions **queried from each database**, per member, and per database. |
+| Disk headroom | Free space where a dump would land, against the live database size. |
+| Permissions | Ownership, mode and writability of the data directory and dump path, plus PVC capacity, access modes and whether the storage class can expand. |
+| Matrix verdict | Looks the discovered versions up against the requested target. |
+
+Versions come from `current_setting('server_version')` and `pg_extension` — never
+from the image tag, and never from chart values. A tag records what someone
+*intended* to deploy; only the database knows what is running. The extension
+version is read **per database**, because they can legitimately differ, and a
+disagreement is reported rather than flattened into one confident answer.
+
+### It is read-only, and that is enforced
+
+- Only `kubectl get` / `exec` are used. Never `apply`, `patch`, `delete` or `scale`.
+- Every connection opens with `PGOPTIONS=-c default_transaction_read_only=on`,
+  so **PostgreSQL itself** rejects any statement that would write, whatever the
+  SQL says.
+- Commands run inside pods are limited to `df`, `stat`, `id` and `test`.
+
+This is why "is the image pullable from this cluster?" reports `unknown` rather
+than `pass` when the image is not already cached: proving it would require
+pulling, which writes to node storage. The check reports what it can observe and
+declines to imply more.
+
+### pass, fail, unknown
+
+`unknown` is a real answer and is never quietly promoted to `pass`. A check that
+could not be carried out has not been passed — and a matrix row whose verdict
+nobody has established is `unknown`, not approval.
+
+| Exit | Meaning |
+|---|---|
+| `0` | every check passed |
+| `2` | at least one check failed |
+| `3` | at least one check is unknown, none failed |
+| `1` | preflight could not run |
+
+Registry auth failures and timeouts are **failures**, not unknowns, and every
+request carries an explicit timeout so nothing hangs a maintenance window. A
+registry that will not answer is never recorded as a registry that has no such
+image.
 
 ---
 
@@ -257,6 +316,7 @@ data/
   upgrade-matrix.json   the compatibility matrix
 docs/matrix.md     generated: the published version table
 tools/tsupgrade/   the CLI (`python -m tsupgrade`), standard library only
+  preflight.py     the read-only pre-upgrade checks
 tests/             unit tests over the loader, lookup and shipped data
 ```
 
@@ -266,7 +326,7 @@ tests/             unit tests over the loader, lookup and shipped data
 
 - [x] **Phase 1** — local test harness: `make up`, `make down`, seeding, smoke test
 - [x] **Phase 2** — version matrix as data, with a loader, lookup and published table
-- [ ] **Phase 3** — read-only preflight checks against a live instance
+- [x] **Phase 3** — read-only preflight checks against a live instance
 - [ ] Upgrade and rollback execution
 - [ ] Maintenance-window estimation
 

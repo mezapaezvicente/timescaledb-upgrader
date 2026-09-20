@@ -26,12 +26,14 @@ DEVICES        ?= 10
 
 export KIND_CLUSTER CLUSTER_NAME NAMESPACE TSDB_IMAGE REPLICAS STORAGE APP_DB
 export ROWS CHUNK_INTERVAL DEVICES
+export TARGET_IMAGE
 
 .DEFAULT_GOAL := help
 .PHONY: help up down status psql seed smoke logs load-image clean
-.PHONY: test matrix matrix-scaffold images images-refresh lookup
+.PHONY: test matrix matrix-scaffold images images-refresh lookup preflight
 
 # Lookup arguments for `make lookup`.
+TARGET_IMAGE ?=
 FROM_PG ?=
 FROM_TS ?=
 TO_PG   ?=
@@ -91,3 +93,8 @@ images-refresh: ## Re-query the registry and regenerate data/images.json
 
 lookup: ## Look up one transition: make lookup FROM_PG=16.15 FROM_TS=2.28.3 TO_PG=17 TO_TS=2.30
 	@bash scripts/tsupgrade.sh matrix lookup 	  --from-pg "$(FROM_PG)" --from-ts "$(FROM_TS)" 	  --to-pg "$(TO_PG)" --to-ts "$(TO_TS)"
+
+# --- preflight (phase 3) ------------------------------------------------------
+
+preflight: ## Read-only pre-upgrade checks: make preflight TARGET_IMAGE=<image>
+	@bash scripts/preflight.sh

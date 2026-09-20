@@ -29,6 +29,14 @@ from .images import (
     load_catalog,
 )
 from .matrix import MatrixError, default_matrix_path, load_matrix
+from .preflight import (
+    FAIL,
+    UNKNOWN,
+    PreflightError,
+    PreflightOptions,
+    render_report,
+    run_preflight,
+)
 from .render import render_markdown
 from .scaffold import scaffold_matrix
 
@@ -36,6 +44,8 @@ EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_UNKNOWN = 3
 EXIT_NOT_FOUND = 4
+# preflight: 2 means at least one check failed, 3 at least one is unknown.
+EXIT_CHECK_FAILED = 2
 
 
 def _write_json(path: Path, doc: object) -> None:
@@ -176,6 +186,52 @@ def cmd_matrix_lookup(args: argparse.Namespace) -> int:
     return EXIT_OK if entry.is_known else EXIT_UNKNOWN
 
 
+def cmd_preflight(args: argparse.Namespace) -> int:
+    opts = PreflightOptions(
+        target_image=args.target_image,
+        context=args.context,
+        namespace=args.namespace,
+        selector=args.selector,
+        container=args.container,
+        psql_user=args.psql_user,
+        admin_db=args.admin_db,
+        dump_path=args.dump_path,
+        headroom_factor=args.headroom_factor,
+        target_pg=args.target_pg,
+        target_ts=args.target_ts,
+        matrix_path=args.matrix,
+        timeout=args.timeout,
+        registry_timeout=args.registry_timeout,
+    )
+    results = run_preflight(opts)
+
+    if args.json:
+        print(
+            json.dumps(
+                [
+                    {
+                        "name": r.name,
+                        "title": r.title,
+                        "status": r.status,
+                        "summary": r.summary,
+                        "details": r.details,
+                    }
+                    for r in results
+                ],
+                indent=2,
+            )
+        )
+    else:
+        print(render_report(results, color=sys.stdout.isatty()))
+
+    statuses = [r.status for r in results]
+    if FAIL in statuses:
+        return EXIT_CHECK_FAILED
+    if UNKNOWN in statuses:
+        return EXIT_UNKNOWN
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tsupgrade",
@@ -231,6 +287,45 @@ def build_parser() -> argparse.ArgumentParser:
     lookup.add_argument("--json", action="store_true")
     lookup.set_defaults(func=cmd_matrix_lookup)
 
+    # --- preflight ---
+    pre = sub.add_parser(
+        "preflight",
+        help="read-only checks against a live instance before an upgrade",
+    )
+    pre.add_argument(
+        "--target-image",
+        required=True,
+        help="the image you intend to upgrade to",
+    )
+    pre.add_argument("--context", default=None, help="kubectl context")
+    pre.add_argument("--namespace", "-n", default="timescale")
+    pre.add_argument("--selector", "-l", default="application=patroni")
+    pre.add_argument("--container", default="timescaledb")
+    pre.add_argument("--psql-user", default="postgres", dest="psql_user")
+    pre.add_argument("--admin-db", default="postgres", dest="admin_db")
+    pre.add_argument(
+        "--dump-path",
+        default=None,
+        dest="dump_path",
+        help="where a dump would be written (default: the data directory volume)",
+    )
+    pre.add_argument(
+        "--headroom-factor",
+        type=float,
+        default=1.2,
+        dest="headroom_factor",
+        help="required free space as a multiple of database size (default: 1.2)",
+    )
+    pre.add_argument("--target-pg", default=None, dest="target_pg")
+    pre.add_argument("--target-ts", default=None, dest="target_ts")
+    pre.add_argument("--matrix", default=None)
+    pre.add_argument("--timeout", type=float, default=30.0)
+    pre.add_argument(
+        "--registry-timeout", type=float, default=15.0, dest="registry_timeout"
+    )
+    pre.add_argument("--json", action="store_true")
+    pre.set_defaults(func=cmd_preflight)
+
     return parser
 
 
@@ -239,7 +334,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
-    except (MatrixError, RegistryError) as exc:
+    except (MatrixError, RegistryError, PreflightError) as exc:
         print("error: {0}".format(exc), file=sys.stderr)
         return EXIT_ERROR
 
