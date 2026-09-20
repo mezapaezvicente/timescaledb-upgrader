@@ -1,0 +1,16 @@
+# Force LF in the working tree for everything executable or parsed by a shell.
+#
+# Without this, a clone on Windows with core.autocrlf=true gets CRLF line
+# endings, and then `bash scripts/up.sh` fails with `\r: command not found`
+# and make chokes on carriage returns in recipes. The one-command setup has to
+# survive being cloned on any platform.
+* text=auto eol=lf
+
+*.sh        text eol=lf
+*.py        text eol=lf
+*.yaml      text eol=lf
+*.yml       text eol=lf
+*.json      text eol=lf
+*.md        text eol=lf
+Makefile    text eol=lf
+LICENSE     text eol=lf
