@@ -30,6 +30,12 @@ from .images import (
     parse_image_reference,
     parse_release_tag,
 )
+from .drift import AVAILABLE_VERSIONS_VIEW_WARNING
+from .drift import INDETERMINATE as DRIFT_INDETERMINATE
+from .drift import classify, installable_from_listings
+from .gates import BLOCKED, CLEAR, NOT_APPLICABLE, SESSION_RULES
+from .gates import INDETERMINATE as GATE_INDETERMINATE
+from .gates import run_gates
 from .matrix import Matrix, MatrixError, load_matrix
 from .support import ABI_BROKEN, ABI_BROKEN_SOURCE, abi_break_for
 from .versions import InvalidVersion, parse_version
@@ -45,6 +51,9 @@ __all__ = [
     "render_report",
     "worst_status",
     "check_abi_break",
+    "check_drift",
+    "check_gates",
+    "installable_on_instance",
 ]
 
 PASS = "pass"
@@ -53,6 +62,9 @@ UNKNOWN = "unknown"
 
 # Read-only at the server, not just by convention.
 _READ_ONLY_PGOPTIONS = "-c default_transaction_read_only=on"
+
+# drift's vocabulary, named here so preflight does not import it wholesale.
+ALIGNED_STATE = "aligned"
 
 
 class PreflightError(Exception):
@@ -817,6 +829,190 @@ def check_abi_break(instances: Sequence[Instance]) -> CheckResult:
     )
 
 
+def installable_on_instance(
+    kube: "Kube", opts: PreflightOptions, pod: str
+) -> Tuple[List[str], Optional[str]]:
+    """Which extension versions this pod's image can genuinely install.
+
+    Deliberately not ``pg_available_extension_versions``: that view lists every
+    version any update script so much as mentions, and asking for one of the
+    phantoms drops the backend connection outright.
+
+    The directories come from the ``pg_config`` *view* -- ordinary read-only SQL
+    over the path preflight already uses -- so this adds ``ls`` to the in-pod
+    command set and nothing else.
+    """
+    rc, out, err = kube.psql(
+        pod,
+        opts.container,
+        opts.admin_db,
+        opts.psql_user,
+        "SELECT setting FROM pg_config WHERE name = 'SHAREDIR' "
+        "UNION ALL SELECT setting FROM pg_config WHERE name = 'PKGLIBDIR'",
+    )
+    if rc != 0 or len(out.splitlines()) < 2:
+        return [], "cannot read SHAREDIR/PKGLIBDIR: {0}".format(
+            err or out or "no rows"
+        )
+
+    sharedir, pkglibdir = [line.strip() for line in out.splitlines()[:2]]
+
+    rc, share_out, err = kube.exec(pod, opts.container, ["ls", sharedir + "/extension"])
+    if rc != 0:
+        return [], "cannot list {0}/extension: {1}".format(sharedir, err or share_out)
+    rc, lib_out, err = kube.exec(pod, opts.container, ["ls", pkglibdir])
+    if rc != 0:
+        return [], "cannot list {0}: {1}".format(pkglibdir, err or lib_out)
+
+    return installable_from_listings(share_out.split(), lib_out.split()), None
+
+
+def check_drift(
+    kube: "Kube", opts: PreflightOptions, instances: Sequence[Instance]
+) -> CheckResult:
+    """Classify every database against what its own image can install.
+
+    Per database, never per cluster: ``ALTER EXTENSION`` runs once per database
+    and they genuinely drift apart, so a cluster-level answer would be wrong.
+
+    ``stranded`` and ``ahead`` are outages and fail. ``lagging`` is a correct,
+    running configuration that simply is not current, so it passes with an
+    advisory. A version that cannot be read is ``unknown`` -- a stranded
+    database and an unreachable one look alike from outside, and inventing the
+    first from the second would be a false alarm.
+    """
+    details: List[str] = []
+    statuses: List[str] = []
+
+    usable = [i for i in instances if not i.error]
+    if not usable:
+        return CheckResult(
+            "drift",
+            "Extension version drift",
+            UNKNOWN,
+            "no instance could be queried",
+            details,
+        )
+
+    for inst in usable:
+        installable, problem = installable_on_instance(kube, opts, inst.pod)
+        if problem:
+            statuses.append(UNKNOWN)
+            details.append("{0} : {1}".format(inst.pod, problem))
+            continue
+
+        details.append(
+            "{0} : image installs {1} version(s), {2} .. {3}; default {4}".format(
+                inst.pod,
+                len(installable),
+                installable[0] if installable else "?",
+                installable[-1] if installable else "?",
+                inst.available_ts or "unknown",
+            )
+        )
+
+        for database, version in sorted(inst.extensions.items()):
+            if version is None:
+                continue
+            verdict = classify(version, installable, inst.available_ts)
+            if verdict.state == DRIFT_INDETERMINATE:
+                statuses.append(UNKNOWN)
+            elif verdict.is_outage:
+                statuses.append(FAIL)
+            else:
+                statuses.append(PASS)
+            details.append(
+                "{0}/{1} : {2} - {3}".format(
+                    inst.pod, database, verdict.state.upper(), verdict.summary
+                )
+            )
+            if verdict.remedy and verdict.state != ALIGNED_STATE:
+                details.append("     -> {0}".format(verdict.remedy))
+
+    details.append("note : {0}".format(AVAILABLE_VERSIONS_VIEW_WARNING))
+    return CheckResult(
+        "drift",
+        "Extension version drift",
+        worst_status(statuses),
+        "checked {0} instance(s)".format(len(usable)),
+        details,
+    )
+
+
+def check_gates(
+    kube: "Kube",
+    opts: PreflightOptions,
+    instances: Sequence[Instance],
+    target_ts: Optional[str],
+) -> CheckResult:
+    """The blockers compiled into the update scripts, per database.
+
+    A transition can be mechanically in-place and still be blocked by what a
+    database happens to contain. These are the conditions that decide it, and
+    every one of them is a read-only query.
+    """
+    details: List[str] = []
+    statuses: List[str] = []
+
+    if not target_ts:
+        return CheckResult(
+            "gates",
+            "Update-script gates",
+            UNKNOWN,
+            "target TimescaleDB version not pinned; pass --target-ts",
+            details,
+        )
+
+    usable = [i for i in instances if not i.error]
+    if not usable:
+        return CheckResult(
+            "gates",
+            "Update-script gates",
+            UNKNOWN,
+            "no instance could be queried",
+            details,
+        )
+
+    for inst in usable:
+
+        def runner(database: str, sql: str, _pod: str = inst.pod):
+            return kube.psql(_pod, opts.container, database, opts.psql_user, sql)
+
+        for database, version in sorted(inst.extensions.items()):
+            if version is None:
+                continue
+            for gate in run_gates(runner, database, version, target_ts):
+                if gate.status == NOT_APPLICABLE:
+                    continue
+                if gate.status == BLOCKED:
+                    statuses.append(FAIL)
+                elif gate.status == GATE_INDETERMINATE:
+                    statuses.append(UNKNOWN)
+                elif gate.status == CLEAR:
+                    statuses.append(PASS)
+                details.append(
+                    "{0}/{1} : {2} - {3}".format(
+                        inst.pod, database, gate.title, gate.summary
+                    )
+                )
+                if gate.status == BLOCKED:
+                    for line in gate.details:
+                        details.append("     {0}".format(line))
+                    if gate.source_url:
+                        details.append("     source: {0}".format(gate.source_url))
+
+    for rule in SESSION_RULES:
+        details.append("note : {0}".format(rule))
+
+    return CheckResult(
+        "gates",
+        "Update-script gates",
+        worst_status(statuses),
+        "target ts{0}".format(target_ts),
+        details,
+    )
+
+
 def check_matrix(
     opts: PreflightOptions,
     instances: Sequence[Instance],
@@ -950,6 +1146,8 @@ def run_preflight(opts: PreflightOptions) -> List[CheckResult]:
     results.append(check_abi_break(instances))
     results.append(check_disk_headroom(kube, opts, instances))
     results.append(check_permissions(kube, opts, instances))
+    results.append(check_drift(kube, opts, instances))
+    results.append(check_gates(kube, opts, instances, target_ts))
     results.append(check_matrix(opts, instances, target_pg, target_ts))
 
     return results
