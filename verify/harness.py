@@ -407,8 +407,30 @@ class Cluster:
             if _run(["docker", "pull", image], timeout=3600, log=log)[0] != 0:
                 raise HarnessError("cannot pull " + image)
         if _run(["kind", "load", "docker-image", image, "--name", self.name],
-                timeout=3600, log=log)[0] != 0:
-            raise HarnessError("cannot load {0} into kind cluster {1}".format(image, self.name))
+                timeout=3600, log=log)[0] == 0:
+            return
+        # With Docker's containerd image store, a multi-platform image is
+        # saved as its whole index but only this platform's layers exist, and
+        # kind's import (--all-platforms) dies on "content digest ... not
+        # found". Saving just this platform imports fine.
+        rc, platform, _ = _run(["docker", "version", "--format", "{{.Server.Os}}/{{.Server.Arch}}"])
+        if rc == 0 and self._import(image, platform.strip(), log):
+            return
+        raise HarnessError("cannot load {0} into kind cluster {1}".format(image, self.name))
+
+    def _import(self, image: str, platform: str, log: Log) -> bool:
+        save = ["docker", "save", "--platform", platform, image]
+        load = ["docker", "exec", "-i", self.name + "-control-plane", "ctr", "--namespace=k8s.io",
+                "images", "import", "--digests", "--snapshotter=overlayfs", "-"]
+        log.write("$ {0} | {1}".format(" ".join(save), " ".join(load)))
+        saver = subprocess.Popen(save, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        loader = subprocess.run(load, stdin=saver.stdout, capture_output=True, text=True,
+                                errors="replace", timeout=3600)
+        saver.stdout.close()
+        save_err = saver.communicate(timeout=60)[1].decode("utf-8", "replace")
+        log.write((save_err + loader.stderr + loader.stdout)[-2000:] or "(no output)")
+        log.write("(exit {0}/{1})".format(saver.returncode, loader.returncode))
+        return saver.returncode == 0 and loader.returncode == 0 and self.loaded(image)
 
     def ensure(self, image: str, log: Log) -> None:
         """Leave the cluster healthy on ``image``, TimescaleDB in no database
