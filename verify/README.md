@@ -5,12 +5,77 @@ an empty database and once on a seeded one. This directory holds what those
 runs need and what they leave behind.
 
 ```
+harness.py          runs matrix rows end to end with plan + apply, writes evidence
 fixture/seed.sql    the seeded fixture, creatable at every source version 1.7 .. 2.29
 fixture/check.sql   integrity checks, run at the target version after the upgrade
 fixture/try.sh      proves the fixture at given versions on one image (not an upgrade)
 evidence/           one JSON record per row and mode, committed
-out/                full logs, local only (gitignored)
+out/                full logs, plans and apply reports, local only (gitignored)
 ```
+
+## The harness
+
+```sh
+python verify/harness.py --list                 # what each row resolves to; touches nothing
+python verify/harness.py --pg 15 --from 2.13    # one row, empty and seeded
+python verify/harness.py                        # all 98 same-PG rows
+```
+
+Options: `--mode empty|seeded|both`, `--cluster` (default `tsdb-verify`),
+`--replicas` (default 2, so rollouts and session cycling cover a replica).
+
+**Images and releases.** A row names series (`pg15 2.13 → 2.28`); the harness
+makes it exact from `data/image-contents.json`. The target is the newest patch
+of the target series, on the image that ships it. The source is the newest
+patch of the source series on that same image when it ships one. Otherwise
+it is staged on the same-major image that ships it and reaches furthest, and
+`plan` is offered every same-major image as a bridge (`--via`). Images are
+only used for the PostgreSQL major in their tag. Rows no measured image can
+reach (the five `→ 2.30` rows below pg16) are listed as skipped.
+
+**Per row and mode:**
+
+1. `tsupgrade plan --verification-run`, offline. If it refuses, the refusal
+   is the row's record (`stage: plan`) and no cluster is touched.
+2. The cluster is brought onto the row's first image. If it runs anything
+   else, its namespace is deleted and recreated with `scripts/up.sh`. Every
+   image the plan names is side-loaded into the node first.
+3. Database `verify` is dropped, recreated, and the source release installed
+   with `CREATE EXTENSION … VERSION` (in a separate session from the `DROP`).
+   On a seeded run, `seed.sql` follows.
+4. `tsupgrade apply --acknowledge-verification-run --database verify`.
+5. `extversion` is read back; on a seeded run `check.sql` runs, even after a
+   failed apply, so the record shows what state the data was left in.
+6. The record is written. A run passes only if `apply` passed, `extversion` is
+   the target, and (seeded) all seven checks print `pass`.
+
+**Isolation.** The row database is the only one with TimescaleDB: after every
+cluster reset the harness drops the extension from `postgres` and
+`template1`. Preflight inspects every database, so another row's leftover
+objects (a non-finalized aggregate from a pre-2.7 seed, say) would otherwise
+block an unrelated row. The harness never touches `tsdb-upgrader`, the
+long-lived `make up` cluster; it deletes namespaces.
+
+**What is not a row result.** If staging or seeding fails, that is the harness
+or the environment, not the transition. It writes no record; it prints
+`ERROR`, logs it, and moves on. `verify/out/runs.jsonl` has one line per row
+and mode for every invocation, errors included.
+
+Records carry the fields `evidence.py` requires, plus:
+
+| Field | Meaning |
+|---|---|
+| `stage` | where the run stopped: `plan`, `apply`, `verify`, `check`, or `done` |
+| `source_pg_version` | the server the source was staged on (differs from `pg_version` on a bridged row) |
+| `pods` | each instance afterwards: role, image, `imageID` digest, server version |
+| `checks` | the fixture checks, seeded runs only |
+| `baseline` | the seed's own summary line |
+| `plan`, `apply_exit`, `replicas`, `started_at`, `finished_at` | as named |
+
+`images[].digest` is the local repository digest of the image that was loaded
+into kind (the one to pin). `pods[].image_id` is what the node reports running:
+for a side-loaded image that is kind's `import-<date>` name with the digest of
+the imported image, which differs from the repository digest. Both are kept.
 
 ## The fixture
 
