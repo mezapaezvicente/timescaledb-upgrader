@@ -48,7 +48,8 @@ TOOLS = REPO / "tools"
 sys.path.insert(0, str(TOOLS))
 
 from tsupgrade.contents import ImageContents, load_contents  # noqa: E402
-from tsupgrade.evidence import build_record, record_path, upgrader_revision, write_record  # noqa: E402
+from tsupgrade.evidence import (  # noqa: E402
+    EvidenceError, build_record, load_record, record_path, upgrader_revision, write_record)
 from tsupgrade.matrix import MatrixEntry, load_matrix  # noqa: E402
 from tsupgrade.preflight import patroni_role  # noqa: E402
 from tsupgrade.versions import InvalidVersion, parse_version  # noqa: E402
@@ -635,6 +636,15 @@ def refused_record(run: Run, mode: str, plan_err: str, plan_log: Log,
             "detail": "plan refused", "record": str(path), "log": str(plan_log.path)}
 
 
+def recorded(run: Run, mode: str, root: Path = EVIDENCE) -> bool:
+    """A valid record from a clean tree already exists for this row and mode."""
+    try:
+        doc = load_record(record_path(root, run.transition, mode))
+    except EvidenceError:
+        return False
+    return doc["upgrader"].get("dirty") is False
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -649,6 +659,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--cluster", default="tsdb-verify", help="kind cluster name")
     ap.add_argument("--replicas", type=int, default=2)
     ap.add_argument("--list", action="store_true", help="show the resolved rows and stop")
+    ap.add_argument("--resume", action="store_true",
+                    help="skip rows and modes that already have a record from a clean tree")
     args = ap.parse_args(argv)
 
     contents = load_contents()
@@ -676,12 +688,16 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     cluster = Cluster(args.cluster, args.replicas, contents)
     outcomes: List[Dict[str, Any]] = []
     for run in runs:
+        todo = [m for m in modes if not (args.resume and recorded(run, m))]
+        if not todo:
+            print("{0:<18} already recorded".format(run.slug), flush=True)
+            continue
         out_dir = OUT / "pg{0}".format(run.major)
         stem = "{0}-to-{1}".format(run.entry.source_ts, run.entry.target_ts)
         plan_log = Log(out_dir / (stem + ".plan.log"))
         plan_path = out_dir / (stem + ".plan.json")
         plan, plan_err = make_plan(run, plan_path, plan_log)
-        for mode in modes:
+        for mode in todo:
             t0 = time.monotonic()
             if plan is None:
                 outcome = refused_record(run, mode, plan_err, plan_log, contents, revision)

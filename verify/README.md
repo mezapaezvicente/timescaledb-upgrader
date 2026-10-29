@@ -22,7 +22,8 @@ python verify/harness.py                        # all 98 same-PG rows
 ```
 
 Options: `--mode empty|seeded|both`, `--cluster` (default `tsdb-verify`),
-`--replicas` (default 2, so rollouts and session cycling cover a replica).
+`--replicas` (default 2, so rollouts and session cycling cover a replica),
+`--resume` (skip rows and modes that already have a record from a clean tree).
 
 **Images and releases.** A row names series (`pg15 2.13 → 2.28`); the harness
 makes it exact from `data/image-contents.json`. The target is the newest patch

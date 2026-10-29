@@ -229,3 +229,21 @@ def test_images_used_follows_the_plan():
 def test_the_make_up_cluster_is_refused():
     with pytest.raises(harness.HarnessError, match="long-lived"):
         harness.Cluster("tsdb-upgrader", 2, PG15)
+
+
+def test_resume_skips_only_clean_valid_records(tmp_path):
+    from tsupgrade.evidence import build_record, record_path, write_record
+
+    def record(dirty):
+        return build_record(
+            transition=RUN.transition, mode="empty",
+            images=[{"reference": RUN.target_image, "digest": "sha256:bb"}],
+            pg_version="15.18", source=RUN.source, target=RUN.target, reached=RUN.target,
+            passed=True, log="verify/out/x.log", upgrader={"commit": "abc", "dirty": dirty})
+
+    assert not harness.recorded(RUN, "empty", tmp_path)
+    write_record(record_path(tmp_path, RUN.transition, "empty"), record(True))
+    assert not harness.recorded(RUN, "empty", tmp_path)
+    write_record(record_path(tmp_path, RUN.transition, "empty"), record(False))
+    assert harness.recorded(RUN, "empty", tmp_path)
+    assert not harness.recorded(RUN, "seeded", tmp_path)
