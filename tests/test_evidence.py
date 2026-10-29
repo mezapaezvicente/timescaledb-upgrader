@@ -1,0 +1,126 @@
+"""Tests for verification-run evidence records.
+
+What these defend: a record cannot claim a pass it did not reach, a failure
+cannot be recorded without its explanation and verbatim error, and the
+version facts that decide whether a row is proven (exact PG minor, exact
+releases, image digests) cannot be left vague. Everything else is left loose
+on purpose -- the failure shapes are not known yet.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from tsupgrade.evidence import (
+    EvidenceError,
+    build_record,
+    load_record,
+    record_path,
+    validate_record,
+    write_record,
+)
+
+ROW = {"source_pg": "15", "source_ts": "2.13", "target_pg": "15", "target_ts": "2.28"}
+IMAGE = {"reference": "timescale/timescaledb-ha:pg15.18-ts2.28.3", "digest": "sha256:f49b"}
+REV = {"commit": "abc123", "dirty": False}
+
+
+def _record(**overrides):
+    args = dict(
+        transition=ROW, mode="seeded", images=[IMAGE], pg_version="15.18",
+        source="2.13.1", target="2.28.3", reached="2.28.3", passed=True,
+        log="verify/out/runs/x.log", upgrader=REV,
+    )
+    args.update(overrides)
+    return build_record(**args)
+
+
+def test_a_passing_run_builds_and_validates():
+    doc = _record(checks=["check|rows|pass|..."])
+    assert doc["result"] == "pass"
+    assert "failure" not in doc
+    assert doc["checks"] == ["check|rows|pass|..."]  # extra fields pass through
+    assert validate_record(doc) == []
+
+
+def test_a_failure_needs_its_explanation_and_the_verbatim_error():
+    with pytest.raises(EvidenceError, match="failure.explanation"):
+        _record(passed=False, reached="2.24.0")
+    doc = _record(
+        passed=False, reached="2.24.0",
+        explanation="the 2.24 -> 2.25 script refused a non-finalized aggregate",
+        error="ERROR:  cannot upgrade because of non-finalized continuous aggregates",
+    )
+    assert doc["failure"]["error"].startswith("ERROR:")
+
+
+def test_a_pass_must_actually_reach_the_target():
+    with pytest.raises(EvidenceError, match="reach its target"):
+        _record(reached="2.27.1")
+
+
+@pytest.mark.parametrize("pg_version", ["15", "", None, "fifteen"])
+def test_the_pg_minor_is_mandatory(pg_version):
+    with pytest.raises(EvidenceError, match="pg_version"):
+        _record(pg_version=pg_version)
+
+
+@pytest.mark.parametrize("field,value", [("source", "2.13"), ("target", "2.28")])
+def test_versions_must_be_exact_releases(field, value):
+    with pytest.raises(EvidenceError, match="versions." + field):
+        _record(**{field: value})
+
+
+def test_reached_may_be_null_on_a_failure_that_never_read_it():
+    doc = _record(passed=False, reached=None, explanation="plan refused", error="refused: ...")
+    assert doc["versions"]["reached"] is None
+
+
+def test_every_image_needs_a_digest():
+    with pytest.raises(EvidenceError, match="digest"):
+        _record(images=[IMAGE, {"reference": "timescale/timescaledb-ha:pg15.13-ts2.20.3"}])
+
+
+def test_mode_is_empty_or_seeded():
+    with pytest.raises(EvidenceError, match="mode"):
+        _record(mode="both")
+
+
+def test_a_pass_with_a_failure_block_is_rejected():
+    doc = _record()
+    doc["failure"] = {"explanation": "x", "error": "y"}
+    assert any("carries no failure" in p for p in validate_record(doc))
+
+
+def test_unknown_fields_are_not_an_error():
+    doc = _record()
+    doc["something_learned_later"] = {"any": "shape"}
+    assert validate_record(doc) == []
+
+
+def test_record_path_is_one_file_per_row_and_mode(tmp_path):
+    assert record_path(tmp_path, ROW, "empty") == tmp_path / "pg15" / "2.13-to-2.28.empty.json"
+
+
+def test_write_and_load_round_trip(tmp_path):
+    path = record_path(tmp_path, ROW, "seeded")
+    write_record(path, _record())
+    assert load_record(path)["versions"]["reached"] == "2.28.3"
+    assert path.read_bytes().endswith(b"}\n")  # LF, like every generated file
+
+
+def test_write_refuses_an_invalid_record(tmp_path):
+    doc = _record()
+    del doc["log"]
+    with pytest.raises(EvidenceError, match="log"):
+        write_record(tmp_path / "x.json", doc)
+    assert not (tmp_path / "x.json").exists()
+
+
+def test_upgrader_revision_reads_this_repository():
+    from tsupgrade.evidence import upgrader_revision
+
+    rev = upgrader_revision(Path(__file__).resolve().parents[1])
+    assert set(rev) == {"commit", "dirty"}
