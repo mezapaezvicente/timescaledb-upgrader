@@ -20,19 +20,19 @@
     "reached": "2.15.3"
   },
   "upgrader": {
-    "commit": "0dc00fd7c768d6082fc9913326159f4b1045927f",
+    "commit": "683f7d776c5c0c40f7fbe601629748e034561704",
     "dirty": false
   },
   "result": "fail",
   "log": "verify/out/pg13/2.6-to-2.15.seeded.log",
-  "recorded_at": "2026-10-29T16:49:52Z",
+  "recorded_at": "2026-10-29T17:11:02Z",
   "failure": {
     "explanation": "fixture checks failed after the upgrade: cagg_survived, cagg_matches, write_and_refresh",
-    "error": "check|cagg_survived|fail|840 materialized rows; seeded 840 (could not set materialized_only; count includes real-time rows)\ncheck|cagg_matches|fail|0 differing buckets; refresh ran\ncheck|write_and_refresh|fail|insert ok, refresh ok; 1 new buckets, 60 rows in them"
+    "error": "check|cagg_survived|fail|840 materialized rows; seeded 840 (could not set materialized_only; count includes real-time rows)\ncheck|cagg_matches|fail|0 differing buckets; refresh ran\ncheck|write_and_refresh|fail|insert ok, refresh ok; 1 new buckets, 60 rows in them\npsql:<stdin>:44: ERROR:  invalid continuous aggregate query\nDETAIL:  Continuous Aggregates with partials is not supported anymore.\nHINT:  Define the Continuous Aggregate with \"finalized\" parameter set to true."
   },
   "stage": "check",
-  "started_at": "2026-10-29T16:49:34Z",
-  "finished_at": "2026-10-29T16:49:52Z",
+  "started_at": "2026-10-29T17:10:44Z",
+  "finished_at": "2026-10-29T17:11:02Z",
   "source_pg_version": "13.22",
   "replicas": 2,
   "pods": [
