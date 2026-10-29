@@ -1,0 +1,57 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "11",
+    "source_ts": "1.7",
+    "target_pg": "11",
+    "target_ts": "2.1"
+  },
+  "mode": "empty",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+      "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525"
+    }
+  ],
+  "pg_version": "11.11",
+  "versions": {
+    "source": "1.7.5",
+    "target": "2.1.1",
+    "reached": "2.1.1"
+  },
+  "upgrader": {
+    "commit": "8b767abe1dc69cf6b394b6ed1c665e52a1e528f3",
+    "dirty": false
+  },
+  "result": "pass",
+  "log": "verify/out/pg11/1.7-to-2.1.empty.log",
+  "recorded_at": "2026-10-29T13:08:45Z",
+  "stage": "done",
+  "started_at": "2026-10-29T13:08:30Z",
+  "finished_at": "2026-10-29T13:08:45Z",
+  "source_pg_version": "11.11",
+  "replicas": 2,
+  "pods": [
+    {
+      "pod": "tsdb-0",
+      "role": "primary",
+      "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:4910cab70a7b90af1813f73ba220a0d9dcb6203500767f3fde0dc3a0c6499e85",
+      "server_version": "11.11"
+    },
+    {
+      "pod": "tsdb-1",
+      "role": "replica",
+      "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:4910cab70a7b90af1813f73ba220a0d9dcb6203500767f3fde0dc3a0c6499e85",
+      "server_version": "11.11"
+    }
+  ],
+  "baseline": null,
+  "checks": null,
+  "plan": {
+    "hops": 1,
+    "path": "verify/out/pg11/1.7-to-2.1.plan.json"
+  },
+  "apply_exit": 0
+}

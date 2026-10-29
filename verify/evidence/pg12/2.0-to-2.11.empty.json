@@ -1,0 +1,39 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "12",
+    "source_ts": "2.0",
+    "target_pg": "12",
+    "target_ts": "2.11"
+  },
+  "mode": "empty",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg12.6-ts2.0.1-p0",
+      "digest": "sha256:f6eac8e357fd65f4cbb6f91c5ebebfda7ad4e973a1d71c2cb8087c9732cfe325"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+      "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+    }
+  ],
+  "pg_version": "12.6",
+  "versions": {
+    "source": "2.0.1",
+    "target": "2.11.2",
+    "reached": null
+  },
+  "upgrader": {
+    "commit": "8b767abe1dc69cf6b394b6ed1c665e52a1e528f3",
+    "dirty": false
+  },
+  "result": "fail",
+  "log": "verify/out/pg12/2.0-to-2.11.plan.log",
+  "recorded_at": "2026-10-29T13:10:49Z",
+  "failure": {
+    "explanation": "plan refused; nothing ran against a cluster",
+    "error": "refused: no plan produced\n  - [blocked] bridging stalls at ts2.0.1: no candidate carries it to a version timescale/timescaledb-ha:pg12.22-ts2.11.2 accepts"
+  },
+  "stage": "plan",
+  "recorded_without_cluster": true
+}
