@@ -194,6 +194,20 @@ def test_judge_seeded_needs_every_check_and_a_missing_line_fails():
     assert "check|decompress|missing" in error
 
 
+def test_judge_failed_check_quotes_what_the_server_said():
+    checks = dict(ALL_PASS)
+    checks["cagg_survived"] = ("fail", "840 rows (could not set materialized_only)")
+    stderr = ("psql:<stdin>:44: ERROR:  invalid continuous aggregate query\n"
+              "DETAIL:  Continuous Aggregates with partials is not supported anymore.\n"
+              "psql:<stdin>:60: NOTICE:  continuous aggregate \"fx_hourly\" is already up-to-date\n")
+    _, _, error, _ = harness.judge(RUN, "seeded", 0, "", {"result": "pass"}, "2.28.3",
+                                   checks, stderr)
+    assert error.splitlines() == [
+        "check|cagg_survived|fail|840 rows (could not set materialized_only)",
+        "psql:<stdin>:44: ERROR:  invalid continuous aggregate query",
+        "DETAIL:  Continuous Aggregates with partials is not supported anymore."]
+
+
 def test_judge_empty_ignores_checks():
     assert harness.judge(RUN, "empty", 0, "", {"result": "pass"}, "2.28.3", {})[0] is True
 

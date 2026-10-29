@@ -68,7 +68,8 @@ MODES = ("empty", "seeded")
 FIXTURE = REPO / "verify" / "fixture"
 EVIDENCE = REPO / "verify" / "evidence"
 OUT = REPO / "verify" / "out"
-ERROR_LINE = re.compile(r"^(ERROR|FATAL|DETAIL|HINT|CONTEXT|PANIC):|error:|refused|^\s+- ")
+# Server messages arrive bare from -c and as `psql:<stdin>:44: ERROR:` from -f.
+ERROR_LINE = re.compile(r"(^|: )(ERROR|FATAL|DETAIL|HINT|CONTEXT|PANIC):|error:|refused|^\s+- ")
 
 
 class HarnessError(Exception):
@@ -234,8 +235,13 @@ def judge(
     report: Optional[Dict[str, Any]],
     reached: Optional[str],
     checks: Optional[Dict[str, Tuple[str, str]]],
+    check_stderr: str = "",
 ) -> Tuple[bool, Optional[str], Optional[str], str]:
-    """(passed, explanation, error, stage). ``stage`` is where it stopped."""
+    """(passed, explanation, error, stage). ``stage`` is where it stopped.
+
+    A failed check quotes its own line and whatever the server said while
+    check.sql ran: the check line says what was wrong, the server says why.
+    """
     if report is None:
         lines = apply_stderr.splitlines()
         if any(l.startswith("refused") for l in lines):
@@ -259,8 +265,9 @@ def judge(
         if bad:
             detail = ["check|{0}|{1}|{2}".format(c, *checks[c]) if c in checks
                       else "check|{0}|missing|printed nothing (errored)".format(c) for c in bad]
+            server = [l for l in check_stderr.splitlines() if ERROR_LINE.search(l)]
             return (False, "fixture checks failed after the upgrade: " + ", ".join(bad),
-                    "\n".join(detail), "check")
+                    "\n".join(detail + server[:8]), "check")
     return (True, None, None, "done")
 
 
@@ -585,15 +592,15 @@ def run_one(run: Run, mode: str, plan: Dict[str, Any], plan_path: Path, cluster:
     log.section("after")
     reached = extversion(cluster, log)
     pg_version = server_version(cluster, log)
-    checks = None
+    checks, check_err = None, ""
     if mode == "seeded" and reached is not None:
         log.section("check.sql, expect {0}".format(run.target))
-        rc, out, _ = cluster.psql(DATABASE, "-qtA", "-F", "|", "-v", "expect=" + run.target,
+        rc, out, check_err = cluster.psql(DATABASE, "-qtA", "-F", "|", "-v", "expect=" + run.target,
                                   "-f", "-", stdin=(FIXTURE / "check.sql").read_text(encoding="utf-8"),
                                   log=log)
         checks = parse_checks(out)
     passed, explanation, error, stopped = judge(
-        run, mode, apply_rc, apply_err, report, reached, checks)
+        run, mode, apply_rc, apply_err, report, reached, checks, check_err)
 
     final = (report or {}).get("final") or {}
     record = build_record(
