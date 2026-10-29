@@ -124,3 +124,30 @@ def test_upgrader_revision_reads_this_repository():
 
     rev = upgrader_revision(Path(__file__).resolve().parents[1])
     assert set(rev) == {"commit", "dirty"}
+
+
+def test_records_themselves_do_not_make_the_tree_dirty(tmp_path):
+    import shutil
+    import subprocess
+
+    from tsupgrade.evidence import upgrader_revision
+
+    if shutil.which("git") is None:
+        pytest.skip("git not available")
+
+    def git(*args):
+        subprocess.run(["git", "-C", str(tmp_path)] + list(args), check=True,
+                       capture_output=True)
+
+    git("init", "-q")
+    (tmp_path / "a.txt").write_text("a")
+    git("add", "a.txt")
+    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "init")
+    assert upgrader_revision(tmp_path)["dirty"] is False
+
+    (tmp_path / "verify" / "evidence" / "pg15").mkdir(parents=True)
+    (tmp_path / "verify" / "evidence" / "pg15" / "x.empty.json").write_text("{}")
+    assert upgrader_revision(tmp_path)["dirty"] is False
+
+    (tmp_path / "a.txt").write_text("changed")
+    assert upgrader_revision(tmp_path)["dirty"] is True

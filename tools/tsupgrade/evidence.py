@@ -73,6 +73,8 @@ def upgrader_revision(repo: Optional[Path] = None) -> Dict[str, Any]:
 
     A dirty tree is recorded, not refused: a fix under test is exactly when a
     run matters. It does mean the commit alone does not reproduce the run.
+    The records themselves (``verify/evidence/``) do not count: a run that
+    has just written some would otherwise call every later run dirty.
     """
     root = repo or Path(__file__).resolve().parents[2]
 
@@ -87,7 +89,7 @@ def upgrader_revision(repo: Optional[Path] = None) -> Dict[str, Any]:
         return done.stdout.strip() if done.returncode == 0 else None
 
     commit = git("rev-parse", "HEAD")
-    status = git("status", "--porcelain")
+    status = git("status", "--porcelain", "--", ".", ":(exclude)verify/evidence")
     return {"commit": commit, "dirty": bool(status) if status is not None else None}
 
 

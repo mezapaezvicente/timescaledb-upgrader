@@ -427,7 +427,8 @@ class Cluster:
         loader = subprocess.run(load, stdin=saver.stdout, capture_output=True, text=True,
                                 errors="replace", timeout=3600)
         saver.stdout.close()
-        save_err = saver.communicate(timeout=60)[1].decode("utf-8", "replace")
+        save_err = saver.stderr.read().decode("utf-8", "replace")
+        saver.wait(timeout=60)
         log.write((save_err + loader.stderr + loader.stdout)[-2000:] or "(no output)")
         log.write("(exit {0}/{1})".format(saver.returncode, loader.returncode))
         return saver.returncode == 0 and loader.returncode == 0 and self.loaded(image)
