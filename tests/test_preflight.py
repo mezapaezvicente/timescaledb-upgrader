@@ -269,3 +269,13 @@ def test_junk_server_version_does_not_crash_the_report(tmp_path):
     result = check_matrix(_opts(path), [inst], "17", "2.30")
     assert result.status == UNKNOWN
     assert any("not-a-version" in d for d in result.details)
+
+
+def test_patroni_role_treats_the_old_master_label_as_primary():
+    from tsupgrade.preflight import patroni_role
+
+    assert patroni_role({"role": "primary"}) == "primary"
+    assert patroni_role({"role": "master"}) == "primary"
+    assert patroni_role({"role": "replica"}) == "replica"
+    assert patroni_role({}) == "unknown"
+    assert patroni_role(None) == "unknown"

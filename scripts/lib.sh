@@ -78,10 +78,11 @@ render_manifests() {
 
 # --- cluster helpers ---------------------------------------------------------
 
-# Name of the pod currently holding the Patroni leader lock.
+# Name of the pod currently holding the Patroni leader lock. Older Patroni (2.0
+# in the pg11 image) labels it `master` regardless of leader_label_value.
 primary_pod() {
   kc -n "$NAMESPACE" get pods \
-    -l "application=patroni,cluster-name=${CLUSTER_NAME},role=primary" \
+    -l "application=patroni,cluster-name=${CLUSTER_NAME},role in (primary,master)" \
     -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
 }
 

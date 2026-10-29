@@ -23,7 +23,10 @@ if kind get clusters 2>/dev/null | grep -qx "${KIND_CLUSTER}"; then
   ok "kind cluster '${KIND_CLUSTER}' already exists"
 else
   log "creating kind cluster '${KIND_CLUSTER}' ..."
-  kind create cluster --config "${REPO_ROOT}/cluster/kind-config.yaml" --wait 120s
+  # --name overrides the config's own `name:`; without it KIND_CLUSTER would
+  # select the context but the cluster would still be created as tsdb-upgrader.
+  kind create cluster --config "${REPO_ROOT}/cluster/kind-config.yaml" \
+    --name "${KIND_CLUSTER}" --wait 120s
   ok "kind cluster created"
 fi
 

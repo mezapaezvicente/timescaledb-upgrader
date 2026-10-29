@@ -49,7 +49,7 @@ echo
 check_nonempty "connect: server_version"   "$(q "SHOW server_version" | awk '{print $1}')"
 check_nonempty "connect: timescaledb ext"  "$(q "SELECT extversion FROM pg_extension WHERE extname='timescaledb'")"
 check          "patroni reports a leader"  "1" \
-               "$(kc -n "$NAMESPACE" get pods -l "application=patroni,cluster-name=${CLUSTER_NAME},role=primary" --no-headers 2>/dev/null | wc -l | tr -d ' ')"
+               "$(kc -n "$NAMESPACE" get pods -l "application=patroni,cluster-name=${CLUSTER_NAME},role in (primary,master)" --no-headers 2>/dev/null | wc -l | tr -d ' ')"
 
 # 2. Hypertable creation -------------------------------------------------------
 q "DROP TABLE IF EXISTS ${TABLE} CASCADE" >/dev/null

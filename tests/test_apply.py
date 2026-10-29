@@ -233,6 +233,21 @@ def test_two_image_upgrade_rolls_replicas_first_and_updates_after_each_rollout()
     ]
 
 
+def test_old_patroni_master_label_is_the_primary():
+    # Patroni 2.0.2 (the pg11 image) labels its leader `master` even with
+    # leader_label_value: primary set; apply refused "found 0" primaries.
+    bridge = _profile(PG15_13, "2.9.0", "2.20.3")
+    plan = _plan(source_ts="2.12.2", candidates=[bridge])
+    kube = FakeKube(PG15_13, "15.18", {"app": "2.12.2"}, replicas=1)
+    kube.pods[0]["role"] = "master"
+    report = _run(plan, kube)
+    assert report["result"] == "pass", report
+    # The primary is still rolled last and is where the update runs.
+    assert kube.writes[3:6] == ["set image " + PG15_18, "delete tsdb-1", "delete tsdb-0"]
+    assert kube.writes[6] == "app@tsdb-0: ALTER EXTENSION timescaledb UPDATE TO '2.28.3';"
+    assert report["final"]["instances"][0]["role"] == "primary"
+
+
 def test_a_failed_rollout_reports_what_it_had_already_done():
     """Found live: a pod that never comes back must not erase the set image."""
     bridge = _profile(PG15_13, "2.9.0", "2.20.3")

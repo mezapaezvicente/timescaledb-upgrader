@@ -53,6 +53,7 @@ from .preflight import (
     PreflightError,
     PreflightOptions,
     discover_instances,
+    patroni_role,
     run_preflight,
 )
 from .versions import InvalidVersion, parse_version
@@ -286,7 +287,7 @@ class _Cluster:
 
     @staticmethod
     def role(pod: Dict[str, Any]) -> str:
-        return (pod.get("metadata", {}).get("labels") or {}).get("role", "unknown")
+        return patroni_role(pod.get("metadata", {}).get("labels"))
 
     @staticmethod
     def ready(pod: Dict[str, Any]) -> bool:

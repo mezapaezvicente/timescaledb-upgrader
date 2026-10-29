@@ -62,6 +62,7 @@ __all__ = [
     "check_drift",
     "check_gates",
     "installable_on_instance",
+    "patroni_role",
 ]
 
 PASS = "pass"
@@ -104,6 +105,18 @@ class PreflightOptions:
     matrix_path: Optional[str] = None
     timeout: float = 30.0
     registry_timeout: float = 15.0
+
+
+# Older Patroni labels the leader `master` whatever the configuration asks
+# for: 2.0.2 (the pg11 image) was seen doing it with leader_label_value set.
+# Both mean the primary.
+_LEADER_LABELS = ("primary", "master")
+
+
+def patroni_role(labels: Optional[Dict[str, str]]) -> str:
+    """The pod's Patroni role from its labels: primary, replica, or as labelled."""
+    role = (labels or {}).get("role", "unknown")
+    return "primary" if role in _LEADER_LABELS else role
 
 
 @dataclass
@@ -471,7 +484,7 @@ def discover_instances(kube: Kube, opts: PreflightOptions) -> Tuple[List[Instanc
         name = meta.get("name", "?")
         inst = Instance(
             pod=name,
-            role=(meta.get("labels") or {}).get("role", "unknown"),
+            role=patroni_role(meta.get("labels")),
             node=pod.get("spec", {}).get("nodeName", ""),
         )
 
