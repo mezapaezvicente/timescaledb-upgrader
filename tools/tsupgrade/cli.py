@@ -4,6 +4,8 @@ Subcommands
 -----------
 ``images refresh``    query the registry and regenerate ``data/images.json``
 ``images show``       summarise the catalog already on disk
+``contents measure``  measure what local images really install
+``contents show``     summarise the measured image contents
 ``matrix scaffold``   add missing transitions to ``data/upgrade-matrix.json``
 ``matrix render``     render the matrix to Markdown
 ``matrix lookup``     look up one transition
@@ -27,6 +29,14 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from .contents import (
+    ContentsError,
+    ImageContents,
+    default_contents_path,
+    load_contents,
+    measure_image,
+    merge_measurements,
+)
 from .drift import (
     AHEAD,
     STRANDED,
@@ -36,12 +46,14 @@ from .drift import (
     profile_from_labels,
 )
 from .images import (
+    DEFAULT_REPOSITORY,
     RegistryError,
     build_catalog,
     default_catalog_path,
     fetch_image_labels,
     fetch_tags,
     load_catalog,
+    parse_image_reference,
 )
 from .matrix import MatrixError, default_matrix_path, load_matrix
 from .plan import PlanRefused, build_plan, render_runbook
@@ -249,10 +261,83 @@ def cmd_preflight(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
-def _profile(reference: str, pg_major, catalog, timeout: float):
+def _load_contents(path: Optional[str]) -> Optional[ImageContents]:
+    """The measured contents; absent is fine unless a path was asked for."""
+    try:
+        return load_contents(path)
+    except ContentsError:
+        if path is not None:
+            raise
+        return None
+
+
+def _profile(reference: str, pg_major, catalog, timeout: float, contents=None):
+    """A measured profile when there is one; the labels only otherwise."""
+    if contents is not None:
+        measured = contents.profile(reference, pg_major)
+        if measured is not None:
+            return measured
     return profile_from_labels(
         fetch_image_labels(reference, timeout=timeout), pg_major, catalog
     )
+
+
+def cmd_contents_measure(args: argparse.Namespace) -> int:
+    """Measure local images and fold the results into the contents file."""
+    output = Path(args.output) if args.output else default_contents_path()
+    existing = load_contents(output).doc if output.exists() else None
+
+    measured = {}
+    failed = 0
+    for tag in args.tags:
+        reference = tag if ":" in tag else "{0}:{1}".format(DEFAULT_REPOSITORY, tag)
+        try:
+            entry = measure_image(reference)
+        except ContentsError as exc:
+            print("error: {0}".format(exc), file=sys.stderr)
+            failed += 1
+            continue
+        _, _, short = parse_image_reference(reference)
+        measured[short] = entry
+        for major, found in sorted(entry["pg"].items(), key=lambda kv: int(kv[0])):
+            versions = found["installable"]
+            print("{0:24} pg{1:<3} {2:>3} versions  {3} .. {4}".format(
+                short, major, len(versions), versions[0], versions[-1]))
+
+    if measured:
+        _write_json(output, merge_measurements(existing, measured))
+        print("wrote {0}".format(output), file=sys.stderr)
+    return EXIT_ERROR if failed else EXIT_OK
+
+
+def cmd_contents_show(args: argparse.Namespace) -> int:
+    contents = load_contents(args.contents)
+    print("image                    pg   installable")
+    print("-----------------------  ---  -----------")
+    for tag, entry in contents.images.items():
+        for major, found in sorted(entry.get("pg", {}).items(), key=lambda kv: int(kv[0])):
+            print("{0:24} {1:<4} {2}".format(tag, major, _ranges(found["installable"])))
+    return EXIT_OK
+
+
+def _ranges(versions: List[str]) -> str:
+    """Collapse a version list into runs, so a hole in it is visible.
+
+    A run breaks where a minor series is skipped: 1.7.5, 2.1.0 .. 2.11.2 reads
+    as two runs because 2.0 is missing.
+    """
+    runs: List[List[str]] = []
+    for version in versions:
+        parts = parse_version(version)
+        if runs:
+            prev = parse_version(runs[-1][-1])
+            same_major_next_minor = parts[0] == prev[0] and parts[1] - prev[1] <= 1
+            next_major_first = parts[0] == prev[0] + 1 and parts[1] == 0
+            if same_major_next_minor or next_major_first:
+                runs[-1].append(version)
+                continue
+        runs.append([version])
+    return ", ".join(r[0] if len(r) == 1 else "{0} .. {1}".format(r[0], r[-1]) for r in runs)
 
 
 def cmd_drift(args: argparse.Namespace) -> int:
@@ -269,9 +354,10 @@ def cmd_drift(args: argparse.Namespace) -> int:
         catalog = None
 
     pg_major = int(args.pg_major) if args.pg_major else None
+    contents = _load_contents(args.contents)
 
     try:
-        target = _profile(args.image, pg_major, catalog, args.registry_timeout)
+        target = _profile(args.image, pg_major, catalog, args.registry_timeout, contents)
     except RegistryError as exc:
         print("error: {0}".format(exc), file=sys.stderr)
         return EXIT_ERROR
@@ -311,7 +397,9 @@ def cmd_drift(args: argparse.Namespace) -> int:
         candidates = []
         for ref in args.via:
             try:
-                candidates.append(_profile(ref, major, catalog, args.registry_timeout))
+                candidates.append(
+                    _profile(ref, major, catalog, args.registry_timeout, contents)
+                )
             except RegistryError as exc:
                 print("warning: {0}".format(exc), file=sys.stderr)
         hops, problem = plan_chain(args.installed, target, candidates, major)
@@ -358,15 +446,20 @@ def cmd_plan(args: argparse.Namespace) -> int:
         print("error: cannot parse --from-pg {0!r}".format(args.from_pg), file=sys.stderr)
         return EXIT_ERROR
 
+    contents = _load_contents(args.contents)
     try:
-        target = _profile(args.target_image, major, catalog, args.registry_timeout)
+        target = _profile(
+            args.target_image, major, catalog, args.registry_timeout, contents
+        )
     except RegistryError as exc:
         print("error: {0}".format(exc), file=sys.stderr)
         return EXIT_ERROR
     candidates = []
     for ref in args.via:
         try:
-            candidates.append(_profile(ref, major, catalog, args.registry_timeout))
+            candidates.append(
+                _profile(ref, major, catalog, args.registry_timeout, contents)
+            )
         except RegistryError as exc:
             print("warning: {0}".format(exc), file=sys.stderr)
 
@@ -446,6 +539,28 @@ def build_parser() -> argparse.ArgumentParser:
     show = images_sub.add_parser("show", help="summarise the catalog on disk")
     show.add_argument("--catalog", default=None)
     show.set_defaults(func=cmd_images_show)
+
+    # --- contents ---
+    contents = sub.add_parser(
+        "contents", help="what specific images really install, measured"
+    )
+    contents_sub = contents.add_subparsers(dest="command", required=True)
+
+    measure = contents_sub.add_parser(
+        "measure",
+        help="measure local images (docker run, ls only) into the contents file",
+    )
+    measure.add_argument(
+        "tags", nargs="+", metavar="TAG", help="image tag or full reference; must be pulled"
+    )
+    measure.add_argument("--output", default=None)
+    measure.set_defaults(func=cmd_contents_measure)
+
+    contents_show = contents_sub.add_parser(
+        "show", help="summarise the measured contents on disk"
+    )
+    contents_show.add_argument("--contents", default=None)
+    contents_show.set_defaults(func=cmd_contents_show)
 
     # --- matrix ---
     matrix = sub.add_parser("matrix", help="the upgrade compatibility matrix")
@@ -541,6 +656,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     drift.add_argument("--catalog", default=None)
     drift.add_argument(
+        "--contents",
+        default=None,
+        help="measured image contents (default: data/image-contents.json)",
+    )
+    drift.add_argument(
         "--registry-timeout", type=float, default=15.0, dest="registry_timeout"
     )
     drift.add_argument("--json", action="store_true")
@@ -578,6 +698,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan.add_argument("--matrix", default=None)
     plan.add_argument("--catalog", default=None)
+    plan.add_argument(
+        "--contents",
+        default=None,
+        help="measured image contents (default: data/image-contents.json)",
+    )
     plan.add_argument("--output", default=None, help="also write the plan as JSON here")
     plan.add_argument(
         "--registry-timeout", type=float, default=15.0, dest="registry_timeout"
@@ -593,7 +718,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parser.parse_args(argv)
     try:
         return int(args.func(args))
-    except (MatrixError, RegistryError, PreflightError) as exc:
+    except (MatrixError, RegistryError, PreflightError, ContentsError) as exc:
         print("error: {0}".format(exc), file=sys.stderr)
         return EXIT_ERROR
 

@@ -36,6 +36,43 @@ docker exec tsdrift ls /usr/share/postgresql/16/extension/
 docker exec tsdrift ls /usr/lib/postgresql/16/lib/
 ```
 
+### Measured once per image, then shipped
+
+Running that per image by hand does not scale, and the labels are not a
+substitute, so `tsupgrade contents measure` does it for every image the
+repository uses and writes `data/image-contents.json`. Measured 2026-10-29:
+
+| Image | Installable (own PG major) | Labels said |
+|---|---|---|
+| `pg11.11-ts2.1.1-p0` | 1.6.0 .. 2.1.1 | no version labels |
+| `pg12.6-ts2.0.1-p0` | 1.7.0 .. 2.0.1 (pg11: 1.6.0 .. 2.0.1) | no TimescaleDB labels |
+| `pg12.22-ts2.11.2` | **1.7.5, 2.1.0 .. 2.11.2** | 1.7.5 .. 2.11.2, no hole |
+| `pg13.22-ts2.15.3` | 2.1.0 .. 2.15.3 | 2.1.0 |
+| `pg14.19-ts2.19.3` | 2.5.0 .. 2.19.3 | 2.4.2 |
+| `pg15.13-ts2.20.3` | 2.9.0 .. 2.20.3 | 2.8.1 |
+| `pg15.18-ts2.28.3` | **2.13.0** .. 2.28.3 | **2.12.2** |
+| `pg16.15-ts2.30.1` | 2.13.0 .. 2.30.1 | 2.12.2 |
+| `pg17.11-ts2.30.1` | 2.17.0 .. 2.30.1 | 2.16.1 |
+| `pg18.6-ts2.30.1` | 2.23.0 .. 2.30.1 | 2.22.1 |
+
+Six of the eight labelled floors are one series low (pg12.22 and pg13 are
+right). The registry clamp corrected the others, but not `pg15.18-ts2.28.3`, because pg15 images from 2.9 exist: `plan`
+then sent a 2.12.2 database onto it in one hop. With the measurement it is
+refused there and bridged through `pg15.13-ts2.20.3`.
+
+The pg12 hole changes routing, not only acceptance. A pg12 database at 1.7
+bridged through `pg12.6-ts2.0.1-p0` must stop at 1.7.5; landing on that image's
+ceiling (2.0.1) leaves it on a version `pg12.22` cannot load. The bridge search
+is breadth-first over every installable version for that reason. It also means
+a pg12 database already **at 2.0** cannot reach 2.11 through these two images at
+all; that needs a pg12 image shipping both 2.0.x and 2.1+.
+
+```sh
+make image-contents                       # docker run --rm, ls only, no server
+bash scripts/tsupgrade.sh contents show
+bash scripts/tsupgrade.sh plan --from-pg 15.18 --from-ts 2.12.2   --target-image timescale/timescaledb-ha:pg15.18-ts2.28.3   --via timescale/timescaledb-ha:pg15.13-ts2.20.3 --verification-run
+```
+
 ## The four states, from real databases
 
 Produced by pinning `CREATE EXTENSION timescaledb VERSION '<v>'` in separate

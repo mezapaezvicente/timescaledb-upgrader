@@ -22,7 +22,7 @@ of them are not upgrade opportunities at all -- they are outages:
 ``stranded`` is the one nothing else reports, and it is not exotic: image floors
 rise over time, so "pin the newest image" is a live way to reach it. A pg15
 cluster at 2.9 cannot move to ``pg15-ts2.28`` at all, because that image's floor
-is 2.12.2. :func:`bridge` computes the sequence of images that gets it there.
+is 2.13.0. :func:`bridge` computes the sequence of images that gets it there.
 
 Read-only, like preflight. The only in-pod command this adds is ``ls``.
 """
@@ -168,6 +168,10 @@ class ImageProfile:
     # True when floor/ceiling came from a filesystem listing rather than labels.
     from_filesystem: bool = False
     notes: Tuple[str, ...] = field(default_factory=tuple)
+    # The exact installable versions, when measured. Ranges have holes -- the
+    # pg12 2.11 image ships 1.7.5 and then 2.1.0 onwards, nothing of 2.0 -- so
+    # once this is known, membership replaces the floor/ceiling test.
+    installable: Tuple[str, ...] = ()
 
     def serves(self, pg_major: int) -> bool:
         return pg_major in self.pg_majors
@@ -177,7 +181,23 @@ class ImageProfile:
         key = _safe_key(version)
         if key is None:
             return False
+        if self.installable:
+            return key in {_key(v) for v in self.installable}
         return _key(self.ts_floor) <= key <= _key(self.ts_ceiling)
+
+    def landings(self, version: object) -> List[str]:
+        """Versions an ``ALTER EXTENSION`` on this image can move ``version`` to.
+
+        Every installable version above it when the set is measured; otherwise
+        only the ceiling, the one version a label range vouches for.
+        """
+        key = _safe_key(version)
+        if key is None:
+            return []
+        if self.installable:
+            return [v for v in self.installable if _key(v) > key]
+        ceiling = _safe_key(self.ts_ceiling)
+        return [self.ts_ceiling] if ceiling is not None and ceiling > key else []
 
 
 def published_floors(catalog: ImageCatalog) -> Dict[int, Tuple[int, int]]:
@@ -371,8 +391,10 @@ def classify_offline(installed: Optional[str], profile: ImageProfile) -> DriftVe
     metadata alone, in advance. That is also the only honest time to ask it --
     afterwards the answer is an incident.
 
-    Range membership stands in for the exact installable set here, so this is a
-    prediction. :func:`classify`, given a real filesystem listing, overrules it.
+    For a label-only profile, range membership stands in for the exact
+    installable set, so this is a prediction. A measured profile answers with
+    the set itself; :func:`classify`, given a live filesystem listing, overrules
+    both.
     """
     if not installed:
         return DriftVerdict(INDETERMINATE, "no installed version supplied")
@@ -404,6 +426,21 @@ def classify_offline(installed: Optional[str], profile: ImageProfile) -> DriftVe
             ),
             "do not roll this image out yet; bridge through an older image "
             "first, then roll forward",
+        )
+    if profile.installable and not profile.accepts(installed):
+        if len(key) < 3:
+            return DriftVerdict(
+                INDETERMINATE,
+                "{0} is not an exact release; {1}'s installable set is measured, "
+                "so the patch release decides".format(installed, profile.reference),
+            )
+        return DriftVerdict(
+            STRANDED,
+            "{0} is inside {1}'s range but the image does not ship it (no "
+            "install script and shared object for it)".format(
+                installed, profile.reference
+            ),
+            "do not roll this image out yet; move to a version it ships first",
         )
 
     default_key = _safe_key(profile.ts_default) if profile.ts_default else None
@@ -440,12 +477,14 @@ def bridge(
 ) -> Tuple[List[BridgeHop], Optional[str]]:
     """Sequence of images carrying ``start`` up to ``target_profile``.
 
-    A hop from version *V* using image *I* is legal when
-    ``I.ts_floor <= V <= I.ts_ceiling`` and *I* serves the PostgreSQL major.
-    It lands on ``I.ts_ceiling``. Greedy -- take the legal image with the
-    highest ceiling, repeat -- which terminates and is optimal in hop count,
-    because ceilings are totally ordered and any legal image's ceiling is
-    reachable in one hop.
+    A hop from version *V* using image *I* is legal when *I* accepts *V* and
+    serves the PostgreSQL major. It lands on any version *I* can move *V* to
+    (:meth:`ImageProfile.landings`). Breadth-first over versions, so the hop
+    count is minimal; among the shortest chains, the one landing highest wins.
+
+    Landing on the ceiling every time is not enough once installable sets have
+    holes. A pg12 database at 1.7 on an image shipping 1.7.0 .. 2.0.1 has to
+    stop at 1.7.5, because the next image ships 1.7.5 and 2.1.0 but no 2.0.
 
     Returns ``(hops, problem)``. An empty hop list with no problem means the
     target image already accepts ``start`` directly.
@@ -468,38 +507,47 @@ def bridge(
     ]
     if not usable:
         return [], "no candidate images to bridge with; supply more tags to consider"
-
-    hops: List[BridgeHop] = []
-    current = start
-    seen = {start}
-
-    # Bounded by the candidate count: each hop strictly raises the version and
-    # every landing point is some candidate's ceiling.
-    for _ in range(len(usable) + 1):
-        if target_profile.accepts(current):
-            return hops, None
-
-        legal = [c for c in usable if c.accepts(current)]
-        if not legal:
-            return hops, (
-                "no image accepts ts{0} for pg{1}; this version cannot be "
-                "bridged from the candidates given".format(current, major)
-            )
-
-        best = max(legal, key=lambda c: _key(c.ts_ceiling))
-        landing = best.ts_ceiling
-        if _key(landing) <= _key(current) or landing in seen:
-            return hops, (
-                "bridging stalls at ts{0}: no candidate reaches higher".format(current)
-            )
-
-        hops.append(
-            BridgeHop(image=best.reference, from_version=current, to_version=landing)
+    if not any(c.accepts(start) for c in usable):
+        return [], (
+            "no image accepts ts{0} for pg{1}; this version cannot be "
+            "bridged from the candidates given".format(start, major)
         )
-        seen.add(landing)
-        current = landing
 
-    return hops, "bridge search did not converge from ts{0}".format(start)
+    # Every version is visited once and each hop strictly raises it, so this
+    # terminates. Higher versions and higher landings are tried first, which
+    # makes the first path found to a version also the preferred one.
+    came_from: Dict[Tuple[int, ...], Optional[BridgeHop]] = {start_key: None}
+    level = [start]
+    highest = start
+    while level:
+        reached: List[str] = []
+        following: List[str] = []
+        for current in sorted(level, key=_key, reverse=True):
+            for image in usable:
+                if not image.accepts(current):
+                    continue
+                for landing in sorted(image.landings(current), key=_key, reverse=True):
+                    if _key(landing) in came_from:
+                        continue
+                    came_from[_key(landing)] = BridgeHop(image.reference, current, landing)
+                    following.append(landing)
+                    if target_profile.accepts(landing):
+                        reached.append(landing)
+        if reached:
+            hops: List[BridgeHop] = []
+            hop = came_from[_key(max(reached, key=_key))]
+            while hop is not None:
+                hops.append(hop)
+                hop = came_from[_key(hop.from_version)]
+            return hops[::-1], None
+        if following:
+            highest = max(following + [highest], key=_key)
+        level = following
+
+    return [], (
+        "bridging stalls at ts{0}: no candidate carries it to a version {1} "
+        "accepts".format(highest, target_profile.reference)
+    )
 
 
 def plan_chain(

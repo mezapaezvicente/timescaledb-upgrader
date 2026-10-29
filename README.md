@@ -207,6 +207,22 @@ make images           # summarise the catalog
 make images-refresh   # re-query the registry and regenerate it
 ```
 
+### What each image really installs
+
+An image's registry labels predict the TimescaleDB versions it ships, and the
+prediction is wrong in ways that strand databases: `pg15.18-ts2.28.3` is
+labelled from 2.12.2 but cannot install below 2.13.0, `pg12.22-ts2.11.2` ships
+1.7.5 and then 2.1.0 onwards with no 2.0 at all, and the oldest images carry no
+version labels. [`data/image-contents.json`](data/image-contents.json) records
+what each image this repository uses actually installs, measured with `ls` in a
+throwaway container (install script and shared object both present). `drift`
+and `plan` use a measured entry in place of the labels.
+
+```bash
+make image-contents                       # re-measure (images must be pulled)
+bash scripts/tsupgrade.sh contents show   # one line per image, holes visible
+```
+
 ### Looking up a transition
 
 ```bash
@@ -313,6 +329,7 @@ scripts/           the real logic; the Makefile is just a table of contents
   lib.sh           shared config, rendering, psql/kubectl helpers
 data/
   images.json      generated: which image tags the registry actually serves
+  image-contents.json   generated: what specific images can really install
   upgrade-matrix.json   the compatibility matrix
 docs/matrix.md     generated: the published version table
 tools/tsupgrade/   the CLI (`python -m tsupgrade`), standard library only

@@ -30,7 +30,7 @@ export TARGET_IMAGE
 
 .DEFAULT_GOAL := help
 .PHONY: help up down status psql seed smoke logs load-image clean
-.PHONY: test matrix matrix-scaffold images images-refresh lookup preflight drift
+.PHONY: test matrix matrix-scaffold images images-refresh image-contents lookup preflight drift
 
 # Lookup arguments for `make lookup`.
 TARGET_IMAGE ?=
@@ -96,6 +96,14 @@ images: ## Summarise which TimescaleDB HA images exist
 
 images-refresh: ## Re-query the registry and regenerate data/images.json
 	@bash scripts/tsupgrade.sh images refresh
+
+# Measures what each image can really install (ls in a throwaway container; no
+# server). The labels overstate floors and cannot express holes, so measured
+# entries overrule them in `drift` and `plan`. The images must be pulled first.
+IMAGE_CONTENTS_TAGS ?= pg11.11-ts2.1.1-p0 pg12.6-ts2.0.1-p0 pg12.22-ts2.11.2   pg13.22-ts2.15.3 pg14.19-ts2.19.3 pg15.13-ts2.20.3 pg15.18-ts2.28.3   pg16.15-ts2.30.1 pg17.11-ts2.30.1 pg18.6-ts2.30.1
+
+image-contents: ## Measure what local images install into data/image-contents.json [IMAGE_CONTENTS_TAGS=...]
+	@bash scripts/tsupgrade.sh contents measure $(IMAGE_CONTENTS_TAGS)
 
 lookup: ## Look up one transition: make lookup FROM_PG=16.15 FROM_TS=2.28.3 TO_PG=17 TO_TS=2.30
 	@bash scripts/tsupgrade.sh matrix lookup 	  --from-pg "$(FROM_PG)" --from-ts "$(FROM_TS)" 	  --to-pg "$(TO_PG)" --to-ts "$(TO_TS)"

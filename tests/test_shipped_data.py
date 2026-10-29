@@ -90,3 +90,43 @@ def test_every_other_verified_row_targets_an_image_that_exists():
             assert catalog.has_pair(entry.target_pg, entry.target_ts), (
                 "{0} targets an image that does not exist".format(entry.transition)
             )
+
+
+# --------------------------------------------------------------------------
+# data/image-contents.json
+# --------------------------------------------------------------------------
+
+def _shipped_contents():
+    from tsupgrade.contents import default_contents_path, load_contents
+
+    if not default_contents_path().exists():
+        pytest.skip("data/image-contents.json has not been measured yet")
+    return load_contents()
+
+
+def test_shipped_contents_agree_with_their_own_tags():
+    """The tag names a PG minor and a TimescaleDB release; the measurement of
+    that image's own major must contain both, or the entry is mislabelled."""
+    from tsupgrade.images import parse_release_tag
+
+    contents = _shipped_contents()
+    assert len(contents) > 0
+    for tag, entry in contents.images.items():
+        parsed = parse_release_tag(tag)
+        assert parsed is not None, tag
+        major = parsed["pg"].split(".")[0]
+        own = entry["pg"][major]
+        assert own["server_version"] == parsed["pg"], tag
+        assert own["default_version"] == parsed["ts"], tag
+        assert parsed["ts"] in own["installable"], tag
+        assert entry.get("digest", "").startswith("sha256:"), tag
+
+
+def test_shipped_contents_are_sorted_and_unique():
+    from tsupgrade.versions import parse_version
+
+    for tag, entry in _shipped_contents().images.items():
+        for major, found in entry["pg"].items():
+            versions = found["installable"]
+            keys = [parse_version(v) for v in versions]
+            assert keys == sorted(set(keys)), (tag, major)
