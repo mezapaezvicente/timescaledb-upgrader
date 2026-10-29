@@ -1,0 +1,57 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "14",
+    "source_ts": "2.10",
+    "target_pg": "14",
+    "target_ts": "2.19"
+  },
+  "mode": "empty",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+      "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+    }
+  ],
+  "pg_version": "14.19",
+  "versions": {
+    "source": "2.10.3",
+    "target": "2.19.3",
+    "reached": "2.19.3"
+  },
+  "upgrader": {
+    "commit": "0dc00fd7c768d6082fc9913326159f4b1045927f",
+    "dirty": false
+  },
+  "result": "pass",
+  "log": "verify/out/pg14/2.10-to-2.19.empty.log",
+  "recorded_at": "2026-10-29T16:39:05Z",
+  "stage": "done",
+  "started_at": "2026-10-29T16:38:48Z",
+  "finished_at": "2026-10-29T16:39:05Z",
+  "source_pg_version": "14.19",
+  "replicas": 2,
+  "pods": [
+    {
+      "pod": "tsdb-0",
+      "role": "primary",
+      "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:cd92b26829bbca55db23f9cb5b59d55e23a5eb413ef3fc0cdf4bf88d2f736012",
+      "server_version": "14.19"
+    },
+    {
+      "pod": "tsdb-1",
+      "role": "replica",
+      "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:cd92b26829bbca55db23f9cb5b59d55e23a5eb413ef3fc0cdf4bf88d2f736012",
+      "server_version": "14.19"
+    }
+  ],
+  "baseline": null,
+  "checks": null,
+  "plan": {
+    "hops": 1,
+    "path": "verify/out/pg14/2.10-to-2.19.plan.json"
+  },
+  "apply_exit": 0
+}

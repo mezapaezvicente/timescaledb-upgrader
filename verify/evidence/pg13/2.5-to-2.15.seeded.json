@@ -1,0 +1,90 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "13",
+    "source_ts": "2.5",
+    "target_pg": "13",
+    "target_ts": "2.15"
+  },
+  "mode": "seeded",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+      "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+    }
+  ],
+  "pg_version": "13.22",
+  "versions": {
+    "source": "2.5.2",
+    "target": "2.15.3",
+    "reached": "2.15.3"
+  },
+  "upgrader": {
+    "commit": "0dc00fd7c768d6082fc9913326159f4b1045927f",
+    "dirty": false
+  },
+  "result": "fail",
+  "log": "verify/out/pg13/2.5-to-2.15.seeded.log",
+  "recorded_at": "2026-10-29T16:49:17Z",
+  "failure": {
+    "explanation": "fixture checks failed after the upgrade: cagg_survived, cagg_matches, write_and_refresh",
+    "error": "check|cagg_survived|fail|840 materialized rows; seeded 840 (could not set materialized_only; count includes real-time rows)\ncheck|cagg_matches|fail|0 differing buckets; refresh ran\ncheck|write_and_refresh|fail|insert ok, refresh ok; 1 new buckets, 60 rows in them"
+  },
+  "stage": "check",
+  "started_at": "2026-10-29T16:48:59Z",
+  "finished_at": "2026-10-29T16:49:17Z",
+  "source_pg_version": "13.22",
+  "replicas": 2,
+  "pods": [
+    {
+      "pod": "tsdb-0",
+      "role": "primary",
+      "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
+      "server_version": "13.22"
+    },
+    {
+      "pod": "tsdb-1",
+      "role": "replica",
+      "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
+      "server_version": "13.22"
+    }
+  ],
+  "baseline": "seeded|2.5.2|50400|2521572.95|840|3",
+  "checks": {
+    "version": {
+      "status": "pass",
+      "detail": "extversion 2.15.3, expected 2.15.3"
+    },
+    "rows": {
+      "status": "pass",
+      "detail": "50400 rows, sum 2521572.95; seeded 50400 rows, sum 2521572.95 at 2.5.2"
+    },
+    "still_compressed": {
+      "status": "pass",
+      "detail": "3 compressed chunks; seeded 3"
+    },
+    "cagg_survived": {
+      "status": "fail",
+      "detail": "840 materialized rows; seeded 840 (could not set materialized_only; count includes real-time rows)"
+    },
+    "cagg_matches": {
+      "status": "fail",
+      "detail": "0 differing buckets; refresh ran"
+    },
+    "write_and_refresh": {
+      "status": "fail",
+      "detail": "insert ok, refresh ok; 1 new buckets, 60 rows in them"
+    },
+    "decompress": {
+      "status": "pass",
+      "detail": "3 chunks decompressed; 50400 rows, sum 2521572.95 before the new writes"
+    }
+  },
+  "plan": {
+    "hops": 1,
+    "path": "verify/out/pg13/2.5-to-2.15.plan.json"
+  },
+  "apply_exit": 0
+}
