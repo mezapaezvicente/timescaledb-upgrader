@@ -19,6 +19,7 @@ from tsupgrade.preflight import (
     _human,
     _parse_df,
     check_matrix,
+    check_pg_minor_floor,
     render_report,
     worst_status,
 )
@@ -187,6 +188,47 @@ def test_a_broken_matrix_file_is_unknown_not_a_crash(tmp_path):
     result = check_matrix(_opts(path), [_instance()], "15", "2.21")
     assert result.status == UNKNOWN
     assert "cannot load matrix" in result.summary
+
+
+# --------------------------------------------------------------------------
+# PostgreSQL minor floor
+# --------------------------------------------------------------------------
+
+def _server(pg):
+    return Instance(pod="tsdb-0", server_version=pg, extensions={"bench": "2.19.3"})
+
+
+def test_minor_below_the_target_floor_fails():
+    result = check_pg_minor_floor([_server("16.4")], "16", "2.30.1")
+    assert result.status == FAIL
+    assert any("16.6" in line for line in result.details)
+
+
+def test_minor_at_the_target_floor_passes():
+    assert check_pg_minor_floor([_server("16.6")], "16", "2.30.1").status == PASS
+
+
+def test_pinned_target_image_minor_is_what_counts():
+    """After the rollout the target runs on the image's PostgreSQL, not ours."""
+    assert check_pg_minor_floor([_server("15.8")], "15.18", "2.28.3").status == PASS
+    assert check_pg_minor_floor([_server("15.18")], "15.9", "2.28.3").status == FAIL
+
+
+def test_unpinned_target_ts_is_unknown():
+    assert check_pg_minor_floor([_server("16.6")], "16", None).status == UNKNOWN
+
+
+def test_untranscribed_target_ts_is_unknown_not_pass():
+    assert check_pg_minor_floor([_server("16.15")], "16", "2.31.0").status == UNKNOWN
+
+
+def test_server_version_without_a_minor_is_unknown():
+    assert check_pg_minor_floor([_server("16")], None, "2.30.1").status == UNKNOWN
+
+
+def test_no_reachable_instance_is_unknown():
+    broken = Instance(pod="tsdb-0", error="connection refused")
+    assert check_pg_minor_floor([broken], "16", "2.30.1").status == UNKNOWN
 
 
 # --------------------------------------------------------------------------

@@ -1,14 +1,16 @@
 """Vendor-stated facts about which versions go together.
 
-Two different things live here, both quoted from primary sources rather than
-recalled, and both *facts about versions* rather than verdicts about upgrades:
+Three different things live here, all quoted from primary sources rather than
+recalled, and all *facts about versions* rather than verdicts about upgrades:
 
 * :data:`SUPPORT_MATRIX` -- which PostgreSQL majors each TimescaleDB series
   supports, transcribed from TigerData's published matrix.
 * :data:`ABI_BROKEN` -- the six PostgreSQL patch releases that shipped an
   accidental ABI break and cannot load TimescaleDB at all.
+* :data:`PG_MINOR_RULES` -- the PostgreSQL minors each TimescaleDB series
+  refuses at load time, from its own ``compat.h``.
 
-Neither says an upgrade is safe. The matrix says a combination is *supportable*;
+None says an upgrade is safe. The matrix says a combination is *supportable*;
 whether you can get there from where you are is the matrix module's job, and
 whether the database's contents allow it is preflight's.
 
@@ -33,6 +35,10 @@ __all__ = [
     "ABI_BROKEN",
     "ABI_BROKEN_SOURCE",
     "abi_break_for",
+    "PG_MINOR_RULES",
+    "PG_MINOR_RULES_SOURCE",
+    "pg_minor_rules_for",
+    "pg_minor_refusal",
     "documented_pg_majors",
     "documented_ts_floor",
     "supports",
@@ -83,6 +89,36 @@ ABI_BROKEN: Dict[Tuple[int, int], str] = {
 }
 
 
+PG_MINOR_RULES_SOURCE = (
+    "https://github.com/timescale/timescaledb/blob/{tag}/src/compat/compat.h"
+)
+
+# The PostgreSQL minors each TimescaleDB series refuses to load on, per major:
+# {major: (lowest accepted minor, minors excluded outright)}. Transcribed from
+# the `is_supported_pg_version_*` macros in `src/compat/compat.h`, which
+# `src/extension.c` evaluates against `server_version_num` at load time. Every
+# 2.x release tag up to the band's upper bound was read, and each band is
+# constant across its patch releases; the tag named is where the band starts.
+#
+# An empty dict means the series was read and places no minor-level condition
+# on any major. A series outside every band is silence, not permission: a
+# release newer than the transcription may well have raised a floor. Majors a
+# series does not build for at all are the support matrix's business, not this
+# table's.
+PG_MINOR_RULES: Tuple[
+    Tuple[Tuple[int, int], Tuple[int, int], str, Dict[int, Tuple[int, Tuple[int, ...]]]],
+    ...,
+] = (
+    ((2, 0), (2, 0), "2.0.0", {}),
+    ((2, 1), (2, 15), "2.1.0", {13: (2, ())}),
+    ((2, 16), (2, 17), "2.16.0", {}),
+    # The ResultRelInfo ABI break, excluded by exact version before a floor
+    # replaced it.
+    ((2, 18), (2, 19), "2.18.0", {14: (0, (14,)), 15: (0, (9,)), 16: (0, (5,)), 17: (0, (1,))}),
+    ((2, 20), (2, 30), "2.20.0", {15: (10, ()), 16: (6, ()), 17: (2, ())}),
+)
+
+
 def _series(ts: object) -> Tuple[int, int]:
     parts = parse_version(ts)
     return (parts[0], parts[1] if len(parts) > 1 else 0)
@@ -102,6 +138,56 @@ def abi_break_for(server_version: object) -> Optional[str]:
     if len(parts) < 2:
         return None
     return ABI_BROKEN.get((parts[0], parts[1]))
+
+
+def pg_minor_rules_for(
+    ts: object,
+) -> Optional[Tuple[str, Dict[int, Tuple[int, Tuple[int, ...]]]]]:
+    """The source tag and per-major minor rules for a TimescaleDB series.
+
+    None when the transcription does not cover the series (or it cannot be
+    parsed). That is silence: the caller cannot conclude the series loads.
+    """
+    try:
+        want = _series(ts)
+    except InvalidVersion:
+        return None
+    for low, high, tag, rules in PG_MINOR_RULES:
+        if low <= want <= high:
+            return tag, rules
+    return None
+
+
+def pg_minor_refusal(ts: object, server_version: object) -> Optional[str]:
+    """Why TimescaleDB ``ts`` would refuse to load on ``server_version``.
+
+    Returns None when it would not refuse -- and also when this cannot be
+    answered (series not transcribed, version without a minor). Like
+    :func:`abi_break_for`, None is not a clean bill of health; callers that
+    need to tell the two apart check :func:`pg_minor_rules_for` and the
+    version's shape themselves.
+    """
+    found = pg_minor_rules_for(ts)
+    if found is None:
+        return None
+    tag, rules = found
+    try:
+        parts = parse_version(server_version)
+    except InvalidVersion:
+        return None
+    if len(parts) < 2 or parts[0] not in rules:
+        return None
+    major, minor = parts[0], parts[1]
+    floor, excluded = rules[major]
+    if minor < floor:
+        return "TimescaleDB {0} requires PostgreSQL {1}.{2} or later (compat.h at {3})".format(
+            ts, major, floor, tag
+        )
+    if minor in excluded:
+        return "TimescaleDB {0} excludes PostgreSQL {1}.{2} (compat.h at {3})".format(
+            ts, major, minor, tag
+        )
+    return None
 
 
 def documented_pg_majors(ts: object) -> Optional[Tuple[int, ...]]:

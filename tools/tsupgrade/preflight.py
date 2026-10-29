@@ -37,7 +37,14 @@ from .gates import BLOCKED, CLEAR, NOT_APPLICABLE, SESSION_RULES
 from .gates import INDETERMINATE as GATE_INDETERMINATE
 from .gates import run_gates
 from .matrix import Matrix, MatrixError, load_matrix
-from .support import ABI_BROKEN, ABI_BROKEN_SOURCE, abi_break_for
+from .support import (
+    ABI_BROKEN,
+    ABI_BROKEN_SOURCE,
+    PG_MINOR_RULES_SOURCE,
+    abi_break_for,
+    pg_minor_refusal,
+    pg_minor_rules_for,
+)
 from .versions import InvalidVersion, parse_version
 
 __all__ = [
@@ -51,6 +58,7 @@ __all__ = [
     "render_report",
     "worst_status",
     "check_abi_break",
+    "check_pg_minor_floor",
     "check_drift",
     "check_gates",
     "installable_on_instance",
@@ -829,6 +837,107 @@ def check_abi_break(instances: Sequence[Instance]) -> CheckResult:
     )
 
 
+def check_pg_minor_floor(
+    instances: Sequence[Instance],
+    target_pg: Optional[str],
+    target_ts: Optional[str],
+) -> CheckResult:
+    """Refuse a target TimescaleDB that will not load on the PostgreSQL minor.
+
+    TimescaleDB checks ``server_version_num`` against its own compat.h at load
+    time: 2.20+ needs 15.10 / 16.6 / 17.2, for example. Like the ABI break this
+    is a property of the server, not of a transition, so it is not in the
+    matrix.
+
+    The server that matters is the one the target TimescaleDB will run on. When
+    the target image pins a PostgreSQL minor, that is the image's; otherwise the
+    image is not changing PostgreSQL as far as we know, and it is each running
+    server's.
+    """
+    title = "PostgreSQL minor accepted by target TimescaleDB"
+    details: List[str] = []
+
+    if not target_ts:
+        return CheckResult(
+            "pg_minor_floor",
+            title,
+            UNKNOWN,
+            "target TimescaleDB version not pinned; pass --target-ts",
+            details,
+        )
+
+    found = pg_minor_rules_for(target_ts)
+    if found is None:
+        return CheckResult(
+            "pg_minor_floor",
+            title,
+            UNKNOWN,
+            "no transcribed compat.h rules for TimescaleDB {0}; it may have "
+            "raised a floor".format(target_ts),
+            details,
+        )
+    tag, _rules = found
+
+    try:
+        target_has_minor = target_pg is not None and len(parse_version(target_pg)) >= 2
+    except InvalidVersion:
+        target_has_minor = False
+
+    if target_has_minor:
+        servers = [("target image", target_pg)]
+    else:
+        servers = [
+            (i.pod, i.server_version)
+            for i in instances
+            if not i.error and i.server_version
+        ]
+        if not servers:
+            return CheckResult(
+                "pg_minor_floor",
+                title,
+                UNKNOWN,
+                "no instance reported a server version",
+                details,
+            )
+
+    statuses: List[str] = []
+    for who, version in servers:
+        try:
+            has_minor = len(parse_version(version)) >= 2
+        except InvalidVersion:
+            has_minor = False
+        if not has_minor:
+            statuses.append(UNKNOWN)
+            details.append(
+                "{0} : cannot read a PostgreSQL minor from {1!r}".format(who, version)
+            )
+            continue
+        refusal = pg_minor_refusal(target_ts, version)
+        if refusal is None:
+            statuses.append(PASS)
+            details.append(
+                "{0} : PostgreSQL {1} is accepted by TimescaleDB {2}".format(
+                    who, version, target_ts
+                )
+            )
+        else:
+            statuses.append(FAIL)
+            details.append(
+                "{0} : PostgreSQL {1} - {2}. The extension will not load; "
+                "move PostgreSQL first.".format(who, version, refusal)
+            )
+
+    details.append("source : {0}".format(PG_MINOR_RULES_SOURCE.format(tag=tag)))
+
+    return CheckResult(
+        "pg_minor_floor",
+        title,
+        worst_status(statuses),
+        "target ts{0}".format(target_ts),
+        details,
+    )
+
+
 def installable_on_instance(
     kube: "Kube", opts: PreflightOptions, pod: str
 ) -> Tuple[List[str], Optional[str]]:
@@ -1144,6 +1253,7 @@ def run_preflight(opts: PreflightOptions) -> List[CheckResult]:
     instances, instances_result = discover_instances(kube, opts)
     results.append(instances_result)
     results.append(check_abi_break(instances))
+    results.append(check_pg_minor_floor(instances, target_pg, target_ts))
     results.append(check_disk_headroom(kube, opts, instances))
     results.append(check_permissions(kube, opts, instances))
     results.append(check_drift(kube, opts, instances))

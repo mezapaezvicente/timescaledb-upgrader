@@ -11,11 +11,14 @@ import pytest
 
 from tsupgrade.support import (
     ABI_BROKEN,
+    PG_MINOR_RULES,
     SUPPORT_MATRIX,
     abi_break_for,
     documented_pg_majors,
     documented_ts_floor,
     floor_disagreements,
+    pg_minor_refusal,
+    pg_minor_rules_for,
     supports,
 )
 
@@ -61,6 +64,81 @@ def test_abi_check_is_silent_on_what_it_cannot_parse(version):
 
 def test_abi_table_covers_exactly_the_six_documented_releases():
     assert len(ABI_BROKEN) == 6
+
+
+# --------------------------------------------------------------------------
+# The PostgreSQL minors each TimescaleDB series refuses at load time
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "ts,pg",
+    [
+        ("2.20.0", "15.9"),
+        ("2.30.1", "16.5"),
+        ("2.28.3", "17.1"),
+        ("2.20.3", "16.0"),
+        ("2.1.0", "13.1"),
+        ("2.15.3", "13.0"),
+        ("2.18.0", "14.14"),   # the ABI break, excluded by exact version
+        ("2.19.3", "17.1"),
+    ],
+)
+def test_target_refuses_the_minor(ts, pg):
+    assert pg_minor_refusal(ts, pg) is not None
+
+
+@pytest.mark.parametrize(
+    "ts,pg",
+    [
+        ("2.20.0", "15.10"),   # the floor itself is accepted
+        ("2.30.1", "16.6"),
+        ("2.28.3", "17.2"),
+        ("2.30.1", "18.0"),    # pg18 has no floor
+        ("2.1.0", "13.2"),
+        ("2.18.0", "15.8"),    # 2.18-2.19 exclude, they do not floor
+        ("2.19.3", "14.15"),
+        ("2.17.2", "17.1"),    # before the exclusions existed
+        ("2.9.0", "15.0"),
+        ("2.0.1", "12.0"),
+    ],
+)
+def test_target_accepts_the_minor(ts, pg):
+    assert pg_minor_refusal(ts, pg) is None
+
+
+def test_refusal_names_the_floor_and_its_source_tag():
+    reason = pg_minor_refusal("2.20.3", "15.9")
+    assert "15.10" in reason
+    assert "2.20.0" in reason
+
+
+def test_refusal_reads_a_full_server_version_string():
+    assert pg_minor_refusal("2.30.1", "16.5 (Ubuntu 16.5-1.pgdg22.04+1)") is not None
+
+
+def test_series_beyond_the_transcription_has_no_rules():
+    """A newer release may have raised a floor; silence, not permission."""
+    assert pg_minor_rules_for("2.31.0") is None
+    assert pg_minor_rules_for("1.7.5") is None
+
+
+def test_series_with_no_minor_conditions_is_known_and_empty():
+    """2.16-2.17 were read and impose nothing, which differs from unread."""
+    assert pg_minor_rules_for("2.17.2") == ("2.16.0", {})
+
+
+@pytest.mark.parametrize("pg", ["16", "not a version", "", None])
+def test_refusal_is_silent_without_a_minor(pg):
+    assert pg_minor_refusal("2.30.1", pg) is None
+
+
+def test_minor_rule_bands_are_contiguous_from_2_0():
+    """Every 2.x tag up to the last band was read, so no gaps are allowed."""
+    expected_low = (2, 0)
+    for low, high, _tag, _rules in PG_MINOR_RULES:
+        assert low == expected_low
+        assert low <= high
+        expected_low = (high[0], high[1] + 1)
 
 
 # --------------------------------------------------------------------------
