@@ -15,3 +15,6 @@ venv/
 .DS_Store
 .idea/
 .vscode/
+
+# verification runs: full logs stay local, evidence records are committed
+verify/out/
