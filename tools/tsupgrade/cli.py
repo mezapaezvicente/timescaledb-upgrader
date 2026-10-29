@@ -8,10 +8,15 @@ Subcommands
 ``matrix render``     render the matrix to Markdown
 ``matrix lookup``     look up one transition
 ``drift``             classify databases against what their image can install
+``plan``              emit the runbook for an upgrade; writes nothing to a cluster
 
 Exit codes for ``matrix lookup`` are meant to be scripted against:
 0 a verified verdict, 3 an entry with no established verdict, 4 no entry at all,
 1 an error.
+
+``plan`` exits 0 with a plan, 2 when refused outright, and 3 when refused only
+because the verdict is not established -- the refusal ``--verification-run``
+lifts.
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ from .images import (
     load_catalog,
 )
 from .matrix import MatrixError, default_matrix_path, load_matrix
+from .plan import PlanRefused, build_plan, render_runbook
 from .preflight import (
     FAIL,
     UNKNOWN,
@@ -48,6 +54,7 @@ from .preflight import (
     run_preflight,
 )
 from .render import render_markdown
+from .versions import InvalidVersion, parse_version
 from .scaffold import scaffold_matrix
 
 EXIT_OK = 0
@@ -336,6 +343,82 @@ def cmd_drift(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_plan(args: argparse.Namespace) -> int:
+    """Build a plan from a stated source and a target image. Offline apart
+    from the registry label lookups; it never touches a cluster.
+    """
+    try:
+        catalog = load_catalog(args.catalog)
+    except RegistryError:
+        catalog = None
+
+    try:
+        major = parse_version(args.from_pg)[0]
+    except InvalidVersion:
+        print("error: cannot parse --from-pg {0!r}".format(args.from_pg), file=sys.stderr)
+        return EXIT_ERROR
+
+    try:
+        target = _profile(args.target_image, major, catalog, args.registry_timeout)
+    except RegistryError as exc:
+        print("error: {0}".format(exc), file=sys.stderr)
+        return EXIT_ERROR
+    candidates = []
+    for ref in args.via:
+        try:
+            candidates.append(_profile(ref, major, catalog, args.registry_timeout))
+        except RegistryError as exc:
+            print("warning: {0}".format(exc), file=sys.stderr)
+
+    try:
+        matrix = load_matrix(args.matrix)
+    except MatrixError as exc:
+        if not args.verification_run:
+            raise
+        print("warning: no matrix: {0}".format(exc), file=sys.stderr)
+        matrix = None
+
+    if args.verification_run:
+        print(
+            "VERIFICATION RUN: planning without an established verdict. The "
+            "plan is for recording a result, not for production.",
+            file=sys.stderr,
+        )
+
+    try:
+        plan = build_plan(
+            args.from_pg,
+            args.from_ts,
+            target,
+            candidates,
+            matrix,
+            target_pg=args.target_pg,
+            target_ts=args.target_ts,
+            verification_run=args.verification_run,
+        )
+    except PlanRefused as exc:
+        print("refused: no plan produced", file=sys.stderr)
+        for refusal in exc.refusals:
+            print("  - [{0}] {1}".format(refusal.kind, refusal.reason), file=sys.stderr)
+        if exc.only_unestablished:
+            print(
+                "only an unestablished verdict stands in the way; "
+                "--verification-run plans it anyway, for recording a result",
+                file=sys.stderr,
+            )
+            return EXIT_UNKNOWN
+        return EXIT_CHECK_FAILED
+
+    if args.output:
+        _write_json(Path(args.output), plan)
+        print("wrote {0}".format(args.output), file=sys.stderr)
+    if args.json:
+        print(json.dumps(plan, indent=2))
+    else:
+        print(render_runbook(plan))
+    return EXIT_OK
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tsupgrade",
@@ -462,6 +545,45 @@ def build_parser() -> argparse.ArgumentParser:
     )
     drift.add_argument("--json", action="store_true")
     drift.set_defaults(func=cmd_drift)
+
+    # --- plan ---
+    plan = sub.add_parser(
+        "plan",
+        help="emit the runbook for an upgrade; writes nothing to any cluster",
+    )
+    plan.add_argument("--from-pg", required=True, dest="from_pg")
+    plan.add_argument(
+        "--from-ts",
+        required=True,
+        dest="from_ts",
+        help="the exact installed extension version, e.g. 2.13.0",
+    )
+    plan.add_argument("--target-image", required=True, dest="target_image")
+    plan.add_argument("--target-pg", default=None, dest="target_pg")
+    plan.add_argument("--target-ts", default=None, dest="target_ts")
+    plan.add_argument(
+        "--via",
+        action="append",
+        default=[],
+        metavar="IMAGE",
+        help="a candidate bridging image; repeat to offer several",
+    )
+    plan.add_argument(
+        "--verification-run",
+        action="store_true",
+        dest="verification_run",
+        help="plan a transition whose verdict is not established, to record "
+        "its result (matrix verification, or a TimescaleDB release newer than "
+        "this repository). Never for production.",
+    )
+    plan.add_argument("--matrix", default=None)
+    plan.add_argument("--catalog", default=None)
+    plan.add_argument("--output", default=None, help="also write the plan as JSON here")
+    plan.add_argument(
+        "--registry-timeout", type=float, default=15.0, dest="registry_timeout"
+    )
+    plan.add_argument("--json", action="store_true")
+    plan.set_defaults(func=cmd_plan)
 
     return parser
 
