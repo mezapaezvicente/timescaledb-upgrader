@@ -11,6 +11,7 @@ Subcommands
 ``matrix lookup``     look up one transition
 ``drift``             classify databases against what their image can install
 ``plan``              emit the runbook for an upgrade; writes nothing to a cluster
+``apply``             execute a plan; the only subcommand that writes
 
 Exit codes for ``matrix lookup`` are meant to be scripted against:
 0 a verified verdict, 3 an entry with no established verdict, 4 no entry at all,
@@ -19,6 +20,9 @@ Exit codes for ``matrix lookup`` are meant to be scripted against:
 ``plan`` exits 0 with a plan, 2 when refused outright, and 3 when refused only
 because the verdict is not established -- the refusal ``--verification-run``
 lifts.
+
+``apply`` exits 0 when every step ran, 2 when it refused (nothing written) or
+a step failed (the report says which, and what was already done).
 """
 
 from __future__ import annotations
@@ -29,6 +33,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
+from .apply import ApplyOptions, ApplyRefused, apply_plan, render_report as render_apply
 from .contents import (
     ContentsError,
     ImageContents,
@@ -512,6 +517,50 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_apply(args: argparse.Namespace) -> int:
+    """Execute a plan file against the cluster in the current context."""
+    try:
+        plan = json.loads(Path(args.plan).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print("error: cannot read plan {0}: {1}".format(args.plan, exc), file=sys.stderr)
+        return EXIT_ERROR
+
+    opts = ApplyOptions(
+        context=args.context,
+        namespace=args.namespace,
+        selector=args.selector,
+        container=args.container,
+        statefulset=args.statefulset,
+        databases=tuple(args.database),
+        acknowledge_verification=args.acknowledge_verification_run,
+        matrix_path=args.matrix,
+        timeout=args.timeout,
+        rollout_timeout=args.rollout_timeout,
+    )
+    if plan.get("mode") == "verification" and args.acknowledge_verification_run:
+        print(
+            "VERIFICATION RUN: applying a plan built without an established "
+            "verdict. Only against a disposable database.",
+            file=sys.stderr,
+        )
+    try:
+        report = apply_plan(plan, opts)
+    except ApplyRefused as exc:
+        print("refused: nothing was written", file=sys.stderr)
+        for reason in exc.reasons:
+            print("  - {0}".format(reason), file=sys.stderr)
+        return EXIT_CHECK_FAILED
+
+    if args.report:
+        _write_json(Path(args.report), report)
+        print("wrote {0}".format(args.report), file=sys.stderr)
+    if args.json:
+        print(json.dumps(report, indent=2))
+    else:
+        print(render_apply(report))
+    return EXIT_OK if report["result"] == "pass" else EXIT_CHECK_FAILED
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tsupgrade",
@@ -709,6 +758,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     plan.add_argument("--json", action="store_true")
     plan.set_defaults(func=cmd_plan)
+
+    # --- apply ---
+    apply = sub.add_parser(
+        "apply", help="execute a plan; the only subcommand that writes"
+    )
+    apply.add_argument("plan", help="a plan written by `tsupgrade plan --output`")
+    apply.add_argument(
+        "--acknowledge-verification-run",
+        action="store_true",
+        dest="acknowledge_verification_run",
+        help="required to apply a verification-mode plan; disposable databases only",
+    )
+    apply.add_argument(
+        "--database",
+        action="append",
+        default=[],
+        metavar="DB",
+        help="act on this database only; repeat for several (default: every "
+        "database with timescaledb, which must all be at the source version)",
+    )
+    apply.add_argument("--context", default=None)
+    apply.add_argument("--namespace", default="timescale")
+    apply.add_argument("--selector", default="application=patroni")
+    apply.add_argument("--container", default="timescaledb")
+    apply.add_argument("--statefulset", default="tsdb")
+    apply.add_argument("--matrix", default=None)
+    apply.add_argument("--timeout", type=float, default=30.0)
+    apply.add_argument(
+        "--rollout-timeout", type=float, default=600.0, dest="rollout_timeout"
+    )
+    apply.add_argument("--report", default=None, help="also write the report as JSON here")
+    apply.add_argument("--json", action="store_true")
+    apply.set_defaults(func=cmd_apply)
 
     return parser
 

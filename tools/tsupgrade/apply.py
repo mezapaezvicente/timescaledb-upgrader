@@ -1,0 +1,650 @@
+"""Execute a plan. The only part of this tool that writes.
+
+``plan`` decides and ``apply`` acts. ``apply`` reads a plan document and does
+exactly what its steps say, in order, and nothing else:
+
+``preflight``         the read-only checks against the hop's image; any FAIL stops
+``ensure_image``      roll the StatefulSet onto the hop's image, if it is not there
+``update_extension``  ``ALTER EXTENSION timescaledb UPDATE TO '<v>'`` in each database
+``cycle_sessions``    terminate client sessions so none keeps the old library loaded
+``verify_version``    every database, on every instance, reports the new version
+
+It stops at the first step that fails and says which one, with the error
+verbatim. It never retries, rolls back or improvises: a half-finished upgrade
+is reported as exactly that, and the operator decides what happens next.
+
+Before the first step it refuses outright, having written nothing, when:
+
+* the plan is in ``verification`` mode and the caller did not acknowledge it
+  separately (``acknowledge_verification``) -- such a plan was built without an
+  established verdict and is for disposable databases only;
+* the cluster does not match ``plan.source``: a different PostgreSQL version,
+  or a database whose extension is not at the source version. A plan is only
+  valid for the state it was made from;
+* an ``update_extension`` step carries SQL other than the one statement its own
+  ``to`` field implies. The plan is a file and files get edited; ``apply``
+  executes upgrades, not whatever SQL a document contains.
+
+Preflight stays read-only and its module is untouched. The writes live here:
+``kubectl set image``, ``kubectl delete pod`` (the StatefulSet is ``OnDelete``,
+so a pod picks up a new image only when deleted), the ``ALTER EXTENSION`` and
+``pg_terminate_backend``.
+
+Pod order on an image rollout: replicas first, the primary last. Patroni
+releases the leader key when its pod is stopped, so with replicas the primary's
+deletion is a fast failover rather than an outage; with one instance it is a
+restart. Either way the rollout waits for a primary to be back before going on.
+"""
+
+from __future__ import annotations
+
+import json
+import re
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+from .plan import PLAN_FORMAT, VERIFICATION
+from .preflight import (
+    FAIL,
+    Instance,
+    Kube,
+    PreflightError,
+    PreflightOptions,
+    discover_instances,
+    run_preflight,
+)
+from .versions import InvalidVersion, parse_version
+
+__all__ = [
+    "APPLY_FORMAT",
+    "ApplyOptions",
+    "ApplyRefused",
+    "apply_plan",
+    "render_report",
+]
+
+APPLY_FORMAT = 1
+
+DONE = "done"
+SKIPPED = "skipped"
+FAILED = "failed"
+
+_UPDATE_SQL = "ALTER EXTENSION timescaledb UPDATE TO '{0}';"
+_EXACT_VERSION = re.compile(r"^[0-9]+(\.[0-9]+)*$")
+
+
+class ApplyRefused(Exception):
+    """Nothing was written: the plan, the options or the cluster disqualify it."""
+
+    def __init__(self, reasons: Sequence[str]) -> None:
+        self.reasons = list(reasons)
+        super().__init__("; ".join(self.reasons))
+
+
+@dataclass
+class ApplyOptions:
+    context: Optional[str] = None
+    namespace: str = "timescale"
+    selector: str = "application=patroni"
+    container: str = "timescaledb"
+    statefulset: str = "tsdb"
+    psql_user: str = "postgres"
+    admin_db: str = "postgres"
+    # Empty: every database with timescaledb installed, which is what a real
+    # upgrade must cover. Naming databases scopes the source check, the update
+    # and the verification to them; the image rollout still affects them all.
+    databases: Tuple[str, ...] = ()
+    acknowledge_verification: bool = False
+    matrix_path: Optional[str] = None
+    timeout: float = 30.0
+    rollout_timeout: float = 600.0
+    registry_timeout: float = 15.0
+    poll_interval: float = 2.0
+
+
+@dataclass
+class StepResult:
+    hop: int
+    action: str
+    status: str
+    summary: str
+    output: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "hop": self.hop,
+            "action": self.action,
+            "status": self.status,
+            "summary": self.summary,
+            "output": list(self.output),
+        }
+
+
+class _StepFailed(Exception):
+    def __init__(self, summary: str, output: Sequence[str] = ()) -> None:
+        self.summary = summary
+        self.output = list(output)
+        super().__init__(summary)
+
+
+def _now() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _literal(text: str) -> str:
+    return "'" + text.replace("'", "''") + "'"
+
+
+# ---------------------------------------------------------------------------
+# Checks made before anything is written
+# ---------------------------------------------------------------------------
+
+
+def check_plan(plan: Any, opts: ApplyOptions) -> List[str]:
+    """Reasons the plan document itself cannot be applied."""
+    if not isinstance(plan, dict):
+        return ["the plan is not a JSON object"]
+    reasons: List[str] = []
+    if plan.get("plan_format") != PLAN_FORMAT:
+        reasons.append(
+            "plan_format {0!r} is not {1}; re-run `tsupgrade plan`".format(
+                plan.get("plan_format"), PLAN_FORMAT
+            )
+        )
+    if plan.get("mode") == VERIFICATION and not opts.acknowledge_verification:
+        reasons.append(
+            "this is a verification-run plan, built without an established "
+            "verdict; applying it needs --acknowledge-verification-run, and only "
+            "against a disposable database"
+        )
+    source = plan.get("source") or {}
+    if not source.get("pg") or not source.get("ts"):
+        reasons.append("plan.source needs pg and ts")
+    steps = plan.get("steps")
+    if not isinstance(steps, list):
+        return reasons + ["plan.steps is not a list"]
+    for i, step in enumerate(steps):
+        if not isinstance(step, dict):
+            reasons.append("steps[{0}] is not an object".format(i))
+            continue
+        action = step.get("action")
+        if action not in _ACTIONS:
+            reasons.append("steps[{0}]: unknown action {1!r}".format(i, action))
+        elif action == "update_extension":
+            to = str(step.get("to") or "")
+            if not _EXACT_VERSION.match(to):
+                reasons.append("steps[{0}]: 'to' is not a version: {1!r}".format(i, to))
+            elif step.get("sql") != _UPDATE_SQL.format(to):
+                reasons.append(
+                    "steps[{0}]: sql is not the one statement its 'to' implies "
+                    "({1})".format(i, _UPDATE_SQL.format(to))
+                )
+        elif action in ("preflight", "ensure_image") and not step.get("image"):
+            reasons.append("steps[{0}]: {1} needs an image".format(i, action))
+        elif action == "verify_version" and not step.get("expect"):
+            reasons.append("steps[{0}]: verify_version needs expect".format(i))
+    return reasons
+
+
+def _same_pg(planned: str, running: Optional[str]) -> bool:
+    """Major always; the minor too when the plan names one."""
+    if not running:
+        return False
+    try:
+        want, have = parse_version(planned), parse_version(running.split()[0])
+    except InvalidVersion:
+        return False
+    return have[: len(want)] == want
+
+
+def check_source(
+    plan: Dict[str, Any], instances: Sequence[Instance], opts: ApplyOptions
+) -> Tuple[List[str], List[str]]:
+    """``(reasons, databases)``: does the cluster match ``plan.source``?
+
+    Returns the databases the run will act on. Every one must be at exactly
+    the source version, on a primary running the source PostgreSQL.
+    """
+    source_pg, source_ts = str(plan["source"]["pg"]), str(plan["source"]["ts"])
+    primaries = [i for i in instances if i.role == "primary" and not i.error]
+    if len(primaries) != 1:
+        return ["expected exactly one reachable primary, found {0}".format(len(primaries))], []
+    primary = primaries[0]
+
+    reasons: List[str] = []
+    if not _same_pg(source_pg, primary.server_version):
+        reasons.append(
+            "the plan is for PostgreSQL {0}, the primary runs {1}".format(
+                source_pg, primary.server_version
+            )
+        )
+
+    installed = {d: v for d, v in primary.extensions.items() if v}
+    if opts.databases:
+        databases = list(opts.databases)
+        for db in databases:
+            if db not in primary.extensions:
+                reasons.append("database {0} does not exist".format(db))
+            elif installed.get(db) != source_ts:
+                reasons.append(
+                    "database {0} has timescaledb {1}, the plan starts from {2}".format(
+                        db, installed.get(db) or "not installed", source_ts
+                    )
+                )
+    else:
+        databases = sorted(installed)
+        if not databases:
+            reasons.append("no database has timescaledb installed")
+        others = {d: v for d, v in installed.items() if v != source_ts}
+        if others:
+            reasons.append(
+                "databases not at the source version {0}: {1}; every database "
+                "has to be upgraded, so either bring them to {0} or scope the "
+                "run with --database".format(
+                    source_ts, ", ".join("{0}={1}".format(d, v) for d, v in sorted(others.items()))
+                )
+            )
+    return reasons, databases
+
+
+# ---------------------------------------------------------------------------
+# The cluster, for writing
+# ---------------------------------------------------------------------------
+
+
+class _Cluster:
+    def __init__(
+        self,
+        kube: Kube,
+        opts: ApplyOptions,
+        sleep: Callable[[float], None],
+        clock: Callable[[], float],
+    ) -> None:
+        self.kube = kube
+        self.opts = opts
+        self.sleep = sleep
+        self.clock = clock
+
+    def pods(self) -> List[Dict[str, Any]]:
+        return self.kube.json(["get", "pods", "-l", self.opts.selector]).get("items", [])
+
+    def _container(self, pod: Dict[str, Any], status: bool = False) -> Dict[str, Any]:
+        key = "containerStatuses" if status else "containers"
+        section = pod.get("status" if status else "spec", {}).get(key) or []
+        for c in section:
+            if c.get("name") == self.opts.container:
+                return c
+        return {}
+
+    def pod_image(self, pod: Dict[str, Any]) -> Optional[str]:
+        return self._container(pod).get("image")
+
+    def pod_image_id(self, pod: Dict[str, Any]) -> Optional[str]:
+        return self._container(pod, status=True).get("imageID")
+
+    @staticmethod
+    def role(pod: Dict[str, Any]) -> str:
+        return (pod.get("metadata", {}).get("labels") or {}).get("role", "unknown")
+
+    @staticmethod
+    def ready(pod: Dict[str, Any]) -> bool:
+        for cond in pod.get("status", {}).get("conditions") or []:
+            if cond.get("type") == "Ready":
+                return cond.get("status") == "True"
+        return False
+
+    def primary(self) -> Optional[str]:
+        for pod in self.pods():
+            if self.role(pod) == "primary" and self.ready(pod):
+                return pod["metadata"]["name"]
+        return None
+
+    def psql(self, pod: str, database: str, sql: str) -> Tuple[int, str, str]:
+        """One statement in a fresh session, writes allowed, no .psqlrc."""
+        return self.kube.exec(
+            pod,
+            self.opts.container,
+            ["psql", "-U", self.opts.psql_user, "-d", database, "-X", "-qtAF", "|",
+             "-v", "ON_ERROR_STOP=1", "-c", sql],
+        )
+
+    def wait_for(self, what: str, test: Callable[[], bool]) -> None:
+        deadline = self.clock() + self.opts.rollout_timeout
+        while True:
+            try:
+                if test():
+                    return
+            except PreflightError:
+                pass  # the API or a pod may be briefly unavailable mid-rollout
+            if self.clock() >= deadline:
+                raise _StepFailed(
+                    "timed out after {0:.0f}s waiting for {1}".format(
+                        self.opts.rollout_timeout, what
+                    )
+                )
+            self.sleep(self.opts.poll_interval)
+
+
+# ---------------------------------------------------------------------------
+# Steps
+# ---------------------------------------------------------------------------
+
+
+def _step_preflight(
+    step: Dict[str, Any],
+    opts: ApplyOptions,
+    preflight: Callable[[PreflightOptions], Sequence[Any]],
+) -> Tuple[str, List[str]]:
+    results = preflight(
+        PreflightOptions(
+            target_image=step["image"],
+            context=opts.context,
+            namespace=opts.namespace,
+            selector=opts.selector,
+            container=opts.container,
+            psql_user=opts.psql_user,
+            admin_db=opts.admin_db,
+            target_pg=step.get("target_pg"),
+            target_ts=step.get("target_ts"),
+            matrix_path=opts.matrix_path,
+            timeout=opts.timeout,
+            registry_timeout=opts.registry_timeout,
+        )
+    )
+    lines = ["{0}: {1} - {2}".format(r.name, r.status, r.summary) for r in results]
+    failed = [r for r in results if r.status == FAIL]
+    if failed:
+        detail = []
+        for r in failed:
+            detail.append("{0}: {1}".format(r.name, r.summary))
+            detail.extend("  " + d for d in r.details)
+        raise _StepFailed(
+            "preflight failed: {0}".format(", ".join(r.name for r in failed)), detail
+        )
+    return "{0} checks, none failed".format(len(results)), lines
+
+
+def _step_ensure_image(step: Dict[str, Any], cluster: _Cluster) -> Tuple[str, List[str]]:
+    image = step["image"]
+    opts = cluster.opts
+    sts = cluster.kube.json(["get", "statefulset", opts.statefulset])
+    containers = sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers") or []
+    template_image = next(
+        (c.get("image") for c in containers if c.get("name") == opts.container), None
+    )
+    pods = cluster.pods()
+    stale = [p for p in pods if cluster.pod_image(p) != image]
+    if template_image == image and not stale:
+        return "already running {0}".format(image), []
+
+    output: List[str] = []
+    try:
+        _roll(cluster, image, template_image, stale, output)
+    except (_StepFailed, PreflightError) as exc:
+        # Keep what was already done: a half-finished rollout is the state
+        # the operator has to act on.
+        summary = exc.summary if isinstance(exc, _StepFailed) else str(exc)
+        extra = exc.output if isinstance(exc, _StepFailed) else []
+        raise _StepFailed(summary, output + extra) from exc
+    return "rolled {0} pod(s) onto {1}".format(len(stale), image), output
+
+
+def _roll(
+    cluster: _Cluster,
+    image: str,
+    template_image: Optional[str],
+    stale: List[Dict[str, Any]],
+    output: List[str],
+) -> None:
+    opts = cluster.opts
+    if template_image != image:
+        rc, out, err = cluster.kube.run(
+            ["set", "image", "statefulset/" + opts.statefulset,
+             "{0}={1}".format(opts.container, image)]
+        )
+        if rc != 0:
+            raise _StepFailed("kubectl set image failed", [err or out])
+        output.append("statefulset/{0}: {1} -> {2}".format(opts.statefulset, template_image, image))
+
+    # Replicas first, the primary last.
+    stale.sort(key=lambda p: (cluster.role(p) == "primary", p["metadata"]["name"]))
+    for pod in stale:
+        name = pod["metadata"]["name"]
+        old_uid = pod["metadata"].get("uid")
+        # Not --wait: Patroni gets the pod's whole grace period to shut down,
+        # which outlasts a single kubectl call's timeout. The poll below waits
+        # instead, under the rollout timeout.
+        rc, out, err = cluster.kube.run(["delete", "pod", name, "--wait=false"])
+        if rc != 0:
+            raise _StepFailed("kubectl delete pod {0} failed".format(name), [err or out])
+        output.append("{0} deleted".format(name))
+
+        def recreated() -> bool:
+            rc, out, _ = cluster.kube.run(["get", "pod", name, "-o", "json"])
+            if rc != 0:
+                return False
+            fresh = json.loads(out)
+            return (
+                fresh["metadata"].get("uid") != old_uid
+                and cluster.pod_image(fresh) == image
+                and cluster.ready(fresh)
+            )
+
+        cluster.wait_for("{0} to come back on {1}".format(name, image), recreated)
+        output.append("{0} recreated on {1}".format(name, image))
+
+    cluster.wait_for("a ready primary", lambda: cluster.primary() is not None)
+
+    def accepting() -> bool:
+        primary = cluster.primary()
+        return primary is not None and cluster.psql(primary, opts.admin_db, "SELECT 1")[0] == 0
+
+    cluster.wait_for("the primary to accept connections", accepting)
+    output.append("primary is {0}".format(cluster.primary()))
+
+
+def _step_update(
+    step: Dict[str, Any], cluster: _Cluster, databases: Sequence[str]
+) -> Tuple[str, List[str]]:
+    primary = cluster.primary()
+    if primary is None:
+        raise _StepFailed("no ready primary to run ALTER EXTENSION on")
+    output: List[str] = []
+    for db in databases:
+        rc, out, err = cluster.psql(primary, db, step["sql"])
+        if rc != 0:
+            done = ", ".join(output) or "none"
+            raise _StepFailed(
+                "ALTER EXTENSION failed in database {0} (already updated: {1})".format(db, done),
+                [line for line in (err or out).splitlines() if line.strip()],
+            )
+        output.append(db)
+    return "updated {0} database(s) to {1}".format(len(databases), step["to"]), [
+        "{0}: {1}".format(db, step["sql"]) for db in output
+    ]
+
+
+def _step_cycle(cluster: _Cluster, databases: Sequence[str]) -> Tuple[str, List[str]]:
+    names = "ARRAY[{0}]::name[]".format(", ".join(_literal(d) for d in databases))
+    sql = (
+        "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity "
+        "WHERE datname = ANY({0}) AND pid <> pg_backend_pid() "
+        "AND backend_type = 'client backend'".format(names)
+    )
+    output = []
+    for pod in cluster.pods():
+        name = pod["metadata"]["name"]
+        rc, out, err = cluster.psql(name, cluster.opts.admin_db, sql)
+        if rc != 0:
+            raise _StepFailed("cannot terminate sessions on {0}".format(name), [err or out])
+        output.append("{0}: {1} session(s) terminated".format(name, out.strip() or "0"))
+    return "sessions cycled on {0} instance(s)".format(len(output)), output
+
+
+def _step_verify(
+    step: Dict[str, Any], cluster: _Cluster, databases: Sequence[str]
+) -> Tuple[str, List[str]]:
+    expect = step["expect"]
+    sql = "SELECT coalesce((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '')"
+    pods = [p["metadata"]["name"] for p in cluster.pods()]
+    seen: Dict[Tuple[str, str], str] = {}
+
+    def all_match() -> bool:
+        for pod in pods:
+            for db in databases:
+                if seen.get((pod, db)) == expect:
+                    continue
+                rc, out, err = cluster.psql(pod, db, sql)
+                seen[(pod, db)] = out.strip() if rc == 0 else "error: " + (err or out)
+        return all(v == expect for v in seen.values())
+
+    # Replicas report the new version only once they have replayed it.
+    try:
+        cluster.wait_for("every instance to report {0}".format(expect), all_match)
+    except _StepFailed as exc:
+        wrong = ["{0}/{1}: {2}".format(p, d, v) for (p, d), v in sorted(seen.items()) if v != expect]
+        raise _StepFailed("not every database reports {0}".format(expect), wrong) from exc
+    return "{0} database(s) x {1} instance(s) report {2}".format(len(databases), len(pods), expect), [
+        "{0}/{1}: {2}".format(p, d, v) for (p, d), v in sorted(seen.items())
+    ]
+
+
+_ACTIONS = ("preflight", "ensure_image", "update_extension", "cycle_sessions", "verify_version")
+
+
+# ---------------------------------------------------------------------------
+# The run
+# ---------------------------------------------------------------------------
+
+
+def _final_state(cluster: _Cluster, databases: Sequence[str]) -> Dict[str, Any]:
+    """What the cluster looks like afterwards -- the facts evidence needs."""
+    state: Dict[str, Any] = {"instances": [], "databases": {}}
+    try:
+        pods = cluster.pods()
+    except PreflightError as exc:
+        state["error"] = str(exc)
+        return state
+    for pod in pods:
+        name = pod["metadata"]["name"]
+        rc, out, _ = cluster.psql(name, cluster.opts.admin_db, "SHOW server_version")
+        state["instances"].append({
+            "pod": name,
+            "role": cluster.role(pod),
+            "image": cluster.pod_image(pod),
+            "image_id": cluster.pod_image_id(pod),
+            "server_version": out.strip().split()[0] if rc == 0 and out.strip() else None,
+        })
+    primary = cluster.primary()
+    for db in databases:
+        if primary is None:
+            state["databases"][db] = None
+            continue
+        rc, out, _ = cluster.psql(
+            primary, db,
+            "SELECT coalesce((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '')",
+        )
+        state["databases"][db] = out.strip() if rc == 0 else None
+    return state
+
+
+def apply_plan(
+    plan: Dict[str, Any],
+    opts: ApplyOptions,
+    kube: Optional[Kube] = None,
+    preflight: Optional[Callable[[PreflightOptions], Sequence[Any]]] = None,
+    sleep: Callable[[float], None] = time.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> Dict[str, Any]:
+    """Run the plan; return the report. Raises :class:`ApplyRefused` before
+    any write when the plan or the cluster disqualifies it."""
+    reasons = check_plan(plan, opts)
+    if reasons:
+        raise ApplyRefused(reasons)
+
+    kube = kube or Kube(opts.context, opts.namespace, opts.timeout)
+    instances, found = discover_instances(
+        kube,
+        PreflightOptions(
+            target_image=plan.get("target", {}).get("image", ""),
+            context=opts.context, namespace=opts.namespace, selector=opts.selector,
+            container=opts.container, psql_user=opts.psql_user, admin_db=opts.admin_db,
+            timeout=opts.timeout,
+        ),
+    )
+    if found.status == FAIL:
+        raise ApplyRefused(["cannot read the cluster: {0}".format(found.summary)] + found.details)
+    reasons, databases = check_source(plan, instances, opts)
+    if reasons:
+        raise ApplyRefused(reasons)
+
+    cluster = _Cluster(kube, opts, sleep, clock)
+    preflight = preflight or run_preflight
+    report: Dict[str, Any] = {
+        "apply_format": APPLY_FORMAT,
+        "mode": plan.get("mode"),
+        "source": plan.get("source"),
+        "target": plan.get("target"),
+        "databases": list(databases),
+        "started_at": _now(),
+        "steps": [],
+    }
+    failure: Optional[Dict[str, Any]] = None
+
+    for step in plan["steps"]:
+        action, hop = step["action"], step.get("hop", 0)
+        try:
+            if action == "preflight":
+                summary, output = _step_preflight(step, opts, preflight)
+            elif action == "ensure_image":
+                summary, output = _step_ensure_image(step, cluster)
+            elif action == "update_extension":
+                summary, output = _step_update(step, cluster, databases)
+            elif action == "cycle_sessions":
+                summary, output = _step_cycle(cluster, databases)
+            else:
+                summary, output = _step_verify(step, cluster, databases)
+        except (_StepFailed, PreflightError) as exc:
+            out = exc.output if isinstance(exc, _StepFailed) else []
+            summary = exc.summary if isinstance(exc, _StepFailed) else str(exc)
+            report["steps"].append(StepResult(hop, action, FAILED, summary, out).to_dict())
+            failure = {"hop": hop, "action": action, "summary": summary, "error": out}
+            break
+        status = SKIPPED if summary.startswith("already running") else DONE
+        report["steps"].append(StepResult(hop, action, status, summary, output).to_dict())
+
+    report["finished_at"] = _now()
+    report["result"] = "fail" if failure else "pass"
+    if failure:
+        report["failure"] = failure
+    report["final"] = _final_state(cluster, databases)
+    return report
+
+
+def render_report(report: Dict[str, Any]) -> str:
+    lines: List[str] = []
+    if report.get("mode") == VERIFICATION:
+        lines.append("VERIFICATION RUN -- applied without an established verdict")
+    src, tgt = report.get("source") or {}, report.get("target") or {}
+    lines.append("source    : pg{0} / ts{1}".format(src.get("pg"), src.get("ts")))
+    lines.append("target    : pg{0} / ts{1}  ({2})".format(tgt.get("pg"), tgt.get("ts"), tgt.get("image")))
+    lines.append("databases : {0}".format(", ".join(report.get("databases") or []) or "none"))
+    lines.append("")
+    mark = {DONE: " ok ", SKIPPED: "skip", FAILED: "FAIL"}
+    for step in report.get("steps", []):
+        lines.append("[{0}] hop {1} {2}: {3}".format(
+            mark.get(step["status"], "????"), step["hop"], step["action"], step["summary"]))
+        if step["status"] == FAILED:
+            lines.extend("         " + line for line in step["output"])
+    lines.append("")
+    final = report.get("final") or {}
+    for inst in final.get("instances", []):
+        lines.append("{0} [{1}] PostgreSQL {2} on {3}".format(
+            inst.get("pod"), inst.get("role"), inst.get("server_version"), inst.get("image")))
+    for db, version in sorted((final.get("databases") or {}).items()):
+        lines.append("{0}: timescaledb {1}".format(db, version))
+    lines.append("")
+    lines.append("result    : {0}".format(report.get("result", "?").upper()))
+    return "\n".join(lines)

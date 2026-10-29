@@ -320,6 +320,37 @@ image.
 
 ---
 
+## Plan and apply
+
+`plan` decides and writes nothing; `apply` executes a plan and is the only
+command that writes. They are separate so a plan can be read, diffed and
+approved before anything touches a cluster.
+
+```bash
+bash scripts/tsupgrade.sh plan --from-pg 15.13 --from-ts 2.12.2   --target-image timescale/timescaledb-ha:pg15.18-ts2.28.3   --via timescale/timescaledb-ha:pg15.13-ts2.20.3 --output plan.json
+bash scripts/tsupgrade.sh apply plan.json --report report.json
+```
+
+A plan is a list of hops: one image the cluster must run, then one `ALTER
+EXTENSION timescaledb UPDATE TO '<v>'`. Each hop runs preflight against its
+image (any FAIL stops), rolls the StatefulSet onto it if needed (replicas
+first, primary last), updates every database in a fresh `psql -X` session,
+cycles client sessions so none keeps the old library loaded, and confirms
+every database on every instance reports the new version.
+
+`apply` refuses, having written nothing, when the cluster is not in the state
+the plan was made from, when an update step carries SQL other than the one
+statement its version implies, and when the plan was built with
+`--verification-run` unless `--acknowledge-verification-run` is also given.
+It stops at the first failing step, keeps the error verbatim, and reports what
+it had already done. It never retries or rolls back on its own.
+
+`--database` scopes a run to named databases; without it every database with
+TimescaleDB must be at the source version, because a real upgrade has to
+cover them all.
+
+---
+
 ## Layout
 
 ```
@@ -334,6 +365,9 @@ data/
 docs/matrix.md     generated: the published version table
 tools/tsupgrade/   the CLI (`python -m tsupgrade`), standard library only
   preflight.py     the read-only pre-upgrade checks
+  plan.py          builds the runbook; writes nothing
+  apply.py         executes a plan; the only module that writes
+verify/            the seeded fixture and verification-run evidence
 tests/             unit tests over the loader, lookup and shipped data
 ```
 
@@ -344,7 +378,10 @@ tests/             unit tests over the loader, lookup and shipped data
 - [x] **Phase 1** — local test harness: `make up`, `make down`, seeding, smoke test
 - [x] **Phase 2** — version matrix as data, with a loader, lookup and published table
 - [x] **Phase 3** — read-only preflight checks against a live instance
-- [ ] Upgrade and rollback execution
+- [x] **Phase 4** — drift classifier, update-script gates, measured image contents
+- [x] **Phase 5** — `plan` and `apply` (extension updates and image rollouts)
+- [ ] Verification harness and a matrix established by running every row
+- [ ] Rollback execution
 - [ ] Maintenance-window estimation
 
 ---

@@ -28,5 +28,10 @@ PY="$(find_python)" || {
   exit 1
 }
 
-export PYTHONPATH="${REPO_ROOT}/tools${PYTHONPATH:+:${PYTHONPATH}}"
+TOOLS="${REPO_ROOT}/tools"
+# Git Bash normally rewrites PYTHONPATH for a Windows Python, but not under
+# MSYS_NO_PATHCONV=1 (which docker/kubectl exec calls need), so do it here.
+SEP=":"
+if command -v cygpath >/dev/null 2>&1; then TOOLS="$(cygpath -w "$TOOLS")"; SEP=";"; fi
+export PYTHONPATH="${TOOLS}${PYTHONPATH:+${SEP}${PYTHONPATH}}"
 exec "$PY" -m tsupgrade "$@"
