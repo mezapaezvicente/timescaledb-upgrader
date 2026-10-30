@@ -27,6 +27,19 @@ Options: `--mode empty|seeded|both`, `--cluster` (default `tsdb-verify`),
 `--resume` (skip rows and modes that already have a record from a clean tree),
 `--history`, `--control` (below).
 
+**Major changes.** `--to-pg 16` runs the rows that change to pg16 instead of
+the same-PG ones. The source is staged on an image of its own major, and
+`plan` is offered every measured image carrying a major in between, which is
+where it finds the `pg_upgrade` images. Their records name the target major
+(`2.11-to-pg16-2.30.seeded.json`). `--link` runs them with `pg_upgrade --link`
+(records `link-empty` and `link-seeded`). `apply` offers `--link`, so a
+verified major change needs those records as well as the copying ones.
+
+```sh
+python verify/harness.py --pg 12 --from 2.11 --to-pg 16            # copy
+python verify/harness.py --pg 12 --from 2.11 --to-pg 16 --link     # pg_upgrade --link
+```
+
 **History.** `--history 2.13.1` stages the source the way a long-lived
 database reaches it: created at 2.13.1 (and seeded there), then updated to the
 source with one `ALTER EXTENSION`, in a session of its own. Everything after

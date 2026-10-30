@@ -367,6 +367,32 @@ it had already done. It never retries or rolls back on its own.
 TimescaleDB must be at the source version, because a real upgrade has to
 cover them all.
 
+### Changing the PostgreSQL major
+
+A target on a newer major is planned as a route of `pg_upgrade` hops between
+same-major segments, from the measured contents of the images offered with
+`--via` (an `-all` tag carries several majors' binaries, but not every major:
+none pairs pg12 with anything past pg13). Each `pg_upgrade` runs inside an
+image carrying both majors, at a TimescaleDB release both sides ship, so the
+old major is updated to that release first. The route takes the fewest
+`pg_upgrade` runs, and the same-major segments keep their stops: pg12 2.11 to
+pg16 runs 12 → 13, 13 → 15 and 15 → 16, and stops at 2.27.2 on pg15 on the way.
+
+```bash
+bash scripts/tsupgrade.sh plan --from-pg 12.22 --from-ts 2.11.2   --target-image timescale/timescaledb-ha:pg16.15-ts2.30.1   --via timescale/timescaledb-ha:pg13.12-ts2.11.2-all --via timescale/timescaledb-ha:pg13.22-ts2.15.3   --via timescale/timescaledb-ha:pg15.13-ts2.19.3-all --via timescale/timescaledb-ha:pg15.18-ts2.28.3   --via timescale/timescaledb-ha:pg16.15-ts2.30.1-all --output plan.json
+```
+
+Under Patroni, `apply` moves the leader to ordinal 0, scales the StatefulSet
+to 0, runs `pg_upgrade` in a pod on ordinal 0's disk (matching the old
+cluster's data checksums), deletes the replicas' disks and Patroni's DCS
+state (`pg_upgrade` gives the cluster a new system identifier), and restarts
+everything on the new major's image; Patroni re-clones the replicas. The plan
+ends with `vacuumdb --all --analyze-in-stages`. By default `pg_upgrade`
+copies, and the old data directory stays beside the new one to go back to;
+`plan --link` hard-links instead, which is fast and needs no space but leaves
+the old directory unusable. A failure before anything is deleted leaves the
+cluster stopped with its data intact, and says how to start it again.
+
 ---
 
 ## Layout
@@ -384,6 +410,7 @@ docs/matrix.md     generated: the published version table
 tools/tsupgrade/   the CLI (`python -m tsupgrade`), standard library only
   preflight.py     the read-only pre-upgrade checks
   plan.py          builds the runbook; writes nothing
+  majors.py        routes across PostgreSQL majors (pg_upgrade hops)
   apply.py         executes a plan; the only module that writes
 verify/            the seeded fixture and verification-run evidence
 tests/             unit tests over the loader, lookup and shipped data
