@@ -1,0 +1,77 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "15",
+    "source_ts": "2.15",
+    "target_pg": "15",
+    "target_ts": "2.28"
+  },
+  "mode": "history-seeded",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+      "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+    }
+  ],
+  "pg_version": "15.18",
+  "versions": {
+    "source": "2.15.3",
+    "target": "2.28.3",
+    "reached": "2.15.3"
+  },
+  "upgrader": {
+    "commit": "45057ddbd4561b28414afb4f3edf5cefccc623f3",
+    "dirty": false
+  },
+  "result": "fail",
+  "log": "verify/out/pg15/2.15-to-2.28.direct-history-seeded.log",
+  "recorded_at": "2026-10-30T13:49:51Z",
+  "failure": {
+    "explanation": "the direct update 2.15.3 -> 2.28.3 failed",
+    "error": "DETAIL:  The job history will only keep the last 1000 successes and failures and run once each day.\nERROR:  cannot drop table _timescaledb_internal.bgw_job_stat_history because other objects depend on it\nDETAIL:  view timescaledb_information.job_errors depends on table _timescaledb_internal.bgw_job_stat_history\nHINT:  Use DROP ... CASCADE to drop the dependent objects too.\nCONTEXT:  SQL statement \"DROP TABLE _timescaledb_internal.bgw_job_stat_history\""
+  },
+  "stage": "apply",
+  "started_at": "2026-10-30T13:49:43Z",
+  "finished_at": "2026-10-30T13:49:51Z",
+  "source_pg_version": "15.18",
+  "replicas": 2,
+  "pods": null,
+  "baseline": "seeded|2.13.1|50400|2521572.95|840|3|2",
+  "checks": {
+    "version": {
+      "status": "fail",
+      "detail": "extversion 2.15.3, expected 2.28.3"
+    },
+    "rows": {
+      "status": "pass",
+      "detail": "50400 rows, sum 2521572.95; seeded 50400 rows, sum 2521572.95 at 2.13.1"
+    },
+    "jobs": {
+      "status": "pass",
+      "detail": "2 jobs registered, seeded 2; fx_job_ok 1 runs, fx_job_fail 1 failures"
+    },
+    "still_compressed": {
+      "status": "pass",
+      "detail": "3 compressed chunks; seeded 3"
+    },
+    "cagg_survived": {
+      "status": "pass",
+      "detail": "840 materialized rows; seeded 840"
+    },
+    "cagg_matches": {
+      "status": "pass",
+      "detail": "0 differing buckets; refresh ran"
+    },
+    "write_and_refresh": {
+      "status": "pass",
+      "detail": "insert ok, refresh ok; 1 new buckets, 60 rows in them"
+    },
+    "decompress": {
+      "status": "pass",
+      "detail": "3 chunks decompressed; 50400 rows, sum 2521572.95 before the new writes"
+    }
+  },
+  "apply_exit": 1,
+  "history": "2.13.1",
+  "control": "direct"
+}
