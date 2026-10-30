@@ -28,15 +28,15 @@
     "reached": "2.11.2"
   },
   "upgrader": {
-    "commit": "161a28e7b7c1f9aa3771349765711ff707d9e01b",
+    "commit": "bee1477219ce6c1f49e72a37bcc37e77aa64e10a",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg11/2.1-to-pg12-2.11.link-empty.log",
-  "recorded_at": "2026-10-30T16:42:35Z",
+  "recorded_at": "2026-10-30T18:21:22Z",
   "stage": "done",
-  "started_at": "2026-10-30T16:39:41Z",
-  "finished_at": "2026-10-30T16:42:35Z",
+  "started_at": "2026-10-30T18:18:29Z",
+  "finished_at": "2026-10-30T18:21:22Z",
   "source_pg_version": "11.11",
   "replicas": 2,
   "pods": [
