@@ -576,6 +576,9 @@ report() { echo "pg_upgrade $1 failed:"; tail -n 40 "$new"/pg_upgrade_output.d/*
 "$new_bin/pg_upgrade" -b "$old_bin" -B "$new_bin" -d "$data" -D "$new" -U postgres $LINK   || { report ""; exit 1; }
 mv "$data" "$keep"
 mv "$new" "$data"
+# Proof of the mode: with --link the new cluster's relation files are hard
+# links into the old directory; a copy has none.
+echo "relation files sharing an inode with $keep: $(find "$data/base" -type f -links +1 | wc -l)"
 echo "upgraded to PostgreSQL $TO; the old data directory is $keep"
 """
 
@@ -679,7 +682,8 @@ def _major_upgrade(step, cluster, kube, opts, output):
     if phase != "Succeeded":
         raise _StepFailed("pg_upgrade {0} -> {1} failed in {2}".format(old, new, image),
                           lines[-40:] + [stopped])
-    output.extend(lines[-12:])
+    # pg_upgrade's own word on copy or link sits mid-log, above the tail.
+    output.extend([l for l in lines[:-12] if "user relation files" in l] + lines[-12:])
     kube.run(["delete", "pod", pod, "--wait=false"])
 
     # 4. The replicas' copies and Patroni's stored state belong to the old cluster.

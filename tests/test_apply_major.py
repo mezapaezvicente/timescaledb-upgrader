@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from tsupgrade.apply import ApplyOptions, apply_plan, check_plan
+from tsupgrade.apply import _PG_UPGRADE_SCRIPT, ApplyOptions, apply_plan, check_plan
 from test_apply import FakeKube, _all_pass
 
 REPO = "timescale/timescaledb-ha:"
@@ -68,8 +68,12 @@ class MajorKube(FakeKube):
             self.writes.append("run {0} on {1}".format(args[1], args[args.index("--image") + 1]))
             return 0, "", ""
         if args[0] == "logs":
-            ok = self.upgrade_phase == "Succeeded"
-            return 0, ("upgraded to PostgreSQL 13" if ok else "pg_upgrade --check failed:\nlocale mismatch"), ""
+            if self.upgrade_phase != "Succeeded":
+                return 0, "pg_upgrade --check failed:\nlocale mismatch", ""
+            env = {e["name"]: e["value"] for e in self.spec_seen["spec"]["containers"][0]["env"]}
+            said = "Linking" if env["LINK"] else "Copying"
+            return 0, "\n".join(["{0} user relation files".format(said)] + ["ok"] * 20
+                                + ["upgraded to PostgreSQL 13"]), ""
         if args[:2] == ["delete", "pod"] and args[2].startswith("tsdb-pg-upgrade-"):
             return 0, "", ""
         if args[:2] == ["delete", "pvc"]:
@@ -147,6 +151,18 @@ def test_the_upgrade_pod_runs_on_ordinal_0s_disk_as_the_statefulsets_user():
     assert env == {"FROM": "12", "TO": "13", "PG_BIN_OLD": "/usr/lib/postgresql/12/bin",
                    "PG_BIN_NEW": "/usr/lib/postgresql/13/bin",
                    "DATA": "/home/postgres/pgdata/data", "LINK": "--link"}
+
+
+@pytest.mark.parametrize("link,said", [(False, "Copying"), (True, "Linking")])
+def test_pg_upgrades_word_on_copy_or_link_is_kept_from_mid_log(link, said):
+    report = _apply(_plan(link=link), MajorKube())
+    output = report["steps"][0]["output"]
+    assert "{0} user relation files".format(said) in output
+    assert "upgraded to PostgreSQL 13" in output
+
+
+def test_the_script_counts_hard_links_to_prove_the_mode():
+    assert "-links +1" in _PG_UPGRADE_SCRIPT
 
 
 def test_a_leader_elsewhere_is_switched_to_ordinal_0_before_anything_stops():
