@@ -261,3 +261,67 @@ def test_resume_skips_only_clean_valid_records(tmp_path):
     write_record(record_path(tmp_path, RUN.transition, "empty"), record(False))
     assert harness.recorded(RUN, "empty", tmp_path)
     assert not harness.recorded(RUN, "seeded", tmp_path)
+
+
+# --- history and controls ---------------------------------------------------
+
+LATE = harness.resolve(_row("15", "2.27", "2.28"), PG15)       # one image
+BRIDGED = harness.resolve(_row("15", "2.12", "2.28"), PG15)    # two images
+
+
+def test_history_keeps_the_row_and_names_its_records():
+    run = harness.with_history(LATE, "2.13.1", PG15)
+    assert isinstance(run, harness.Run)
+    assert (run.history, run.source, run.target) == ("2.13.1", "2.27.2", "2.28.3")
+    assert (run.mode("empty"), run.key("seeded")) == ("history-empty", "history-seeded")
+    assert (LATE.mode("seeded"), LATE.key("seeded")) == ("seeded", "seeded")
+
+
+@pytest.mark.parametrize("version,reason", [
+    ("2.13", "exact release"),          # a series pins nothing
+    ("2.27.2", "not below source"),     # no history at all
+    ("2.28.0", "not below source"),
+    ("2.12.1", "does not ship"),       # below the image's floor
+])
+def test_history_must_be_an_older_release_the_start_image_ships(version, reason):
+    assert reason in harness.with_history(LATE, version, PG15).reason
+
+
+def test_history_is_staged_on_the_start_image():
+    # The bridged row starts on pg15.13, which ships 2.9.0 but not 2.10.0.
+    assert isinstance(harness.with_history(BRIDGED, "2.9.0", PG15), harness.Run)
+    assert "does not ship 2.10.0" in harness.with_history(BRIDGED, "2.10.0", PG15).reason
+
+
+def test_a_direct_control_needs_a_history_and_one_image():
+    assert "only recorded with --history" in harness.as_control(LATE, "direct").reason
+    run = harness.as_control(harness.with_history(LATE, "2.13.1", PG15), "direct")
+    assert run.control == "direct"
+    assert run.key("seeded") == "direct-history-seeded"
+    assert run.mode("seeded") == "history-seeded"
+    bridged = harness.as_control(harness.with_history(BRIDGED, "2.9.0", PG15), "direct")
+    assert "needs one image" in bridged.reason
+
+
+def test_a_failed_direct_update_is_judged_as_a_failure_in_the_update():
+    run = harness.as_control(harness.with_history(LATE, "2.13.1", PG15), "direct")
+    passed, _, error, stage = harness.judge(
+        run, "empty", 3, "ERROR:  cannot drop table _timescaledb_internal.bgw_job_stat_history",
+        None, "2.27.2", None)
+    assert (passed, stage) == (False, "apply")
+    assert "bgw_job_stat_history" in error
+
+
+def test_resume_finds_history_and_control_records_by_their_key(tmp_path):
+    from tsupgrade.evidence import build_record, record_path, write_record
+
+    run = harness.as_control(harness.with_history(LATE, "2.13.1", PG15), "direct")
+    doc = build_record(
+        transition=run.transition, mode="history-empty", history="2.13.1", control="direct",
+        images=[{"reference": run.target_image, "digest": "sha256:bb"}],
+        pg_version="15.18", source=run.source, target=run.target, reached=run.source,
+        passed=False, explanation="the direct update failed", error="ERROR: x",
+        log="verify/out/x.log", upgrader={"commit": "abc", "dirty": False})
+    write_record(record_path(tmp_path, run.transition, "direct-history-empty"), doc)
+    assert harness.recorded(run, "empty", tmp_path)
+    assert not harness.recorded(harness.with_history(LATE, "2.13.1", PG15), "empty", tmp_path)

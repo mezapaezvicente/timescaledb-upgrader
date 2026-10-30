@@ -3,6 +3,7 @@
 
     python verify/harness.py --list [--pg 15]
     python verify/harness.py --pg 15 [--from 2.13] [--mode both] [--cluster tsdb-verify]
+    python verify/harness.py --pg 15 --from 2.20 --history 2.13.1 [--control direct]
 
 For each same-PG matrix row it picks images from the measured contents
 (``data/image-contents.json``), resolves the row's series to exact releases,
@@ -15,6 +16,17 @@ and then, once per mode (empty, seeded):
 4. ``tsupgrade apply`` with the verification acknowledgement
 5. reads ``extversion`` back and, on a seeded run, runs ``check.sql``
 6. writes the evidence record (``verify/evidence/``), full log in ``verify/out/``
+
+``--history V`` stages the source with an upgrade history instead: created at
+release V (and seeded there), then updated to the source with one ALTER
+EXTENSION. Its records are ``history-empty`` and ``history-seeded``. Some
+TimescaleDB bugs only exist for a database that got to its version that way.
+
+``--control direct`` (with ``--history``) is a negative control: after
+staging, the update runs as a single ALTER EXTENSION to the target instead of
+``plan`` and ``apply``. It shows what a step the planner adds protects
+against, and its records (``direct-history-*``) never verify a row. Only a
+row that runs on one image can be controlled this way.
 
 Failures are recorded and the run goes on. A failure to stage or seed is the
 harness's or the environment's, not the row's, so it gets no record -- it is
@@ -38,7 +50,7 @@ import shutil
 import subprocess
 import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
@@ -49,7 +61,8 @@ sys.path.insert(0, str(TOOLS))
 
 from tsupgrade.contents import ImageContents, load_contents  # noqa: E402
 from tsupgrade.evidence import (  # noqa: E402
-    EvidenceError, build_record, load_record, record_path, upgrader_revision, write_record)
+    EvidenceError, build_record, evidence_key, load_record, record_path, upgrader_revision,
+    write_record)
 from tsupgrade.matrix import MatrixEntry, load_matrix  # noqa: E402
 from tsupgrade.preflight import patroni_role  # noqa: E402
 from tsupgrade.versions import InvalidVersion, parse_version  # noqa: E402
@@ -65,6 +78,7 @@ CHECKS = (
     "cagg_matches", "write_and_refresh", "decompress", "jobs",
 )
 MODES = ("empty", "seeded")
+CONTROLS = ("direct",)
 FIXTURE = REPO / "verify" / "fixture"
 EVIDENCE = REPO / "verify" / "evidence"
 OUT = REPO / "verify" / "out"
@@ -93,10 +107,20 @@ class Run:
     start_pg: str        # exact server version of start_image
     target_pg: str
     candidates: Tuple[str, ...] = ()  # same-major images offered to plan as --via
+    history: Optional[str] = None     # created at this release, then updated to source
+    control: Optional[str] = None     # "direct": one ALTER instead of plan/apply
 
     @property
     def major(self) -> int:
         return int(self.entry.source_pg)
+
+    def mode(self, base: str) -> str:
+        """The record mode for a base mode (empty or seeded)."""
+        return "history-" + base if self.history else base
+
+    def key(self, base: str) -> str:
+        """What the record is filed and cited as."""
+        return evidence_key(self.mode(base), self.control)
 
     @property
     def transition(self) -> Dict[str, str]:
@@ -183,6 +207,37 @@ def resolve(entry: MatrixEntry, contents: ImageContents) -> Union[Run, Unrunnabl
         return Unrunnable(entry, "source {0} is not below target {1}".format(source, target))
     candidates = tuple(ref for ref, _, _ in images if ref != t_ref)
     return Run(entry, s_ref, t_ref, source, target, s_sv, t_sv, candidates)
+
+
+def with_history(run: Run, version: str, contents: ImageContents) -> Union[Run, Unrunnable]:
+    """The same row, staged by creating at ``version`` and updating to the source.
+
+    Staging happens on the start image, so it has to ship both releases.
+    """
+    try:
+        if len(_key(version)) < 3:
+            raise InvalidVersion(version)
+    except InvalidVersion:
+        return Unrunnable(run.entry, "--history needs an exact release, got {0!r}".format(version))
+    if _key(version) >= _key(run.source):
+        return Unrunnable(run.entry, "history {0} is not below source {1}".format(version, run.source))
+    profile = contents.profile(run.start_image, run.major)
+    if profile is None or version not in profile.installable:
+        return Unrunnable(run.entry, "{0} does not ship {1}".format(
+            run.start_image.split(":")[-1], version))
+    return replace(run, history=version)
+
+
+def as_control(run: Run, control: str) -> Union[Run, Unrunnable]:
+    """The same row as a negative control: one ALTER, no planner."""
+    if control not in CONTROLS:
+        return Unrunnable(run.entry, "unknown control {0!r}".format(control))
+    if run.history is None:
+        return Unrunnable(run.entry, "a control is only recorded with --history")
+    if run.start_image != run.target_image:
+        return Unrunnable(run.entry, "a direct control needs one image; this row rolls out "
+                          + run.target_image.split(":")[-1])
+    return replace(run, control=control)
 
 
 def select_rows(
@@ -516,8 +571,14 @@ def make_plan(run: Run, path: Path, log: Log) -> Tuple[Optional[Dict[str, Any]],
 
 
 def stage(cluster: Cluster, run: Run, mode: str, log: Log) -> Optional[str]:
-    """Database ``verify`` at exactly ``run.source``; returns the seed baseline."""
-    log.section("stage {0} at {1} ({2})".format(DATABASE, run.source, mode))
+    """Database ``verify`` at exactly ``run.source``; returns the seed baseline.
+
+    With a history the database is created (and seeded) at ``run.history``
+    and then updated to the source in a session of its own.
+    """
+    created = run.history or run.source
+    log.section("stage {0} at {1} ({2}{3})".format(
+        DATABASE, run.source, mode, ", created at " + run.history if run.history else ""))
     steps = [
         ("postgres", ["-q", "-c",
                       "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
@@ -527,25 +588,33 @@ def stage(cluster: Cluster, run: Run, mode: str, log: Log) -> Optional[str]:
         # Separate sessions: up to at least 2.1, the library DROP loaded stays
         # loaded, and CREATE of another version in that session is refused.
         (DATABASE, ["-q", "-c", "DROP EXTENSION IF EXISTS timescaledb CASCADE"]),
-        (DATABASE, ["-q", "-c", "CREATE EXTENSION timescaledb VERSION '{0}'".format(run.source)]),
+        (DATABASE, ["-q", "-c", "CREATE EXTENSION timescaledb VERSION '{0}'".format(created)]),
     ]
     for db, args in steps:
         rc, _, err = cluster.psql(db, *args, log=log)
         if rc != 0:
             raise HarnessError("staging {0} failed: {1}".format(
-                run.source, error_lines(err.splitlines(), 3)))
-    if extversion(cluster, log) != run.source:
-        raise HarnessError("staging did not leave {0} at {1}".format(DATABASE, run.source))
-    if mode != "seeded":
-        return None
-    log.section("seed")
-    seed = (FIXTURE / "seed.sql").read_text(encoding="utf-8")
-    rc, out, err = cluster.psql(DATABASE, "-qtA", "-f", "-", stdin=seed, log=log)
-    if rc != 0:
-        raise HarnessError("seeding at {0} failed: {1}".format(
-            run.source, error_lines(err.splitlines(), 3)))
-    lines = [l for l in out.splitlines() if l.strip()]
-    return lines[-1] if lines else None
+                created, error_lines(err.splitlines(), 3)))
+    if extversion(cluster, log) != created:
+        raise HarnessError("staging did not leave {0} at {1}".format(DATABASE, created))
+    baseline = None
+    if mode == "seeded":
+        log.section("seed")
+        seed = (FIXTURE / "seed.sql").read_text(encoding="utf-8")
+        rc, out, err = cluster.psql(DATABASE, "-qtA", "-f", "-", stdin=seed, log=log)
+        if rc != 0:
+            raise HarnessError("seeding at {0} failed: {1}".format(
+                created, error_lines(err.splitlines(), 3)))
+        lines = [l for l in out.splitlines() if l.strip()]
+        baseline = lines[-1] if lines else None
+    if run.history:
+        log.section("history: update {0} -> {1}".format(run.history, run.source))
+        rc, _, err = cluster.psql(DATABASE, "-q", sql=(
+            "ALTER EXTENSION timescaledb UPDATE TO '{0}'".format(run.source)), log=log)
+        if rc != 0 or extversion(cluster, log) != run.source:
+            raise HarnessError("history update {0} -> {1} failed: {2}".format(
+                run.history, run.source, error_lines(err.splitlines(), 3)))
+    return baseline
 
 
 def extversion(cluster: Cluster, log: Log) -> Optional[str]:
@@ -559,50 +628,78 @@ def server_version(cluster: Cluster, log: Log) -> Optional[str]:
     return out.split()[0] if rc == 0 and out.strip() else None
 
 
-def run_one(run: Run, mode: str, plan: Dict[str, Any], plan_path: Path, cluster: Cluster,
-            contents: ImageContents, revision: Dict[str, Any]) -> Dict[str, Any]:
+def direct_update(cluster: Cluster, run: Run, log: Log) -> Tuple[int, Optional[Dict[str, Any]], str]:
+    """The control's whole upgrade: one ALTER, first statement of a fresh session.
+
+    Answers like ``apply`` does, so the run is judged by the same rules: a
+    report when the update went through, none (and the server's error) when
+    it did not.
+    """
+    log.section("direct update {0} -> {1} (control; no plan, no apply)".format(run.source, run.target))
+    rc, _, err = cluster.psql(DATABASE, "-q", sql=(
+        "ALTER EXTENSION timescaledb UPDATE TO '{0}'".format(run.target)), log=log)
+    return rc, ({"result": "pass"} if rc == 0 else None), err
+
+
+def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Optional[Path],
+            cluster: Cluster, contents: ImageContents, revision: Dict[str, Any]) -> Dict[str, Any]:
+    mode, key = run.mode(base), run.key(base)
     out_dir = OUT / "pg{0}".format(run.major)
-    stem = "{0}-to-{1}.{2}".format(run.entry.source_ts, run.entry.target_ts, mode)
+    stem = "{0}-to-{1}.{2}".format(run.entry.source_ts, run.entry.target_ts, key)
     log = Log(out_dir / (stem + ".log"))
     started = _now()
-    log.write("row {0}  mode {1}  source {2} on {3}  target {4} on {5}".format(
-        run.slug, mode, run.source, run.start_image, run.target, run.target_image))
+    log.write("row {0}  mode {1}  source {2} on {3}  target {4} on {5}{6}{7}".format(
+        run.slug, mode, run.source, run.start_image, run.target, run.target_image,
+        "  created at " + run.history if run.history else "",
+        "  CONTROL " + run.control if run.control else ""))
     images = images_used(run, plan)
     try:
         cluster.ensure(run.start_image, log)
         for image in images:
             cluster.load(image, log)
-        baseline = stage(cluster, run, mode, log)
+        baseline = stage(cluster, run, base, log)
     except HarnessError as exc:
         log.write("HARNESS ERROR: {0}".format(exc))
-        return {"row": run.slug, "mode": mode, "result": "error", "detail": str(exc),
+        return {"row": run.slug, "mode": key, "result": "error", "detail": str(exc),
                 "log": str(log.path)}
     start_pg = server_version(cluster, log) or run.start_pg
 
-    log.section("apply")
-    report_path = out_dir / (stem + ".report.json")
-    if report_path.exists():
-        report_path.unlink()
-    apply_rc, _, apply_err = tsupgrade(
-        ["apply", str(plan_path), "--acknowledge-verification-run",
-         "--context", cluster.context, "--namespace", NAMESPACE, "--selector", SELECTOR,
-         "--database", DATABASE, "--report", str(report_path)], log)
-    report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else None
+    if run.control:
+        apply_rc, report, apply_err = direct_update(cluster, run, log)
+    else:
+        log.section("apply")
+        report_path = out_dir / (stem + ".report.json")
+        if report_path.exists():
+            report_path.unlink()
+        apply_rc, _, apply_err = tsupgrade(
+            ["apply", str(plan_path), "--acknowledge-verification-run",
+             "--context", cluster.context, "--namespace", NAMESPACE, "--selector", SELECTOR,
+             "--database", DATABASE, "--report", str(report_path)], log)
+        report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else None
 
     log.section("after")
     reached = extversion(cluster, log)
     pg_version = server_version(cluster, log)
     checks, check_err = None, ""
-    if mode == "seeded" and reached is not None:
+    if base == "seeded" and reached is not None:
         log.section("check.sql, expect {0}".format(run.target))
         rc, out, check_err = cluster.psql(DATABASE, "-qtA", "-F", "|", "-v", "expect=" + run.target,
                                   "-f", "-", stdin=(FIXTURE / "check.sql").read_text(encoding="utf-8"),
                                   log=log)
         checks = parse_checks(out)
     passed, explanation, error, stopped = judge(
-        run, mode, apply_rc, apply_err, report, reached, checks, check_err)
+        run, base, apply_rc, apply_err, report, reached, checks, check_err)
+    if run.control and report is None:
+        explanation = "the direct update {0} -> {1} failed".format(run.source, run.target)
 
     final = (report or {}).get("final") or {}
+    extra: Dict[str, Any] = {}
+    if run.history:
+        extra["history"] = run.history
+    if run.control:
+        extra["control"] = run.control
+    else:
+        extra["plan"] = {"hops": plan.get("hops"), "path": plan_path.relative_to(REPO).as_posix()}
     record = build_record(
         transition=run.transition, mode=mode,
         images=[{"reference": i, "digest": local_digest(i, contents)} for i in images],
@@ -613,20 +710,21 @@ def run_one(run: Run, mode: str, plan: Dict[str, Any], plan_path: Path, cluster:
         source_pg_version=start_pg, replicas=cluster.replicas,
         pods=final.get("instances"), baseline=baseline,
         checks={k: {"status": s, "detail": d} for k, (s, d) in checks.items()} if checks else None,
-        plan={"hops": plan.get("hops"), "path": plan_path.relative_to(REPO).as_posix()},
-        apply_exit=apply_rc,
+        apply_exit=apply_rc, **extra,
     )
-    path = record_path(EVIDENCE, run.transition, mode)
+    path = record_path(EVIDENCE, run.transition, key)
     write_record(path, record)
     log.write("\nRESULT {0}{1}".format(record["result"].upper(),
                                        ": " + explanation if explanation else ""))
-    return {"row": run.slug, "mode": mode, "result": record["result"],
+    return {"row": run.slug, "mode": key, "result": record["result"],
             "detail": explanation or "", "record": str(path), "log": str(log.path)}
 
 
-def refused_record(run: Run, mode: str, plan_err: str, plan_log: Log,
+def refused_record(run: Run, base: str, plan_err: str, plan_log: Log,
                    contents: ImageContents, revision: Dict[str, Any]) -> Dict[str, Any]:
     """`plan` refused the row: that is the tool's answer, recorded as such."""
+    mode, key = run.mode(base), run.key(base)
+    extra = {"history": run.history} if run.history else {}
     images = images_used(run, None)
     record = build_record(
         transition=run.transition, mode=mode,
@@ -635,18 +733,18 @@ def refused_record(run: Run, mode: str, plan_err: str, plan_log: Log,
         passed=False, log=plan_log.path.relative_to(REPO).as_posix(),
         explanation="plan refused; nothing ran against a cluster",
         error=error_lines(plan_err.splitlines()) or "refused", upgrader=revision,
-        stage="plan", recorded_without_cluster=True,
+        stage="plan", recorded_without_cluster=True, **extra,
     )
-    path = record_path(EVIDENCE, run.transition, mode)
+    path = record_path(EVIDENCE, run.transition, key)
     write_record(path, record)
-    return {"row": run.slug, "mode": mode, "result": "fail",
+    return {"row": run.slug, "mode": key, "result": "fail",
             "detail": "plan refused", "record": str(path), "log": str(plan_log.path)}
 
 
-def recorded(run: Run, mode: str, root: Path = EVIDENCE) -> bool:
+def recorded(run: Run, base: str, root: Path = EVIDENCE) -> bool:
     """A valid record from a clean tree already exists for this row and mode."""
     try:
-        doc = load_record(record_path(root, run.transition, mode))
+        doc = load_record(record_path(root, run.transition, run.key(base)))
     except EvidenceError:
         return False
     return doc["upgrader"].get("dirty") is False
@@ -668,19 +766,31 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--list", action="store_true", help="show the resolved rows and stop")
     ap.add_argument("--resume", action="store_true",
                     help="skip rows and modes that already have a record from a clean tree")
+    ap.add_argument("--history", metavar="RELEASE",
+                    help="create the database at this release, then update it to the source")
+    ap.add_argument("--control", choices=CONTROLS,
+                    help="negative control: one ALTER EXTENSION instead of plan/apply "
+                         "(needs --history)")
     args = ap.parse_args(argv)
 
     contents = load_contents()
     rows = select_rows(load_matrix().entries, args.pg, args.sources)
     resolved = [resolve(e, contents) for e in rows]
+    if args.history:
+        resolved = [with_history(r, args.history, contents) if isinstance(r, Run) else r
+                    for r in resolved]
+    if args.control:
+        resolved = [as_control(r, args.control) if isinstance(r, Run) else r for r in resolved]
     runs = run_order([r for r in resolved if isinstance(r, Run)])
     skipped = [r for r in resolved if isinstance(r, Unrunnable)]
 
     for run in runs:
-        print("{0:<18} {1:>7} -> {2:<7} on {3}{4}".format(
+        print("{0:<18} {1:>7} -> {2:<7} on {3}{4}{5}{6}".format(
             run.slug, run.source, run.target, run.start_image.split(":")[-1],
             "" if run.start_image == run.target_image
-            else " then " + run.target_image.split(":")[-1]))
+            else " then " + run.target_image.split(":")[-1],
+            "  (created at {0})".format(run.history) if run.history else "",
+            "  CONTROL {0}".format(run.control) if run.control else ""))
     for skip in skipped:
         e = skip.entry
         print("{0:<18} skipped: {1}".format(
@@ -699,21 +809,24 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         if not todo:
             print("{0:<18} already recorded".format(run.slug), flush=True)
             continue
-        out_dir = OUT / "pg{0}".format(run.major)
-        stem = "{0}-to-{1}".format(run.entry.source_ts, run.entry.target_ts)
-        plan_log = Log(out_dir / (stem + ".plan.log"))
-        plan_path = out_dir / (stem + ".plan.json")
-        plan, plan_err = make_plan(run, plan_path, plan_log)
+        plan: Optional[Dict[str, Any]] = None
+        plan_path: Optional[Path] = None
+        if not run.control:
+            out_dir = OUT / "pg{0}".format(run.major)
+            stem = "{0}-to-{1}".format(run.entry.source_ts, run.entry.target_ts)
+            plan_log = Log(out_dir / (stem + ".plan.log"))
+            plan_path = out_dir / (stem + ".plan.json")
+            plan, plan_err = make_plan(run, plan_path, plan_log)
         for mode in todo:
             t0 = time.monotonic()
-            if plan is None:
+            if plan is None and not run.control:
                 outcome = refused_record(run, mode, plan_err, plan_log, contents, revision)
             else:
                 outcome = run_one(run, mode, plan, plan_path, cluster, contents, revision)
             outcome["seconds"] = round(time.monotonic() - t0)
             outcomes.append(outcome)
             print("{0:<18} {1:<6} {2:<5} {3:>4}s  {4}".format(
-                run.slug, mode, outcome["result"].upper(), outcome["seconds"],
+                run.slug, outcome["mode"], outcome["result"].upper(), outcome["seconds"],
                 outcome["detail"]), flush=True)
             with open(OUT / "runs.jsonl", "a", encoding="utf-8", newline="\n") as handle:
                 handle.write(json.dumps(dict(outcome, at=_now())) + "\n")
