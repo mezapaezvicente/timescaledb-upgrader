@@ -105,9 +105,25 @@ def test_references_are_not_evidence(write_matrix, valid_entry):
         ["a.json", "b.json"],
     ],
 )
-def test_evidence_must_name_exactly_the_two_runs(write_matrix, valid_entry, evidence):
+def test_evidence_must_name_the_two_runs_and_nothing_unknown(write_matrix, valid_entry, evidence):
     valid_entry["evidence"] = evidence
-    with pytest.raises(MatrixError, match="must map exactly empty and seeded"):
+    with pytest.raises(MatrixError, match="must map empty and seeded"):
+        load_matrix(write_matrix({"entries": [valid_entry]}))
+
+
+def test_evidence_may_add_history_runs_and_controls(write_matrix, valid_entry):
+    valid_entry["evidence"] = {
+        "empty": "a.json", "seeded": "b.json",
+        "history-empty": "c.json", "history-seeded": "d.json",
+        "direct-history-empty": "e.json", "direct-history-seeded": "f.json",
+    }
+    entry = load_matrix(write_matrix({"entries": [valid_entry]})).entries[0]
+    assert entry.evidence["direct-history-seeded"] == "f.json"
+
+
+def test_history_runs_never_replace_the_two_runs(write_matrix, valid_entry):
+    valid_entry["evidence"] = {"history-empty": "c.json", "history-seeded": "d.json"}
+    with pytest.raises(MatrixError, match="must map empty and seeded"):
         load_matrix(write_matrix({"entries": [valid_entry]}))
 
 

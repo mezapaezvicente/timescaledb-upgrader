@@ -11,7 +11,7 @@ import pytest
 
 from tsupgrade.evidence import load_record
 from tsupgrade.images import load_catalog
-from tsupgrade.matrix import EVIDENCE_MODES, VERDICTS, default_matrix_path, load_matrix
+from tsupgrade.matrix import VERDICTS, default_matrix_path, load_matrix
 
 REPO = default_matrix_path().parents[1]
 
@@ -59,9 +59,12 @@ def test_no_unverified_row_smuggles_in_a_verdict():
 
 
 def _records(entry):
-    records = {m: load_record(REPO / entry.evidence[m]) for m in EVIDENCE_MODES}
-    for mode, doc in records.items():
-        assert doc["mode"] == mode, (entry.transition, mode)
+    """Every record the row cites, keyed as cited; each must be what its key says."""
+    records = {key: load_record(REPO / path) for key, path in entry.evidence.items()}
+    for key, doc in records.items():
+        control, _, mode = key.partition("-") if key.startswith("direct-") else (None, "", key)
+        assert doc["mode"] == mode, (entry.transition, key)
+        assert doc.get("control") == control, (entry.transition, key)
         assert doc["transition"] == {
             "source_pg": entry.source_pg, "source_ts": entry.source_ts,
             "target_pg": entry.target_pg, "target_ts": entry.target_ts,
@@ -82,20 +85,39 @@ def test_every_verified_row_agrees_with_its_evidence():
         if not entry.verified or not entry.evidence:
             continue
         records = _records(entry)
-        empty, seeded = records["empty"], records["seeded"]
+        runs = {k: d for k, d in records.items() if "control" not in d}
+        controls = {k: d for k, d in records.items() if "control" in d}
         where = entry.transition
         if entry.verdict == "in_place":
-            for doc in records.values():
+            for doc in runs.values():
                 assert doc["versions"]["reached"] == doc["versions"]["target"], where
-            assert empty["result"] == "pass", where
-            if seeded["result"] != "pass":
-                assert seeded["stage"] == "check", where
-                assert entry.reason, where
+            for prefix in ("", "history-"):
+                empty, seeded = runs.get(prefix + "empty"), runs.get(prefix + "seeded")
+                if empty is not None:
+                    assert empty["result"] == "pass", (where, prefix)
+                if seeded is not None and seeded["result"] != "pass":
+                    assert seeded["stage"] == "check", (where, prefix)
+                    assert entry.reason, where
         elif entry.verdict == "unsupported":
             assert any(d["result"] == "fail" and d["stage"] in ("plan", "apply")
-                       for d in records.values()), where
+                       for d in runs.values()), where
         else:
             pytest.fail("no evidence rule for verdict {0!r} ({1})".format(entry.verdict, where))
+
+
+def test_a_cited_control_shows_the_failure_it_controls_for():
+    """A row cites a direct control to show that a planner's step is needed.
+
+    The control never counts toward the verdict; it has to have failed in the
+    update itself, or it shows nothing.
+    """
+    for entry in load_matrix():
+        if not entry.evidence:
+            continue
+        for key, doc in _records(entry).items():
+            if "control" in doc:
+                assert doc["result"] == "fail" and doc["stage"] == "apply", (entry.transition, key)
+                assert entry.steps, (entry.transition, key)
 
 
 def test_every_same_pg_row_is_settled():

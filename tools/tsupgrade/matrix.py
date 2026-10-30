@@ -5,7 +5,9 @@ verified upgrade path means running it and editing JSON, not editing Python.
 
 A row is verified only by running that migration with the upgrader itself, on
 an empty database and on a seeded one (``verify/harness.py``). Its
-``evidence`` names the two records those runs left in ``verify/evidence/``.
+``evidence`` names the two records those runs left in ``verify/evidence/``,
+and may name more: the same runs on a database with an upgrade history, and
+negative controls that show what a planner's step protects against.
 The one exception is ``no_image``, which the registry answers: such a row
 carries the registry listing in ``references`` instead. ``references``
 otherwise holds upstream issues, pull requests and release notes that explain
@@ -29,6 +31,7 @@ from .versions import InvalidVersion, pg_matches, ts_matches
 __all__ = [
     "VERDICTS",
     "EVIDENCE_MODES",
+    "OPTIONAL_EVIDENCE",
     "MatrixError",
     "MatrixEntry",
     "Matrix",
@@ -42,6 +45,13 @@ VERDICTS = frozenset({"in_place", "dump_restore", "unsupported", "no_image"})
 
 # The two runs every verified row has evidence for, by the evidence key.
 EVIDENCE_MODES = ("empty", "seeded")
+# Records a row may cite as well. They never replace the two above: history
+# runs repeat them on a database updated from an older release, and controls
+# (``direct-*``) bypass the planner to show what its step protects against.
+OPTIONAL_EVIDENCE = (
+    "history-empty", "history-seeded",
+    "direct-history-empty", "direct-history-seeded",
+)
 
 _REQUIRED_FIELDS = ("source_pg", "source_ts", "target_pg", "target_ts")
 
@@ -143,12 +153,13 @@ def _entry_from_dict(raw: Any, index: int) -> MatrixEntry:
     if evidence is not None:
         if (
             not isinstance(evidence, dict)
-            or sorted(evidence) != sorted(EVIDENCE_MODES)
+            or not set(EVIDENCE_MODES) <= set(evidence)
+            or not set(evidence) <= set(EVIDENCE_MODES + OPTIONAL_EVIDENCE)
             or any(not isinstance(v, str) or not v.strip() for v in evidence.values())
         ):
             raise MatrixError(
-                "{0}: 'evidence' must map exactly {1} to record paths".format(
-                    where, " and ".join(EVIDENCE_MODES)
+                "{0}: 'evidence' must map {1} to record paths, and may add {2}".format(
+                    where, " and ".join(EVIDENCE_MODES), ", ".join(OPTIONAL_EVIDENCE)
                 )
             )
 

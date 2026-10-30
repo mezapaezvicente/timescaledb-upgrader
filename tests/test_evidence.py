@@ -16,6 +16,7 @@ import pytest
 from tsupgrade.evidence import (
     EvidenceError,
     build_record,
+    evidence_key,
     load_record,
     record_path,
     validate_record,
@@ -86,6 +87,24 @@ def test_every_image_needs_a_digest():
 def test_mode_is_empty_or_seeded():
     with pytest.raises(EvidenceError, match="mode"):
         _record(mode="both")
+
+
+def test_a_history_run_names_the_release_it_was_created_at():
+    with pytest.raises(EvidenceError, match="history"):
+        _record(mode="history-seeded")
+    with pytest.raises(EvidenceError, match="history"):
+        _record(mode="history-seeded", history="2.13")
+    assert _record(mode="history-seeded", history="2.13.1")["history"] == "2.13.1"
+
+
+def test_a_control_is_marked_and_keyed_apart():
+    doc = _record(mode="history-empty", history="2.13.1", control="direct", passed=False,
+                  reached="2.20.3", explanation="direct update failed", error="ERROR: ...")
+    assert doc["control"] == "direct"
+    assert evidence_key(doc["mode"], doc["control"]) == "direct-history-empty"
+    assert evidence_key("seeded") == "seeded"
+    with pytest.raises(EvidenceError, match="control"):
+        _record(control="skip-stops")
 
 
 def test_a_pass_with_a_failure_block_is_rejected():

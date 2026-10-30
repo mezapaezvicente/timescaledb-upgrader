@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from .evidence import EvidenceError, load_record
-from .matrix import EVIDENCE_MODES, Matrix, MatrixEntry
+from .matrix import EVIDENCE_MODES, OPTIONAL_EVIDENCE, Matrix, MatrixEntry
 
 __all__ = ["render_markdown"]
 
@@ -63,11 +63,16 @@ def _references_cell(entry: MatrixEntry) -> str:
     return ", ".join("[{0}]({1})".format(reference_label(u), u) for u in entry.references)
 
 
+def _cited(entry: MatrixEntry) -> List[str]:
+    """The row's evidence keys, required ones first, in a fixed order."""
+    return [m for m in EVIDENCE_MODES + OPTIONAL_EVIDENCE if m in (entry.evidence or {})]
+
+
 def _records(entry: MatrixEntry, root: Optional[Path]) -> Dict[str, Optional[Dict[str, Any]]]:
     if not entry.evidence or root is None:
         return {}
     found: Dict[str, Optional[Dict[str, Any]]] = {}
-    for mode in EVIDENCE_MODES:
+    for mode in _cited(entry):
         try:
             found[mode] = load_record(root / entry.evidence[mode])
         except EvidenceError:
@@ -86,7 +91,7 @@ def _evidence_cell(
     if not entry.evidence:
         return "—"
     cells = []
-    for mode in EVIDENCE_MODES:
+    for mode in _cited(entry):
         if mode in records and records[mode] is None:
             status = "missing"
         elif mode in records:

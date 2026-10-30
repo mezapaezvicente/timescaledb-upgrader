@@ -12,7 +12,10 @@ a harness can add what turns out to matter without a schema change:
 
 ``transition``      the matrix row: ``{source_pg, source_ts, target_pg,
                     target_ts}`` with the row's own (series-level) keys
-``mode``            ``empty`` or ``seeded``
+``mode``            ``empty`` or ``seeded``; ``history-empty`` or
+                    ``history-seeded`` when the database was created at an
+                    older release and updated to the source before the run
+                    (``history`` then names that release)
 ``images``          every image the run used, in order, each ``{reference,
                     digest}`` -- a two-image row lists both
 ``pg_version``      the exact server version the extension ran on
@@ -30,6 +33,11 @@ a harness can add what turns out to matter without a schema change:
 
 Optional and unchecked beyond being present: ``checks`` (the fixture's check
 lines on a seeded run), ``started_at``/``finished_at``, ``plan``, ``notes``.
+
+``control: "direct"`` marks a negative control: the update ran as one
+``ALTER EXTENSION`` instead of through ``plan``/``apply``, to show what a
+step the planner adds is protecting against. It is never a verification of
+the row. Its file is keyed ``direct-<mode>`` (:func:`evidence_key`).
 """
 
 from __future__ import annotations
@@ -45,7 +53,9 @@ from .versions import InvalidVersion, parse_version
 __all__ = [
     "EVIDENCE_FORMAT",
     "MODES",
+    "CONTROLS",
     "RESULTS",
+    "evidence_key",
     "EvidenceError",
     "build_record",
     "validate_record",
@@ -56,8 +66,14 @@ __all__ = [
 ]
 
 EVIDENCE_FORMAT = 1
-MODES = ("empty", "seeded")
+MODES = ("empty", "seeded", "history-empty", "history-seeded")
+CONTROLS = ("direct",)
 RESULTS = ("pass", "fail")
+
+
+def evidence_key(mode: str, control: Optional[str] = None) -> str:
+    """The name a record goes by in a file name and a matrix row's evidence."""
+    return "{0}-{1}".format(control, mode) if control else mode
 
 
 class EvidenceError(Exception):
@@ -152,6 +168,10 @@ def validate_record(doc: Any) -> List[str]:
 
     if doc.get("mode") not in MODES:
         problems.append("mode must be one of {0}".format(", ".join(MODES)))
+    elif str(doc["mode"]).startswith("history-") and not _exact(doc.get("history"), 3):
+        problems.append("a history run must name the release it was created at in history")
+    if "control" in doc and doc["control"] not in CONTROLS:
+        problems.append("control must be one of {0}".format(", ".join(CONTROLS)))
 
     images = doc.get("images")
     if not isinstance(images, list) or not images:
@@ -207,6 +227,9 @@ def validate_record(doc: Any) -> List[str]:
 
 def record_path(root: Path, transition: Dict[str, str], mode: str) -> Path:
     """``<root>/pg<major>/<source_ts>-to-<target_ts>.<mode>.json``.
+
+    ``mode`` is the record's :func:`evidence_key`, which differs from its
+    ``mode`` field only for a control.
 
     One file per row and mode, overwritten by a re-run; git keeps the earlier
     ones, which is where a run before a tool fix stays visible.
