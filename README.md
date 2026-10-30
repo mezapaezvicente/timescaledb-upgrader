@@ -189,8 +189,9 @@ Each row records a transition and what is known about it:
   "verdict": "no_image",
   "reason": "No timescale/timescaledb-ha tag pairs PostgreSQL 15 with TimescaleDB 2.30. ...",
   "steps": [],
-  "source_url": "https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000",
-  "verified": true
+  "verified": true,
+  "evidence": null,
+  "references": ["https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000"]
 }
 ```
 
@@ -205,15 +206,18 @@ Each row records a transition and what is known about it:
 ### What is verified, and what is not
 
 The loader enforces the rule that keeps this honest: **a row marked `verified`
-must carry both a verdict and a `source_url`**, and a row that is not verified
-must be blank — no verdict, no reason, no source. There is no state in which the
-matrix asserts something without saying where it came from.
+must carry a verdict and the `evidence` behind it** — the records of running
+that migration with this tool (`verify/harness.py`), once on an empty database
+and once on a seeded one, and for a PostgreSQL major change both again with
+`pg_upgrade --link`. A row that is not verified must be blank: no verdict, no
+reason, no evidence. `no_image` is the one exception, because the container
+registry answers it: such a row cites the registry listing in `references`.
+Otherwise `references` holds upstream issues and release notes that explain a
+verdict; they are never its proof.
 
-Today, the only verdicts filled in automatically are `no_image`, because that
-one is a question about a container registry and the registry answers it.
-Whether a given transition works in place or needs a dump and restore is a
-compatibility fact, and those rows ship as `null` / `verified: false` for a
-human to establish and cite.
+Today 110 of the 131 rows are verified: every same-PG row, and the seven rows
+that change major from pg11 2.1 and pg12 2.11. The other 21 cross-PG rows ship
+as `null` / `verified: false`.
 
 ### Which images actually exist
 
@@ -379,7 +383,11 @@ old major is updated to that release first. The route takes the fewest
 pg16 runs 12 → 13, 13 → 15 and 15 → 16, and stops at 2.27.2 on pg15 on the way.
 
 ```bash
-bash scripts/tsupgrade.sh plan --from-pg 12.22 --from-ts 2.11.2   --target-image timescale/timescaledb-ha:pg16.15-ts2.30.1   --via timescale/timescaledb-ha:pg13.12-ts2.11.2-all --via timescale/timescaledb-ha:pg13.22-ts2.15.3   --via timescale/timescaledb-ha:pg15.13-ts2.19.3-all --via timescale/timescaledb-ha:pg15.18-ts2.28.3   --via timescale/timescaledb-ha:pg16.15-ts2.30.1-all --output plan.json
+bash scripts/tsupgrade.sh plan --from-pg 12.22 --from-ts 2.11.2 \
+  --target-image timescale/timescaledb-ha:pg16.15-ts2.30.1 \
+  --via timescale/timescaledb-ha:pg13.12-ts2.11.2-all --via timescale/timescaledb-ha:pg13.22-ts2.15.3 \
+  --via timescale/timescaledb-ha:pg15.13-ts2.19.3-all --via timescale/timescaledb-ha:pg15.18-ts2.28.3 \
+  --via timescale/timescaledb-ha:pg16.15-ts2.30.1-all --output plan.json
 ```
 
 Under Patroni, `apply` moves the leader to ordinal 0, scales the StatefulSet
@@ -392,6 +400,14 @@ copies, and the old data directory stays beside the new one to go back to;
 `plan --link` hard-links instead, which is fast and needs no space but leaves
 the old directory unusable. A failure before anything is deleted leaves the
 cluster stopped with its data intact, and says how to start it again.
+
+`pg_upgrade` may write an `update_extensions.sql` holding a bare
+`ALTER EXTENSION timescaledb UPDATE`. `apply` never runs it, and removes it:
+run on the new cluster, it goes straight to that image's default release,
+past any stop the plan makes (after 13 → 15, from 2.15.3 to 2.28.3, past the
+2.27.2 stop). Both modes are verified on kind
+for the seven rows from pg11 2.1 and pg12 2.11, and the records show what
+`pg_upgrade` did: copied files, or hard links into the old directory.
 
 ---
 
