@@ -28,15 +28,15 @@
     "reached": "2.15.3"
   },
   "upgrader": {
-    "commit": "645e227bc1f29ef5f4ee87a045bb3b9c0be6e19c",
+    "commit": "24706f343d3112813328d6169e0acb702d86fac2",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg12/2.11-to-pg13-2.15.seeded.log",
-  "recorded_at": "2026-10-30T15:52:09Z",
+  "recorded_at": "2026-10-30T16:26:41Z",
   "stage": "done",
-  "started_at": "2026-10-30T15:48:16Z",
-  "finished_at": "2026-10-30T15:52:09Z",
+  "started_at": "2026-10-30T16:22:45Z",
+  "finished_at": "2026-10-30T16:26:41Z",
   "source_pg_version": "12.22",
   "replicas": 2,
   "pods": [
@@ -94,5 +94,13 @@
   "plan": {
     "hops": 2,
     "path": "verify/out/pg12/2.11-to-pg13-2.15.plan.json"
-  }
+  },
+  "major_upgrades": [
+    {
+      "from_pg": 12,
+      "to_pg": 13,
+      "files": "copy",
+      "shared_inodes": 0
+    }
+  ]
 }
