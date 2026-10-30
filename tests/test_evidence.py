@@ -107,6 +107,43 @@ def test_a_control_is_marked_and_keyed_apart():
         _record(control="skip-stops")
 
 
+CROSS = {"source_pg": "12", "source_ts": "2.11", "target_pg": "13", "target_ts": "2.15"}
+
+
+def _cross(mode, *hops, **kw):
+    return _record(transition=CROSS, mode=mode, pg_version="13.22", source="2.11.2",
+                   target="2.15.3", reached="2.15.3", major_upgrades=list(hops), **kw)
+
+
+def _hop(files, shared):
+    return {"from_pg": 12, "to_pg": 13, "files": files, "shared_inodes": shared}
+
+
+def test_a_passing_major_change_shows_pg_upgrade_copied_or_linked_as_its_mode_says():
+    assert _cross("seeded", _hop("copy", 0))["result"] == "pass"
+    assert _cross("link-seeded", _hop("link", 159))["result"] == "pass"
+    with pytest.raises(EvidenceError, match="lists its pg_upgrade runs"):
+        _cross("seeded")
+    with pytest.raises(EvidenceError, match="link of the relation files"):
+        _cross("link-empty", _hop("copy", 0))
+    with pytest.raises(EvidenceError, match="hard-link count"):
+        _cross("empty", _hop("copy", None))
+
+
+def test_the_hard_link_count_must_fit_the_mode():
+    with pytest.raises(EvidenceError, match="does not fit a link"):
+        _cross("link-empty", _hop("link", 0))
+    with pytest.raises(EvidenceError, match="does not fit a copy"):
+        _cross("empty", _hop("copy", 3))
+
+
+def test_a_failed_major_change_need_not_show_its_pg_upgrades():
+    doc = _record(transition=CROSS, mode="empty", passed=False, reached="2.11.2",
+                  source="2.11.2", target="2.15.3", explanation="pg_upgrade failed",
+                  error="locale mismatch")
+    assert doc["result"] == "fail"
+
+
 def test_a_pass_with_a_failure_block_is_rejected():
     doc = _record()
     doc["failure"] = {"explanation": "x", "error": "y"}

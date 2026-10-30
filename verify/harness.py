@@ -411,6 +411,29 @@ def images_used(run: Run, plan: Optional[Dict[str, Any]]) -> List[str]:
     return seen
 
 
+def major_upgrades(report: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """What each pg_upgrade did with the relation files, from apply's report:
+    its own "Copying"/"Linking" line, and how many files share an inode with
+    the old directory (none after a copy)."""
+    found = []
+    for step in (report or {}).get("steps") or []:
+        if step.get("action") != "major_upgrade":
+            continue
+        majors = re.search(r"PostgreSQL (\d+) -> (\d+)", step.get("summary") or "")
+        hop: Dict[str, Any] = {"from_pg": int(majors.group(1)) if majors else None,
+                               "to_pg": int(majors.group(2)) if majors else None,
+                               "files": None, "shared_inodes": None}
+        for line in step.get("output") or []:
+            line = line.strip()
+            if line.endswith("user relation files"):
+                hop["files"] = {"Copying": "copy", "Linking": "link"}.get(line.split()[0])
+            elif line.startswith("relation files sharing an inode"):
+                count = line.rsplit(":", 1)[-1].strip()
+                hop["shared_inodes"] = int(count) if count.isdigit() else None
+        found.append(hop)
+    return found
+
+
 # ---------------------------------------------------------------------------
 # Processes
 # ---------------------------------------------------------------------------
@@ -775,6 +798,8 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         extra["control"] = run.control
     else:
         extra["plan"] = {"hops": plan.get("hops"), "path": plan_path.relative_to(REPO).as_posix()}
+        if run.cross:
+            extra["major_upgrades"] = major_upgrades(report)
     record = build_record(
         transition=run.transition, mode=mode,
         images=[{"reference": i, "digest": local_digest(i, contents)} for i in images],

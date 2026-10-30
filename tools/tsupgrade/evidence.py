@@ -32,6 +32,13 @@ a harness can add what turns out to matter without a schema change:
                     account of what went wrong, and the relevant error lines
                     copied verbatim (not the whole log)
 ``log``             path to the full log
+``major_upgrades``  on a passing PostgreSQL major change only: one
+                    ``{from_pg, to_pg, files, shared_inodes}`` per pg_upgrade,
+                    where ``files`` is ``copy`` or ``link`` as pg_upgrade
+                    itself reported it and ``shared_inodes`` counts the new
+                    cluster's relation files hard-linked to the old directory.
+                    A ``link-`` record must show ``link`` and a count above 0;
+                    any other must show ``copy`` and 0
 
 Optional and unchecked beyond being present: ``checks`` (the fixture's check
 lines on a seeded run), ``started_at``/``finished_at``, ``plan``, ``notes``.
@@ -222,8 +229,33 @@ def validate_record(doc: Any) -> List[str]:
     elif result == "pass" and isinstance(versions, dict) and versions.get("reached") != versions.get("target"):
         problems.append("a passing run must reach its target version")
 
+    if (result == "pass" and isinstance(transition, dict) and "control" not in doc
+            and transition.get("source_pg") != transition.get("target_pg")):
+        problems.extend(_major_upgrade_problems(doc))
+
     if not doc.get("log"):
         problems.append("log must point at the full log")
+    return problems
+
+
+def _major_upgrade_problems(doc: Dict[str, Any]) -> List[str]:
+    """A passing major change shows what each pg_upgrade did with the
+    relation files, and that matches the mode: a ``link-`` run linked them
+    (files share an inode with the old directory), any other run copied."""
+    hops = doc.get("major_upgrades")
+    if not isinstance(hops, list) or not hops:
+        return ["a passing major change lists its pg_upgrade runs in major_upgrades"]
+    link = str(doc.get("mode")).startswith("link-")
+    want = "link" if link else "copy"
+    problems = []
+    for i, hop in enumerate(hops):
+        shared = hop.get("shared_inodes") if isinstance(hop, dict) else None
+        if not isinstance(hop, dict) or hop.get("files") != want or not isinstance(shared, int):
+            problems.append("major_upgrades[{0}] must show pg_upgrade's {1} of the relation "
+                            "files and a hard-link count".format(i, want))
+        elif (shared > 0) != link:
+            problems.append("major_upgrades[{0}]: {1} relation files share an inode with the old "
+                            "directory, which does not fit a {2}".format(i, shared, want))
     return problems
 
 

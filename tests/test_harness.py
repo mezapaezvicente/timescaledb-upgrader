@@ -240,6 +240,20 @@ def test_images_used_follows_the_plan():
     assert harness.images_used(RUN, None) == [REPO + ":pg15.18-ts2.28.3"]
 
 
+def test_major_upgrades_reads_what_pg_upgrade_did_from_the_report():
+    report = {"steps": [
+        {"action": "update_extension", "output": ["Copying user relation files"]},
+        {"action": "major_upgrade", "summary": "PostgreSQL 12 -> 13; 2 instance(s) on x",
+         "output": ["Linking user relation files",
+                    "relation files sharing an inode with /d.pg12: 159", "Upgrade Complete"]},
+        {"action": "major_upgrade", "summary": "PostgreSQL 13 -> 15; 2 instance(s) on y",
+         "output": ["Upgrade Complete"]}]}
+    assert harness.major_upgrades(report) == [
+        {"from_pg": 12, "to_pg": 13, "files": "link", "shared_inodes": 159},
+        {"from_pg": 13, "to_pg": 15, "files": None, "shared_inodes": None}]
+    assert harness.major_upgrades(None) == []
+
+
 def test_the_make_up_cluster_is_refused():
     with pytest.raises(harness.HarnessError, match="long-lived"):
         harness.Cluster("tsdb-upgrader", 2, PG15)
