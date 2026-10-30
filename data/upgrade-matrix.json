@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-09-20T00:51:55Z",
+  "generated_at": "2026-10-30T03:50:24Z",
   "note": "Transitions are scaffolded from data/images.json by `make matrix-scaffold`. no_image verdicts are set from the registry. Every other verdict comes only from verification runs by the upgrader itself (verify/harness.py), on an empty and a seeded database, and names both evidence records. Preflight results from a user's cluster are never written here.",
   "verdicts": [
     "in_place",
@@ -15,11 +15,14 @@
       "source_ts": "1.7",
       "target_pg": "11",
       "target_ts": "2.1",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg11/1.7-to-2.1.empty.json",
+        "seeded": "verify/evidence/pg11/1.7-to-2.1.seeded.json"
+      },
       "references": []
     },
     {
@@ -27,11 +30,14 @@
       "source_ts": "2.0",
       "target_pg": "11",
       "target_ts": "2.1",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg11/2.0-to-2.1.empty.json",
+        "seeded": "verify/evidence/pg11/2.0-to-2.1.seeded.json"
+      },
       "references": []
     },
     {
@@ -137,23 +143,33 @@
       "source_ts": "1.7",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Passes only with the stop at 2.1.1 that `tsupgrade plan` inserts. A single update from 1.x to 2.10.2 or later fails: `2.10.1--2.10.2.sql` drops `_timescaledb_internal.ping_data_node(name)` without IF EXISTS, and that function only exists from 2.0.0 (#5789, closed upstream without a fix).",
+      "steps": [
+        "update to 2.1.1 first, then to 2.11.2; `tsupgrade plan` inserts this stop (#5789)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg12/1.7-to-2.11.empty.json",
+        "seeded": "verify/evidence/pg12/1.7-to-2.11.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/5789"
+      ]
     },
     {
       "source_pg": "12",
       "source_ts": "2.0",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": null,
-      "reason": "",
+      "verdict": "unsupported",
+      "reason": "No measured pg12 image ships both 2.0.x and 2.1 or later: pg12.6-ts2.0.1-p0 stops at 2.0.1 and pg12.22-ts2.11.2 ships 1.7.5 and 2.1.0 onwards, so `tsupgrade plan` refuses the row (bridging stalls at ts2.0.1). The target image exists; nothing bridges to it. A pg12 ts2.1.x image might; unmeasured.",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg12/2.0-to-2.11.empty.json",
+        "seeded": "verify/evidence/pg12/2.0-to-2.11.seeded.json"
+      },
       "references": []
     },
     {
@@ -161,11 +177,14 @@
       "source_ts": "2.1",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg12/2.1-to-2.11.empty.json",
+        "seeded": "verify/evidence/pg12/2.1-to-2.11.seeded.json"
+      },
       "references": []
     },
     {
@@ -173,11 +192,14 @@
       "source_ts": "2.2",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg12/2.2-to-2.11.empty.json",
+        "seeded": "verify/evidence/pg12/2.2-to-2.11.seeded.json"
+      },
       "references": []
     },
     {
@@ -185,11 +207,14 @@
       "source_ts": "2.3",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg12/2.3-to-2.11.empty.json",
+        "seeded": "verify/evidence/pg12/2.3-to-2.11.seeded.json"
+      },
       "references": []
     },
     {
@@ -197,11 +222,14 @@
       "source_ts": "2.4",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg12/2.4-to-2.11.empty.json",
+        "seeded": "verify/evidence/pg12/2.4-to-2.11.seeded.json"
+      },
       "references": []
     },
     {
@@ -209,11 +237,14 @@
       "source_ts": "2.5",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg12/2.5-to-2.11.empty.json",
+        "seeded": "verify/evidence/pg12/2.5-to-2.11.seeded.json"
+      },
       "references": []
     },
     {
@@ -221,11 +252,14 @@
       "source_ts": "2.6",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg12/2.6-to-2.11.empty.json",
+        "seeded": "verify/evidence/pg12/2.6-to-2.11.seeded.json"
+      },
       "references": []
     },
     {
@@ -233,11 +267,14 @@
       "source_ts": "2.7",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg12/2.7-to-2.11.empty.json",
+        "seeded": "verify/evidence/pg12/2.7-to-2.11.seeded.json"
+      },
       "references": []
     },
     {
@@ -245,11 +282,14 @@
       "source_ts": "2.8",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg12/2.8-to-2.11.empty.json",
+        "seeded": "verify/evidence/pg12/2.8-to-2.11.seeded.json"
+      },
       "references": []
     },
     {
@@ -257,11 +297,14 @@
       "source_ts": "2.9",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg12/2.9-to-2.11.empty.json",
+        "seeded": "verify/evidence/pg12/2.9-to-2.11.seeded.json"
+      },
       "references": []
     },
     {
@@ -269,11 +312,14 @@
       "source_ts": "2.10",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg12/2.10-to-2.11.empty.json",
+        "seeded": "verify/evidence/pg12/2.10-to-2.11.seeded.json"
+      },
       "references": []
     },
     {
@@ -367,83 +413,146 @@
       "source_ts": "2.1",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
+      "steps": [
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.1-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.1-to-2.15.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/pull/6360",
+        "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
+        "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
+        "https://github.com/timescale/timescaledb/pull/8859"
+      ]
     },
     {
       "source_pg": "13",
       "source_ts": "2.2",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
+      "steps": [
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.2-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.2-to-2.15.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/pull/6360",
+        "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
+        "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
+        "https://github.com/timescale/timescaledb/pull/8859"
+      ]
     },
     {
       "source_pg": "13",
       "source_ts": "2.3",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
+      "steps": [
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.3-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.3-to-2.15.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/pull/6360",
+        "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
+        "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
+        "https://github.com/timescale/timescaledb/pull/8859"
+      ]
     },
     {
       "source_pg": "13",
       "source_ts": "2.4",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
+      "steps": [
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.4-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.4-to-2.15.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/pull/6360",
+        "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
+        "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
+        "https://github.com/timescale/timescaledb/pull/8859"
+      ]
     },
     {
       "source_pg": "13",
       "source_ts": "2.5",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
+      "steps": [
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.5-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.5-to-2.15.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/pull/6360",
+        "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
+        "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
+        "https://github.com/timescale/timescaledb/pull/8859"
+      ]
     },
     {
       "source_pg": "13",
       "source_ts": "2.6",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
+      "steps": [
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.6-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.6-to-2.15.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/pull/6360",
+        "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
+        "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
+        "https://github.com/timescale/timescaledb/pull/8859"
+      ]
     },
     {
       "source_pg": "13",
       "source_ts": "2.7",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.7-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.7-to-2.15.seeded.json"
+      },
       "references": []
     },
     {
@@ -451,11 +560,14 @@
       "source_ts": "2.8",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.8-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.8-to-2.15.seeded.json"
+      },
       "references": []
     },
     {
@@ -463,11 +575,14 @@
       "source_ts": "2.9",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.9-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.9-to-2.15.seeded.json"
+      },
       "references": []
     },
     {
@@ -475,11 +590,14 @@
       "source_ts": "2.10",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.10-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.10-to-2.15.seeded.json"
+      },
       "references": []
     },
     {
@@ -487,11 +605,14 @@
       "source_ts": "2.11",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.11-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.11-to-2.15.seeded.json"
+      },
       "references": []
     },
     {
@@ -499,11 +620,14 @@
       "source_ts": "2.12",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.12-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.12-to-2.15.seeded.json"
+      },
       "references": []
     },
     {
@@ -511,11 +635,14 @@
       "source_ts": "2.13",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.13-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.13-to-2.15.seeded.json"
+      },
       "references": []
     },
     {
@@ -523,11 +650,14 @@
       "source_ts": "2.14",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.14-to-2.15.empty.json",
+        "seeded": "verify/evidence/pg13/2.14-to-2.15.seeded.json"
+      },
       "references": []
     },
     {
@@ -609,35 +739,58 @@
       "source_ts": "2.5",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
+      "steps": [
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.5-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.5-to-2.19.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/pull/6360",
+        "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
+        "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
+        "https://github.com/timescale/timescaledb/pull/8859"
+      ]
     },
     {
       "source_pg": "14",
       "source_ts": "2.6",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
+      "steps": [
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.6-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.6-to-2.19.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/pull/6360",
+        "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
+        "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
+        "https://github.com/timescale/timescaledb/pull/8859"
+      ]
     },
     {
       "source_pg": "14",
       "source_ts": "2.7",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.7-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.7-to-2.19.seeded.json"
+      },
       "references": []
     },
     {
@@ -645,11 +798,14 @@
       "source_ts": "2.8",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.8-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.8-to-2.19.seeded.json"
+      },
       "references": []
     },
     {
@@ -657,11 +813,14 @@
       "source_ts": "2.9",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.9-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.9-to-2.19.seeded.json"
+      },
       "references": []
     },
     {
@@ -669,11 +828,14 @@
       "source_ts": "2.10",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.10-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.10-to-2.19.seeded.json"
+      },
       "references": []
     },
     {
@@ -681,11 +843,14 @@
       "source_ts": "2.11",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.11-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.11-to-2.19.seeded.json"
+      },
       "references": []
     },
     {
@@ -693,11 +858,14 @@
       "source_ts": "2.12",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.12-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.12-to-2.19.seeded.json"
+      },
       "references": []
     },
     {
@@ -705,11 +873,14 @@
       "source_ts": "2.13",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.13-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.13-to-2.19.seeded.json"
+      },
       "references": []
     },
     {
@@ -717,11 +888,14 @@
       "source_ts": "2.14",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.14-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.14-to-2.19.seeded.json"
+      },
       "references": []
     },
     {
@@ -729,11 +903,14 @@
       "source_ts": "2.15",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.15-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.15-to-2.19.seeded.json"
+      },
       "references": []
     },
     {
@@ -741,11 +918,14 @@
       "source_ts": "2.16",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.16-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.16-to-2.19.seeded.json"
+      },
       "references": []
     },
     {
@@ -753,11 +933,14 @@
       "source_ts": "2.17",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.17-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.17-to-2.19.seeded.json"
+      },
       "references": []
     },
     {
@@ -765,11 +948,14 @@
       "source_ts": "2.18",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.18-to-2.19.empty.json",
+        "seeded": "verify/evidence/pg14/2.18-to-2.19.seeded.json"
+      },
       "references": []
     },
     {
@@ -839,59 +1025,106 @@
       "source_ts": "2.9",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Passes only with the stop at 2.27.2 that `tsupgrade plan` inserts. The bridge hop updates the database across 2.15, and TimescaleDB 2.28.2/2.28.3 then fail to update it directly (`cannot drop table _timescaledb_internal.bgw_job_stat_history`, #10272). Fixed in 2.29.0, which drops PostgreSQL 15: no fixed release exists for PG15.",
+      "steps": [
+        "roll out pg15.13-ts2.20.3 and update to its newest release",
+        "roll out pg15.18-ts2.28.3; update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.9-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.9-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.10",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Passes only with the stop at 2.27.2 that `tsupgrade plan` inserts. The bridge hop updates the database across 2.15, and TimescaleDB 2.28.2/2.28.3 then fail to update it directly (`cannot drop table _timescaledb_internal.bgw_job_stat_history`, #10272). Fixed in 2.29.0, which drops PostgreSQL 15: no fixed release exists for PG15.",
+      "steps": [
+        "roll out pg15.13-ts2.20.3 and update to its newest release",
+        "roll out pg15.18-ts2.28.3; update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.10-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.10-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.11",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Passes only with the stop at 2.27.2 that `tsupgrade plan` inserts. The bridge hop updates the database across 2.15, and TimescaleDB 2.28.2/2.28.3 then fail to update it directly (`cannot drop table _timescaledb_internal.bgw_job_stat_history`, #10272). Fixed in 2.29.0, which drops PostgreSQL 15: no fixed release exists for PG15.",
+      "steps": [
+        "roll out pg15.13-ts2.20.3 and update to its newest release",
+        "roll out pg15.18-ts2.28.3; update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.11-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.11-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.12",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Passes only with the stop at 2.27.2 that `tsupgrade plan` inserts. The bridge hop updates the database across 2.15, and TimescaleDB 2.28.2/2.28.3 then fail to update it directly (`cannot drop table _timescaledb_internal.bgw_job_stat_history`, #10272). Fixed in 2.29.0, which drops PostgreSQL 15: no fixed release exists for PG15.",
+      "steps": [
+        "roll out pg15.13-ts2.20.3 and update to its newest release",
+        "roll out pg15.18-ts2.28.3; update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.12-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.12-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.13",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.13-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.13-to-2.28.seeded.json"
+      },
       "references": []
     },
     {
@@ -899,11 +1132,14 @@
       "source_ts": "2.14",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.14-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.14-to-2.28.seeded.json"
+      },
       "references": []
     },
     {
@@ -911,131 +1147,234 @@
       "source_ts": "2.15",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Measured on a source created at this version. A database that reached it by an update from below 2.15 fails a direct update to 2.28.2/2.28.3 (#10272); a plan cannot see that history, so `tsupgrade plan` always stops at 2.27.2, and the evidence is for that path. No fixed release exists for PG15.",
+      "steps": [
+        "update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.15-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.15-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.16",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Measured on a source created at this version. A database that reached it by an update from below 2.15 fails a direct update to 2.28.2/2.28.3 (#10272); a plan cannot see that history, so `tsupgrade plan` always stops at 2.27.2, and the evidence is for that path. No fixed release exists for PG15.",
+      "steps": [
+        "update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.16-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.16-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.17",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Measured on a source created at this version. A database that reached it by an update from below 2.15 fails a direct update to 2.28.2/2.28.3 (#10272); a plan cannot see that history, so `tsupgrade plan` always stops at 2.27.2, and the evidence is for that path. No fixed release exists for PG15.",
+      "steps": [
+        "update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.17-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.17-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.18",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Measured on a source created at this version. A database that reached it by an update from below 2.15 fails a direct update to 2.28.2/2.28.3 (#10272); a plan cannot see that history, so `tsupgrade plan` always stops at 2.27.2, and the evidence is for that path. No fixed release exists for PG15.",
+      "steps": [
+        "update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.18-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.18-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.19",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Measured on a source created at this version. A database that reached it by an update from below 2.15 fails a direct update to 2.28.2/2.28.3 (#10272); a plan cannot see that history, so `tsupgrade plan` always stops at 2.27.2, and the evidence is for that path. No fixed release exists for PG15.",
+      "steps": [
+        "update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.19-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.19-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.20",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Measured on a source created at this version. A database that reached it by an update from below 2.15 fails a direct update to 2.28.2/2.28.3 (#10272); a plan cannot see that history, so `tsupgrade plan` always stops at 2.27.2, and the evidence is for that path. No fixed release exists for PG15.",
+      "steps": [
+        "update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.20-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.20-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.21",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Measured on a source created at this version. A database that reached it by an update from below 2.15 fails a direct update to 2.28.2/2.28.3 (#10272); a plan cannot see that history, so `tsupgrade plan` always stops at 2.27.2, and the evidence is for that path. No fixed release exists for PG15.",
+      "steps": [
+        "update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.21-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.21-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.22",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Measured on a source created at this version. A database that reached it by an update from below 2.15 fails a direct update to 2.28.2/2.28.3 (#10272); a plan cannot see that history, so `tsupgrade plan` always stops at 2.27.2, and the evidence is for that path. No fixed release exists for PG15.",
+      "steps": [
+        "update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.22-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.22-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.23",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Measured on a source created at this version. A database that reached it by an update from below 2.15 fails a direct update to 2.28.2/2.28.3 (#10272); a plan cannot see that history, so `tsupgrade plan` always stops at 2.27.2, and the evidence is for that path. No fixed release exists for PG15.",
+      "steps": [
+        "update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.23-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.23-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.24",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "Measured on a source created at this version. A database that reached it by an update from below 2.15 fails a direct update to 2.28.2/2.28.3 (#10272); a plan cannot see that history, so `tsupgrade plan` always stops at 2.27.2, and the evidence is for that path. No fixed release exists for PG15.",
+      "steps": [
+        "update to 2.27.2 first, then to 2.28.3; `tsupgrade plan` inserts this stop because a direct update to 2.28.2/2.28.3 fails for a database once updated across 2.15 (#10272)"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.24-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.24-to-2.28.seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
       "source_ts": "2.25",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.25-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.25-to-2.28.seeded.json"
+      },
       "references": []
     },
     {
@@ -1043,11 +1382,14 @@
       "source_ts": "2.26",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.26-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.26-to-2.28.seeded.json"
+      },
       "references": []
     },
     {
@@ -1055,11 +1397,14 @@
       "source_ts": "2.27",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.27-to-2.28.empty.json",
+        "seeded": "verify/evidence/pg15/2.27-to-2.28.seeded.json"
+      },
       "references": []
     },
     {
@@ -1117,11 +1462,14 @@
       "source_ts": "2.13",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.13-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.13-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1129,11 +1477,14 @@
       "source_ts": "2.14",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.14-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.14-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1141,11 +1492,14 @@
       "source_ts": "2.15",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.15-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.15-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1153,11 +1507,14 @@
       "source_ts": "2.16",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.16-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.16-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1165,11 +1522,14 @@
       "source_ts": "2.17",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.17-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.17-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1177,11 +1537,14 @@
       "source_ts": "2.18",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.18-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.18-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1189,11 +1552,14 @@
       "source_ts": "2.19",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.19-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.19-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1201,11 +1567,14 @@
       "source_ts": "2.20",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.20-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.20-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1213,11 +1582,14 @@
       "source_ts": "2.21",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.21-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.21-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1225,11 +1597,14 @@
       "source_ts": "2.22",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.22-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.22-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1237,11 +1612,14 @@
       "source_ts": "2.23",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.23-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.23-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1249,11 +1627,14 @@
       "source_ts": "2.24",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.24-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.24-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1261,11 +1642,14 @@
       "source_ts": "2.25",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.25-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.25-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1273,11 +1657,14 @@
       "source_ts": "2.26",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.26-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.26-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1285,11 +1672,14 @@
       "source_ts": "2.27",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.27-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.27-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1297,11 +1687,14 @@
       "source_ts": "2.28",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.28-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.28-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1309,11 +1702,14 @@
       "source_ts": "2.29",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.29-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.29-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1345,11 +1741,14 @@
       "source_ts": "2.17",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.17-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.17-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1357,11 +1756,14 @@
       "source_ts": "2.18",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.18-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.18-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1369,11 +1771,14 @@
       "source_ts": "2.19",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.19-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.19-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1381,11 +1786,14 @@
       "source_ts": "2.20",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.20-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.20-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1393,11 +1801,14 @@
       "source_ts": "2.21",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.21-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.21-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1405,11 +1816,14 @@
       "source_ts": "2.22",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.22-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.22-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1417,11 +1831,14 @@
       "source_ts": "2.23",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.23-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.23-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1429,11 +1846,14 @@
       "source_ts": "2.24",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.24-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.24-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1441,11 +1861,14 @@
       "source_ts": "2.25",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.25-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.25-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1453,11 +1876,14 @@
       "source_ts": "2.26",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.26-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.26-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1465,11 +1891,14 @@
       "source_ts": "2.27",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.27-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.27-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1477,11 +1906,14 @@
       "source_ts": "2.28",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.28-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.28-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1489,11 +1921,14 @@
       "source_ts": "2.29",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.29-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.29-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1513,11 +1948,14 @@
       "source_ts": "2.23",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg18/2.23-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg18/2.23-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1525,11 +1963,14 @@
       "source_ts": "2.24",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg18/2.24-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg18/2.24-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1537,11 +1978,14 @@
       "source_ts": "2.25",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg18/2.25-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg18/2.25-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1549,11 +1993,14 @@
       "source_ts": "2.26",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg18/2.26-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg18/2.26-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1561,11 +2008,14 @@
       "source_ts": "2.27",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg18/2.27-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg18/2.27-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1573,11 +2023,14 @@
       "source_ts": "2.28",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg18/2.28-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg18/2.28-to-2.30.seeded.json"
+      },
       "references": []
     },
     {
@@ -1585,11 +2038,14 @@
       "source_ts": "2.29",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
+      "verdict": "in_place",
       "reason": "",
       "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg18/2.29-to-2.30.empty.json",
+        "seeded": "verify/evidence/pg18/2.29-to-2.30.seeded.json"
+      },
       "references": []
     }
   ]

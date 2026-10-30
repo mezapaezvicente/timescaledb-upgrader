@@ -98,6 +98,12 @@ def test_every_verified_row_agrees_with_its_evidence():
             pytest.fail("no evidence rule for verdict {0!r} ({1})".format(entry.verdict, where))
 
 
+def test_every_same_pg_row_is_settled():
+    """Only the cross-PG rows, out of scope, may still be unverified."""
+    for entry in load_matrix():
+        if entry.source_pg == entry.target_pg:
+            assert entry.verified, entry.transition
+
 
 def test_no_duplicate_transitions():
     seen = set()
