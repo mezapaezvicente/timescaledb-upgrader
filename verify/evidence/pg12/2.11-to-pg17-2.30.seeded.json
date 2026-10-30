@@ -1,0 +1,134 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "12",
+    "source_ts": "2.11",
+    "target_pg": "17",
+    "target_ts": "2.30"
+  },
+  "mode": "seeded",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+      "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+      "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+      "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+      "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+      "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg17.11-ts2.30.1-all",
+      "digest": "sha256:e1d9b67f589e09108d4c54871378f2b6588192a3cc7c307773fbfb3a6380ebc6"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+      "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+    }
+  ],
+  "pg_version": "17.11",
+  "versions": {
+    "source": "2.11.2",
+    "target": "2.30.1",
+    "reached": "2.30.1"
+  },
+  "upgrader": {
+    "commit": "d9638f5ffb429b406fc8ae6d2265aa8a15215fef",
+    "dirty": false
+  },
+  "result": "pass",
+  "log": "verify/out/pg12/2.11-to-pg17-2.30.seeded.log",
+  "recorded_at": "2026-10-30T19:53:21Z",
+  "stage": "done",
+  "started_at": "2026-10-30T19:47:24Z",
+  "finished_at": "2026-10-30T19:53:21Z",
+  "source_pg_version": "12.22",
+  "replicas": 2,
+  "pods": [
+    {
+      "pod": "tsdb-0",
+      "role": "primary",
+      "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:659f0ed8e303892cf8ee3f87fc88a3278fcfeaf51d18340cbaa4cb9a68e71908",
+      "server_version": "17.11"
+    },
+    {
+      "pod": "tsdb-1",
+      "role": "replica",
+      "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:659f0ed8e303892cf8ee3f87fc88a3278fcfeaf51d18340cbaa4cb9a68e71908",
+      "server_version": "17.11"
+    }
+  ],
+  "baseline": "seeded|2.11.2|50400|2521572.95|840|3|2",
+  "checks": {
+    "version": {
+      "status": "pass",
+      "detail": "extversion 2.30.1, expected 2.30.1"
+    },
+    "rows": {
+      "status": "pass",
+      "detail": "50400 rows, sum 2521572.95; seeded 50400 rows, sum 2521572.95 at 2.11.2"
+    },
+    "jobs": {
+      "status": "pass",
+      "detail": "2 jobs registered, seeded 2; fx_job_ok 1 runs, fx_job_fail 1 failures"
+    },
+    "still_compressed": {
+      "status": "pass",
+      "detail": "3 compressed chunks; seeded 3"
+    },
+    "cagg_survived": {
+      "status": "pass",
+      "detail": "840 materialized rows; seeded 840"
+    },
+    "cagg_matches": {
+      "status": "pass",
+      "detail": "0 differing buckets; refresh ran"
+    },
+    "write_and_refresh": {
+      "status": "pass",
+      "detail": "insert ok, refresh ok; 1 new buckets, 60 rows in them"
+    },
+    "decompress": {
+      "status": "pass",
+      "detail": "3 chunks decompressed; 50400 rows, sum 2521572.95 before the new writes"
+    }
+  },
+  "apply_exit": 0,
+  "plan": {
+    "hops": 7,
+    "path": "verify/out/pg12/2.11-to-pg17-2.30.plan.json"
+  },
+  "major_upgrades": [
+    {
+      "from_pg": 12,
+      "to_pg": 13,
+      "files": "copy",
+      "shared_inodes": 0
+    },
+    {
+      "from_pg": 13,
+      "to_pg": 15,
+      "files": "copy",
+      "shared_inodes": 0
+    },
+    {
+      "from_pg": 15,
+      "to_pg": 17,
+      "files": "copy",
+      "shared_inodes": 0
+    }
+  ]
+}
