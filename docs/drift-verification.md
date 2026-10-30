@@ -172,6 +172,8 @@ fixture could be built on this image.
 | Claim | Verified by | Result |
 |---|---|---|
 | `views_detached.sql` guard keys off the **source** version | `sql/CMakeLists.txt` @ 2.30.1 | `if(START_VERSION VERSION_GREATER "2.24.0")` — strictly greater, so 2.24.0 itself is still exposed |
+| …but only in scripts built by 2.28.0 and later | every `timescaledb--A--B.sql` in eight images (2026-10-30), `tests/fixtures/view_drop_boundaries.tsv` | 2.25.x → 2.26.0–2.27.2 still drops `hypertables` and `chunks` outright; measured: `cannot drop view timescaledb_information.hypertables` on 2.25.0 → 2.27.2. The gate first shipped keyed off the source alone and missed this |
+| Scripts from 2.25.0–2.28.0 to 2.28.1+ can still drop `job_history`/`job_errors` | same scripts; pg15.18 runs | only inside the #10272 repair, which runs when `bgw_job_stat_history.id` is `integer` (a database created below 2.15); measured blocked with history, clear when created fresh |
 | The fix landed in 2.28.0 | HTTP status on raw URLs | 404 through 2.27.1, 200 from 2.28.0 |
 | Multi-node has three triggers | `2.13.1--2.14.0.sql` | `replication_factor > 0`, `timescaledb_fdw` server, `dist_uuid` key |
 | 2.25 drops `cagg_migrate` | `2.24.0--2.25.0.sql` | `DROP PROCEDURE IF EXISTS @extschema@.cagg_migrate` plus ~14 supporting routines |
@@ -241,9 +243,12 @@ got wrong at least once, or that would fail silently:
   one look identical from outside; conflating them invents an outage.
 - **`ahead` outranks `stranded`.** Both are outages, but the remedies point in
   opposite directions — forward vs. back — so the precedence is pinned.
-- **The 2.24.0 boundary is exclusive.** The upstream guard is `VERSION_GREATER`,
-  so a source at exactly 2.24.0 is still exposed, and a series-only `"2.24"`
-  is treated as exposed too because it pins less.
+- **The views gate keys off both versions.** Each target has a floor below
+  which its script drops the views; the floors are checked against the
+  boundary of every shipped script, so the 2.25.x → 2.27.2 case that a
+  source-only rule missed is pinned. A source at exactly 2.24.0 is still
+  exposed (the upstream guard is `VERSION_GREATER`), and a series-only
+  version is treated as exposed because it pins less.
 - **Support-matrix gaps stay gaps.** `documented_pg_majors("2.11")` is `None`,
   not `()` and not `False`.
 - **Bridging terminates.** A candidate that accepts a version without raising

@@ -20,9 +20,10 @@ The gates
                         ``cagg_migrate``, so this cannot be fixed afterwards --
                         migrate first or restore a backup.
 ``information_views``   User views built on ``timescaledb_information`` block the
-                        update with a stock dependency error. Fixed in 2.28, but
-                        the fix keys off the *source* version, so updating from
-                        2.24.0 or older is still exposed.
+                        update with a stock dependency error, whenever its script
+                        drops the views. That depends on both versions: from
+                        2.28 targets keep them for sources past 2.24.0, but
+                        2.25.x to 2.27.2 still drops them.
 
 Probing for the catalog
 -----------------------
@@ -386,6 +387,45 @@ def check_old_caggs(
 
 VIEWS_SOURCE = "https://github.com/timescale/timescaledb/issues/5057"
 
+# Whether the update script from A to B drops the information views outright,
+# measured from every forward script the images ship (3805 pairs across eight
+# images, 2026-10-30; no image disagrees): it does exactly when A is below a
+# floor that depends only on B. Each row gives the floor for targets from its
+# first version up to the next row's; the last row holds for later releases.
+# Below 2.28 the floor is the first release of the series that last redefined
+# a view. From 2.28 the scripts swap in stub views first (views_detached.sql,
+# built only for start versions past 2.24.0), so the floor stops moving.
+_VIEW_DROP_FLOORS: Tuple[Tuple[Tuple[int, ...], Tuple[int, ...]], ...] = (
+    ((1, 7, 0), (1, 7, 0)),
+    ((2, 0, 0), (2, 0, 0)),
+    ((2, 3, 0), (2, 3, 0)),
+    ((2, 6, 0), (2, 6, 0)),
+    ((2, 7, 0), (2, 7, 0)),
+    ((2, 8, 0), (2, 8, 0)),
+    ((2, 9, 0), (2, 9, 0)),
+    ((2, 10, 2), (2, 10, 2)),
+    ((2, 12, 0), (2, 12, 0)),
+    ((2, 13, 0), (2, 13, 0)),
+    ((2, 14, 0), (2, 14, 0)),
+    ((2, 15, 0), (2, 15, 0)),
+    ((2, 20, 0), (2, 20, 0)),
+    ((2, 22, 0), (2, 22, 0)),
+    ((2, 23, 0), (2, 23, 0)),
+    ((2, 24, 0), (2, 24, 0)),
+    ((2, 25, 0), (2, 25, 0)),
+    ((2, 26, 0), (2, 26, 0)),
+    ((2, 28, 0), (2, 25, 0)),
+)
+
+# The other way views get dropped: scripts from 2.25.0-2.28.0 to 2.28.1 or
+# later repair a bgw_job_stat_history that the 2.14.2--2.15.0 script migrated
+# with an integer id (#10272), and the repair drops job_history and job_errors.
+# Only a database created below 2.15 has the bad column, so this asks the
+# database instead of assuming.
+_REPAIR_SOURCES = ((2, 25, 0), (2, 28, 0))
+_REPAIR_TARGET = (2, 28, 1)
+_REPAIRED_VIEWS = ("job_history", "job_errors")
+
 _VIEW_DEPENDENCY_SQL = """SELECT DISTINCT dependent.relnamespace::regnamespace || '.' || dependent.relname
 FROM pg_depend d
 JOIN pg_rewrite r ON r.oid = d.objid AND d.classid = 'pg_rewrite'::regclass
@@ -396,18 +436,53 @@ WHERE target.relnamespace = 'timescaledb_information'::regnamespace
   AND NOT EXISTS (SELECT 1 FROM pg_depend e WHERE e.objid = dependent.oid
                     AND e.classid = 'pg_class'::regclass AND e.deptype = 'e')"""
 
+# Only the views the repair drops, and only if the repair will run.
+_REPAIR_DEPENDENCY_SQL = (
+    _VIEW_DEPENDENCY_SQL
+    + "\n  AND target.relname IN ("
+    + ", ".join("'{0}'".format(v) for v in _REPAIRED_VIEWS)
+    + """)
+  AND EXISTS (SELECT 1 FROM pg_attribute
+              WHERE attrelid = to_regclass('_timescaledb_internal.bgw_job_stat_history')
+                AND attname = 'id' AND atttypid <> 'bigint'::regtype)"""
+)
+
+
+def _drops_information_views(source_ts: object, target_ts: object) -> bool:
+    """Whether the script from source to target drops the views outright.
+
+    Anything not pinned to a full release counts as dropping: a series-only
+    source may be its oldest patch, and a series-only target spans floors.
+    """
+    source, target = _key(source_ts), _key(target_ts)
+    if source is None or target is None or len(target) < 3:
+        return True
+    floor = None
+    for first, value in _VIEW_DROP_FLOORS:
+        if target >= first:
+            floor = value
+    return floor is None or source < floor
+
+
+def _runs_history_repair(source_ts: object, target_ts: object) -> bool:
+    source, target = _key(source_ts), _key(target_ts)
+    if source is None or target is None:
+        return True
+    low, high = _REPAIR_SOURCES
+    return low <= source[:3] <= high and target >= _REPAIR_TARGET
+
 
 def check_information_views(
     runner: Runner, database: str, source_ts: object, target_ts: object
 ) -> GateResult:
     """User views over ``timescaledb_information``, which block the drop.
 
-    Update scripts begin by dropping the information views, so anything of the
-    user's built on top blocks the update with an ordinary PostgreSQL
-    dependency error. 2.28 ships stub views that avoid this, but the guard keys
-    off the *source* version -- updating from 2.24.0 or older still drops the
-    views for real, which is exactly the long hops that make this tool worth
-    running.
+    An update script that drops an information view is blocked by any view of
+    the user's built on top, with an ordinary PostgreSQL dependency error.
+    Whether a script drops them depends on both ends (``_VIEW_DROP_FLOORS``):
+    2.25.0 to 2.28.0 is safe, 2.25.0 to 2.27.2 is not. Even a script that
+    keeps them can drop ``job_history`` and ``job_errors`` while repairing a
+    database created below 2.15, which the query checks for itself.
 
     The ``deptype = 'e'`` exclusion keeps the extension's own views out of the
     result; without it every ``timescaledb_information`` view reports itself.
@@ -418,19 +493,22 @@ def check_information_views(
     title = "User views on timescaledb_information"
     details: List[str] = []
 
-    protected = _at_or_above(source_ts, (2, 24, 1))
-    if protected:
+    if _drops_information_views(source_ts, target_ts):
+        query = _VIEW_DEPENDENCY_SQL
+    elif _runs_history_repair(source_ts, target_ts):
+        query = _REPAIR_DEPENDENCY_SQL
+    else:
         return GateResult(
             "information_views",
             title,
             NOT_APPLICABLE,
-            "source ts{0} is past 2.24.0, so views_detached.sql protects the "
-            "update".format(source_ts),
+            "the update script from ts{0} to ts{1} keeps the information "
+            "views".format(source_ts, target_ts),
             details,
             VIEWS_SOURCE,
         )
 
-    rc, out, err = runner(database, _VIEW_DEPENDENCY_SQL)
+    rc, out, err = runner(database, query)
     if rc != 0:
         return GateResult(
             "information_views",
@@ -454,6 +532,11 @@ def check_information_views(
 
     for name in offenders:
         details.append("blocking view : {0}".format(name))
+    if query is _REPAIR_DEPENDENCY_SQL:
+        details.append(
+            "This database was created below 2.15, so the update repairs "
+            "bgw_job_stat_history and drops job_history and job_errors (#10272)."
+        )
     details.append(
         "The update drops the information views first, so these must be "
         "dropped and recreated around it. The update is transactional, so it "

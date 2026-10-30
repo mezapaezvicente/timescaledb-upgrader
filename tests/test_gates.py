@@ -11,6 +11,8 @@ The live counterparts are recorded in ``docs/drift-verification.md``.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from tsupgrade.gates import (
@@ -58,6 +60,9 @@ class FakeDB:
         return 0, "", ""
 
 
+FIXTURES = Path(__file__).resolve().parent / "fixtures"
+
+
 def _between(text, start, end):
     head = text.split(start, 1)[1]
     return head.split(end, 1)[0]
@@ -101,30 +106,106 @@ def test_cagg_gate_applies_only_when_crossing_225(target, applies):
     assert (result.status != NOT_APPLICABLE) is applies
 
 
+def _boundaries():
+    """The measured per-target boundaries in fixtures/view_drop_boundaries.tsv."""
+    rows = []
+    for line in (FIXTURES / "view_drop_boundaries.tsv").read_text(encoding="utf-8").splitlines():
+        if line and not line.startswith("#"):
+            target, last_dropping, first_keeping, repair_only = line.split("	")
+            rows.append((target, last_dropping, first_keeping, repair_only))
+    return rows
+
+
+@pytest.mark.parametrize("target,last_dropping,first_keeping,repair_only", _boundaries())
+def test_information_views_gate_matches_every_measured_update_script(
+    target, last_dropping, first_keeping, repair_only
+):
+    """The gate's floors agree with what each shipped script does.
+
+    A script that drops the views must get the full check, one that keeps them
+    must not, and one that drops them only in the #10272 repair gets the
+    narrow check.
+    """
+    if last_dropping != "-":
+        assert check_information_views(FakeDB(), "db", last_dropping, target).status != NOT_APPLICABLE
+    if first_keeping != "-":
+        db = FakeDB()
+        result = check_information_views(db, "db", first_keeping, target)
+        if repair_only == "-":
+            assert result.status == NOT_APPLICABLE
+        else:
+            assert first_keeping == repair_only.split("..")[0]
+            assert result.status != NOT_APPLICABLE
+            assert "job_history" in db.calls[-1]
+
+
 @pytest.mark.parametrize(
-    "source,applies",
+    "source,target,applies",
     [
-        ("2.24.0", True),   # the guard is strictly greater, so 2.24.0 is exposed
-        ("2.13.0", True),
-        ("2.24.1", False),
-        ("2.28.0", False),
-        ("2.30.1", False),
+        # Measured on pg15.18 and pg16.15 with a user view on every information view.
+        ("2.25.0", "2.27.2", True),   # cannot drop view ...hypertables: 2.25 is not enough below 2.28
+        ("2.25.2", "2.27.2", True),
+        ("2.26.4", "2.27.2", False),
+        ("2.26.0", "2.27.2", False),
+        ("2.27.2", "2.28.0", False),
+        ("2.25.0", "2.28.0", False),
+        ("2.24.0", "2.30.1", True),   # views_detached.sql is built only past 2.24.0
+        ("2.13.1", "2.28.3", True),
+        # Measured on pg14.19 and pg15.18.
+        ("2.15.3", "2.19.3", False),
+        ("2.14.2", "2.15.3", True),
+        ("2.10.2", "2.11.2", False),
+        ("2.10.1", "2.11.2", True),
+        ("2.20.0", "2.21.4", False),
+        ("2.21.4", "2.22.1", True),
+        ("2.5.0", "2.5.2", False),
+        ("2.6.1", "2.7.0", True),
+        # Later than anything measured: the 2.28 floor holds.
+        ("2.29.0", "2.31.0", False),
     ],
 )
-def test_information_views_gate_keys_off_the_source_version(source, applies):
-    """The fix protects updates *from* a version past 2.24.0, not *to* one.
-
-    sql/CMakeLists.txt guards it with VERSION_GREATER "2.24.0" -- strictly
-    greater -- so a source at exactly 2.24.0 still drops the views for real.
-    """
-    result = check_information_views(FakeDB(), "db", source, "2.30.1")
+def test_information_views_gate_keys_off_both_versions(source, target, applies):
+    result = check_information_views(FakeDB(), "db", source, target)
     assert (result.status != NOT_APPLICABLE) is applies
 
 
-def test_a_series_only_source_is_treated_as_exposed():
+def test_a_series_only_version_is_treated_as_exposed():
     """'2.24' pins less than '2.24.0' does, so assume the exposed reading."""
-    result = check_information_views(FakeDB(), "db", "2.24", "2.30.1")
-    assert result.status != NOT_APPLICABLE
+    assert check_information_views(FakeDB(), "db", "2.24", "2.30.1").status != NOT_APPLICABLE
+    assert check_information_views(FakeDB(), "db", "2.26.0", "2.27").status != NOT_APPLICABLE
+
+
+@pytest.mark.parametrize("source", ["2.25.0", "2.26.4", "2.27.2", "2.28.0"])
+def test_history_repair_window_checks_only_the_views_it_drops(source):
+    """2.25.0-2.28.0 to 2.28.1+ keeps the views unless the #10272 repair runs.
+
+    Measured on pg15.18: created at 2.13.1, updated to 2.25.0, 2.26.4 or
+    2.27.2, a user view on job_history blocks 2.28.3; created fresh at 2.25.0,
+    the same view does not. Only the bad id column tells them apart.
+    """
+    db = FakeDB()
+    check_information_views(db, "db", source, "2.28.3")
+    query = db.calls[-1]
+    assert "'job_history', 'job_errors'" in query
+    assert "atttypid <> 'bigint'::regtype" in query
+
+
+def test_history_repair_does_not_run_past_its_window():
+    assert check_information_views(FakeDB(), "db", "2.28.1", "2.30.1").status == NOT_APPLICABLE
+    assert check_information_views(FakeDB(), "db", "2.25.0", "2.28.0").status == NOT_APPLICABLE
+
+
+def test_history_repair_blocks_with_its_own_explanation():
+    db = FakeDB(rows={"timescaledb_information": "public.fx_v_job_history"})
+    result = check_information_views(db, "db", "2.25.0", "2.28.3")
+    assert result.status == BLOCKED
+    assert any("#10272" in d for d in result.details)
+
+
+def test_a_full_drop_uses_the_full_query():
+    db = FakeDB()
+    check_information_views(db, "db", "2.24.0", "2.28.3")
+    assert "job_history" not in db.calls[-1]
 
 
 # --------------------------------------------------------------------------
