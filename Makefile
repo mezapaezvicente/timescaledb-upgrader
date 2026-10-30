@@ -100,7 +100,7 @@ images-refresh: ## Re-query the registry and regenerate data/images.json
 # Measures what each image can really install (ls in a throwaway container; no
 # server). The labels overstate floors and cannot express holes, so measured
 # entries overrule them in `drift` and `plan`. The images must be pulled first.
-IMAGE_CONTENTS_TAGS ?= pg11.11-ts2.1.1-p0 pg12.6-ts2.0.1-p0 pg12.22-ts2.11.2   pg13.22-ts2.15.3 pg14.19-ts2.19.3 pg15.13-ts2.20.3 pg15.18-ts2.28.3   pg16.15-ts2.30.1 pg17.11-ts2.30.1 pg18.6-ts2.30.1
+IMAGE_CONTENTS_TAGS ?= pg11.11-ts2.1.1-p0 pg12.6-ts2.0.1-p0 pg12.6-ts2.1.1-p2 pg12.22-ts2.11.2   pg13.22-ts2.15.3 pg14.19-ts2.19.3 pg15.13-ts2.20.3 pg15.18-ts2.28.3   pg16.15-ts2.30.1 pg17.11-ts2.30.1 pg18.6-ts2.30.1
 
 image-contents: ## Measure what local images install into data/image-contents.json [IMAGE_CONTENTS_TAGS=...]
 	@bash scripts/tsupgrade.sh contents measure $(IMAGE_CONTENTS_TAGS)
