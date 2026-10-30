@@ -200,15 +200,21 @@ def test_malformed_plans_are_refused(mutate):
 # --------------------------------------------------------------------------
 
 def test_single_image_upgrade_touches_no_pods():
+    # 2.20.3 -> 2.28.3 stops at 2.27.2 (#10272): two updates, still no rollout.
     kube = FakeKube(PG15_18, "15.18", {"app": "2.20.3"}, replicas=1)
     report = _run(_plan(), kube)
     assert report["result"] == "pass"
     assert kube.writes == [
+        "app@tsdb-0: ALTER EXTENSION timescaledb UPDATE TO '2.27.2';",
+        "terminate on tsdb-0",
+        "terminate on tsdb-1",
         "app@tsdb-0: ALTER EXTENSION timescaledb UPDATE TO '2.28.3';",
         "terminate on tsdb-0",
         "terminate on tsdb-1",
     ]
-    assert [s["status"] for s in report["steps"]][:2] == ["done", "skipped"]
+    statuses = [(s["hop"], s["action"], s["status"]) for s in report["steps"]]
+    assert (1, "ensure_image", "skipped") in statuses
+    assert (2, "ensure_image", "skipped") in statuses
     assert report["final"]["databases"] == {"app": "2.28.3"}
     assert report["final"]["instances"][0]["server_version"] == "15.18"
     assert report["final"]["instances"][0]["image_id"].endswith("@sha256:feed")
@@ -217,7 +223,7 @@ def test_single_image_upgrade_touches_no_pods():
 def test_two_image_upgrade_rolls_replicas_first_and_updates_after_each_rollout():
     bridge = _profile(PG15_13, "2.9.0", "2.20.3")
     plan = _plan(source_ts="2.12.2", candidates=[bridge])
-    assert plan["hops"] == 2
+    assert plan["hops"] == 3
     kube = FakeKube(PG15_13, "15.18", {"app": "2.12.2"}, replicas=1)
     report = _run(plan, kube)
     assert report["result"] == "pass", report
@@ -225,9 +231,12 @@ def test_two_image_upgrade_rolls_replicas_first_and_updates_after_each_rollout()
         # hop 1: already on the bridge image
         "app@tsdb-0: ALTER EXTENSION timescaledb UPDATE TO '2.20.3';",
         "terminate on tsdb-0", "terminate on tsdb-1",
-        # hop 2: roll, replica first, then update
+        # hop 2: roll, replica first, then update to the #10272 stop
         "set image " + PG15_18,
         "delete tsdb-1", "delete tsdb-0",
+        "app@tsdb-0: ALTER EXTENSION timescaledb UPDATE TO '2.27.2';",
+        "terminate on tsdb-0", "terminate on tsdb-1",
+        # hop 3: same image, no rollout
         "app@tsdb-0: ALTER EXTENSION timescaledb UPDATE TO '2.28.3';",
         "terminate on tsdb-0", "terminate on tsdb-1",
     ]
@@ -244,7 +253,7 @@ def test_old_patroni_master_label_is_the_primary():
     assert report["result"] == "pass", report
     # The primary is still rolled last and is where the update runs.
     assert kube.writes[3:6] == ["set image " + PG15_18, "delete tsdb-1", "delete tsdb-0"]
-    assert kube.writes[6] == "app@tsdb-0: ALTER EXTENSION timescaledb UPDATE TO '2.28.3';"
+    assert kube.writes[6] == "app@tsdb-0: ALTER EXTENSION timescaledb UPDATE TO '2.27.2';"
     assert report["final"]["instances"][0]["role"] == "primary"
 
 

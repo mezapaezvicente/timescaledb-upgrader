@@ -28,17 +28,25 @@ Some refusals hold in either mode, because no run could turn them into a
 result: a PostgreSQL major change (out of scope for ``plan``), a source above
 the target (a downgrade), a chain that cannot be bridged, and a PostgreSQL
 minor the target TimescaleDB is known to refuse at load time.
+
+Known-bad updates
+-----------------
+A hop whose single ``ALTER EXTENSION`` would hit a known TimescaleDB bug
+(:data:`support.UPDATE_HAZARDS`) is split into two hops on the same image,
+stopping at the release measured to avoid it. The second hop's rollout is a
+no-op for ``apply``: the cluster already runs that image. An image that does
+not ship the stop blocks the plan.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
-from .drift import ImageProfile, plan_chain
+from .drift import BridgeHop, ImageProfile, plan_chain
 from .images import RegistryError, parse_image_reference, parse_release_tag
 from .matrix import Matrix, MatrixError
-from .support import pg_minor_refusal, pg_minor_rules_for
+from .support import pg_minor_refusal, pg_minor_rules_for, update_hazard
 from .versions import InvalidVersion, parse_version
 
 __all__ = [
@@ -141,6 +149,41 @@ def _check_loads(out: _Collector, image: str, ts: str) -> None:
     refusal = pg_minor_refusal(ts, pg)
     if refusal is not None:
         out.block("{0}: {1}".format(image, refusal))
+
+
+def _avoid_hazards(
+    out: _Collector,
+    hops: Sequence[BridgeHop],
+    profiles: Dict[str, ImageProfile],
+) -> Tuple[List[BridgeHop], Dict[BridgeHop, str]]:
+    """Split every hop that hits a known update bug at its measured stop.
+
+    Returns the hops and, for each hop that stops short, why. Both halves of
+    a split are checked again, so stops compose.
+    """
+    done: List[BridgeHop] = []
+    why: Dict[BridgeHop, str] = {}
+    pending = list(hops)
+    while pending:
+        hop = pending.pop(0)
+        hazard = update_hazard(hop.from_version, hop.to_version)
+        if hazard is None:
+            done.append(hop)
+            continue
+        direct = "{0} -> {1} directly {2} ({3})".format(
+            hop.from_version, hop.to_version, hazard.reason, hazard.url)
+        profile = profiles.get(hop.image)
+        between = _parts(hop.from_version) < _parts(hazard.via) < _parts(hop.to_version)
+        if not between or profile is None or not profile.accepts(hazard.via):
+            out.block("{0}: {1}, and the image does not ship the stop {2}".format(
+                hop.image, direct, hazard.via))
+            done.append(hop)
+            continue
+        out.warnings.append("stopping at {0} on {1}: {2}".format(hazard.via, hop.image, direct))
+        first = BridgeHop(hop.image, hop.from_version, hazard.via)
+        why[first] = direct
+        pending[:0] = [first, BridgeHop(hop.image, hazard.via, hop.to_version)]
+    return done, why
 
 
 def _check_matrix(
@@ -269,6 +312,10 @@ def build_plan(
                 )
             hops[-1] = type(last)(last.image, last.from_version, target_ts)
 
+    profiles = {c.reference: c for c in candidates}
+    profiles[target_image] = target_profile
+    hops, stops = _avoid_hazards(out, hops, profiles)
+
     for hop in hops:
         _check_loads(out, hop.image, hop.to_version)
 
@@ -285,6 +332,16 @@ def build_plan(
     steps: List[Dict[str, Any]] = []
     for i, hop in enumerate(hops, 1):
         hop_pg = _tag_versions(hop.image).get("pg") or target_pg
+        update: Dict[str, Any] = {
+            "hop": i,
+            "action": "update_extension",
+            "from": hop.from_version,
+            "to": hop.to_version,
+            "sql": "ALTER EXTENSION timescaledb UPDATE TO '{0}';".format(hop.to_version),
+            "rules": list(_SESSION_RULES),
+        }
+        if hop in stops:
+            update["why"] = stops[hop]
         steps.extend(
             [
                 {
@@ -295,16 +352,7 @@ def build_plan(
                     "target_ts": hop.to_version,
                 },
                 {"hop": i, "action": "ensure_image", "image": hop.image},
-                {
-                    "hop": i,
-                    "action": "update_extension",
-                    "from": hop.from_version,
-                    "to": hop.to_version,
-                    "sql": "ALTER EXTENSION timescaledb UPDATE TO '{0}';".format(
-                        hop.to_version
-                    ),
-                    "rules": list(_SESSION_RULES),
-                },
+                update,
                 {
                     "hop": i,
                     "action": "cycle_sessions",
@@ -378,6 +426,8 @@ def render_runbook(plan: Dict[str, Any]) -> str:
             lines.append("{0}. update the extension {1} -> {2}:".format(
                 prefix, step["from"], step["to"]))
             lines.append("         {0}".format(step["sql"]))
+            if step.get("why"):
+                lines.append("         - stops here because {0}".format(step["why"]))
             for rule in step["rules"]:
                 lines.append("         - {0}".format(rule))
         elif action == "cycle_sessions":

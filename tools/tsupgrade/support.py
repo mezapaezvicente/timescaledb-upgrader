@@ -10,6 +10,9 @@ recalled, and all *facts about versions* rather than verdicts about upgrades:
 * :data:`PG_MINOR_RULES` -- the PostgreSQL minors each TimescaleDB series
   refuses at load time, from its own ``compat.h``.
 
+* :data:`UPDATE_HAZARDS` -- single ``ALTER EXTENSION`` updates that a known,
+  unfixed TimescaleDB bug makes fail, and the release to stop at instead.
+
 None says an upgrade is safe. The matrix says a combination is *supportable*;
 whether you can get there from where you are is the matrix module's job, and
 whether the database's contents allow it is preflight's.
@@ -25,7 +28,7 @@ and :func:`floor_disagreements` exists to surface the gap rather than hide it.
 
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple
 
 from .versions import InvalidVersion, parse_version
 
@@ -39,6 +42,9 @@ __all__ = [
     "PG_MINOR_RULES_SOURCE",
     "pg_minor_rules_for",
     "pg_minor_refusal",
+    "UpdateHazard",
+    "UPDATE_HAZARDS",
+    "update_hazard",
     "documented_pg_majors",
     "documented_ts_floor",
     "supports",
@@ -187,6 +193,74 @@ def pg_minor_refusal(ts: object, server_version: object) -> Optional[str]:
         return "TimescaleDB {0} excludes PostgreSQL {1}.{2} (compat.h at {3})".format(
             ts, major, minor, tag
         )
+    return None
+
+
+class UpdateHazard(NamedTuple):
+    """One update edge a TimescaleDB bug breaks, and the stop that avoids it.
+
+    The edge is every single ``ALTER EXTENSION`` from a version in
+    ``[from_low, from_high)`` to one in ``[to_low, to_high)``; ``to_high``
+    None means no fixed release exists. ``via`` is the stop that was measured
+    to work, inside the same image.
+    """
+
+    from_low: str
+    from_high: str
+    to_low: str
+    to_high: Optional[str]
+    via: str
+    reason: str
+    url: str
+
+
+# Measured with plain containers and with the harness (TODO.md findings 2 and
+# 8); the upstream reports are the reference, not the proof.
+UPDATE_HAZARDS: Tuple[UpdateHazard, ...] = (
+    # `2.10.1--2.10.2.sql` drops `_timescaledb_internal.ping_data_node(name)`
+    # without IF EXISTS, and that function only exists from 2.0.0. Closed
+    # upstream without a fix. Measured on pg12.22: 1.7.5 -> 2.11.2 fails,
+    # 1.7.5 -> 2.1.0 -> 2.11.2 and 1.7.5 -> 2.1.1 -> 2.11.2 pass.
+    UpdateHazard(
+        "0", "2.0.0", "2.10.2", None, "2.1.1",
+        "fails on `function _timescaledb_internal.ping_data_node(name) does not exist`",
+        "https://github.com/timescale/timescaledb/issues/5789",
+    ),
+    # The 2.28.1 repair block in `2.28.0--2.28.1.sql` drops
+    # `bgw_job_stat_history` but not the `job_errors` view on it. It fires only
+    # for a database that was *updated* across 2.15 from below, and only on
+    # update paths starting at or below 2.24. A plan cannot see that history,
+    # so the stop is taken for every such edge. Fixed in 2.29.0 (#10278); the
+    # 2.28.x backport (#10284) merged after 2.28.3, the last 2.28 release, so
+    # PG15 has no fixed release. Measured on pg15.18: 2.13.1 -> 2.20.3 ->
+    # 2.28.3 fails, 2.13.1 -> 2.20.3 -> 2.27.2 -> 2.28.3 passes.
+    UpdateHazard(
+        "2.15.0", "2.25.0", "2.28.2", "2.28.4", "2.27.2",
+        "fails on `cannot drop table _timescaledb_internal.bgw_job_stat_history` "
+        "when the database was once updated across 2.15",
+        "https://github.com/timescale/timescaledb/issues/10272",
+    ),
+)
+
+
+def update_hazard(from_version: object, to_version: object) -> Optional[UpdateHazard]:
+    """The known bug a direct update ``from_version -> to_version`` hits, if any.
+
+    None also when either version cannot be parsed: absence of a hazard here is
+    only the absence of these specific defects.
+    """
+    try:
+        src, dst = parse_version(from_version), parse_version(to_version)
+    except InvalidVersion:
+        return None
+    for hazard in UPDATE_HAZARDS:
+        if not parse_version(hazard.from_low) <= src < parse_version(hazard.from_high):
+            continue
+        if dst < parse_version(hazard.to_low):
+            continue
+        if hazard.to_high is not None and dst >= parse_version(hazard.to_high):
+            continue
+        return hazard
     return None
 
 

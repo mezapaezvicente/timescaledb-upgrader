@@ -177,11 +177,13 @@ def test_stranded_source_is_bridged_through_an_older_image():
     plan = build_plan(
         "15", "2.9.0", PG15_28, [PG15_20], matrix=EMPTY, verification_run=True
     )
-    assert plan["hops"] == 2
+    assert plan["hops"] == 3
     updates = [s for s in plan["steps"] if s["action"] == "update_extension"]
-    assert [(u["from"], u["to"]) for u in updates] == [("2.9.0", "2.20.3"), ("2.20.3", "2.28.3")]
+    assert [(u["from"], u["to"]) for u in updates] == [
+        ("2.9.0", "2.20.3"), ("2.20.3", "2.27.2"), ("2.27.2", "2.28.3"),
+    ]
     images = [s["image"] for s in plan["steps"] if s["action"] == "ensure_image"]
-    assert images == [PG15_20.reference, PG15_28.reference]
+    assert images == [PG15_20.reference, PG15_28.reference, PG15_28.reference]
 
 
 def test_stranded_source_without_candidates_is_blocked():
@@ -206,8 +208,73 @@ def test_hop_preflight_targets_the_hop_not_the_final_version():
     plan = build_plan("15", "2.9.0", PG15_28, [PG15_20], matrix=EMPTY, verification_run=True)
     preflights = [s for s in plan["steps"] if s["action"] == "preflight"]
     assert [(p["target_pg"], p["target_ts"]) for p in preflights] == [
-        ("15.13", "2.20.3"), ("15.18", "2.28.3"),
+        ("15.13", "2.20.3"), ("15.18", "2.27.2"), ("15.18", "2.28.3"),
     ]
+
+
+# --------------------------------------------------------------------------
+# Known-bad updates: stop short inside the same image
+# --------------------------------------------------------------------------
+
+PG12_11 = ImageProfile(
+    REPO + "pg12.22-ts2.11.2", (12,), "1.7.5", "2.11.2", "2.11.2",
+    installable=("1.7.5",) + tuple("2.{0}.0".format(m) for m in range(1, 11))
+    + ("2.1.1", "2.10.1", "2.10.2", "2.10.3", "2.11.0", "2.11.1", "2.11.2"),
+)
+
+
+def _updates(plan):
+    return [(s["from"], s["to"]) for s in plan["steps"] if s["action"] == "update_extension"]
+
+
+@pytest.mark.parametrize("source", ["2.15.0", "2.20.3", "2.24.0"])
+def test_unknown_history_source_stops_at_2_27_2_before_2_28_3(source):
+    """#10272: the planner cannot see whether the source was updated across 2.15."""
+    plan = build_plan("15", source, PG15_28, matrix=EMPTY, verification_run=True)
+    assert _updates(plan) == [(source, "2.27.2"), ("2.27.2", "2.28.3")]
+    images = [s["image"] for s in plan["steps"] if s["action"] == "ensure_image"]
+    assert images == [PG15_28.reference, PG15_28.reference]
+    assert any("10272" in w and "2.27.2" in w for w in plan["warnings"])
+
+
+@pytest.mark.parametrize("source", ["2.13.0", "2.14.2", "2.25.0", "2.27.2"])
+def test_sources_outside_the_bad_range_go_straight_to_2_28_3(source):
+    plan = build_plan("15", source, PG15_28, matrix=EMPTY, verification_run=True)
+    assert _updates(plan) == [(source, "2.28.3")]
+
+
+def test_1x_to_2_10_2_or_later_stops_at_2_1_1():
+    """#5789: 1.7.5 -> 2.11.2 in one ALTER fails on ping_data_node."""
+    plan = build_plan("12", "1.7.5", PG12_11, matrix=EMPTY, verification_run=True)
+    assert _updates(plan) == [("1.7.5", "2.1.1"), ("2.1.1", "2.11.2")]
+
+
+def test_1x_below_2_10_2_needs_no_stop():
+    plan = build_plan(
+        "12", "1.7.5", PG12_11, matrix=EMPTY, target_ts="2.10.1", verification_run=True
+    )
+    assert _updates(plan) == [("1.7.5", "2.10.1")]
+
+
+def test_stop_the_image_does_not_ship_blocks_the_plan():
+    no_stop = ImageProfile(
+        REPO + "pg15.18-ts2.28.3", (15,), "2.13.0", "2.28.3", "2.28.3",
+        installable=("2.20.3", "2.28.3"),
+    )
+    refused = _refusal(
+        source_pg="15", source_ts="2.20.3", target_profile=no_stop,
+        matrix=EMPTY, verification_run=True,
+    )
+    assert refused.refusals[0].kind == BLOCKED
+    assert "2.27.2" in str(refused) and "10272" in str(refused)
+
+
+def test_the_stop_says_why_in_the_plan_and_the_runbook():
+    plan = build_plan("15", "2.20.3", PG15_28, matrix=EMPTY, verification_run=True)
+    first, second = [s for s in plan["steps"] if s["action"] == "update_extension"]
+    assert "issues/10272" in first["why"]
+    assert "why" not in second
+    assert "stops here because 2.20.3 -> 2.28.3 directly" in render_runbook(plan)
 
 
 # --------------------------------------------------------------------------

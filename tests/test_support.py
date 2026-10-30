@@ -13,6 +13,7 @@ from tsupgrade.support import (
     ABI_BROKEN,
     PG_MINOR_RULES,
     SUPPORT_MATRIX,
+    UPDATE_HAZARDS,
     abi_break_for,
     documented_pg_majors,
     documented_ts_floor,
@@ -20,7 +21,9 @@ from tsupgrade.support import (
     pg_minor_refusal,
     pg_minor_rules_for,
     supports,
+    update_hazard,
 )
+from tsupgrade.versions import parse_version
 
 
 # --------------------------------------------------------------------------
@@ -226,3 +229,47 @@ def test_registry_floor_above_the_table_is_not_a_disagreement():
 
 def test_unknown_major_is_skipped_rather_than_guessed():
     assert floor_disagreements({99: (1, 0)}) == []
+
+
+# --------------------------------------------------------------------------
+# Known-bad updates
+# --------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "src,dst,issue",
+    [
+        ("1.7.5", "2.10.2", "5789"),
+        ("1.7.5", "2.11.2", "5789"),
+        ("2.15.0", "2.28.2", "10272"),
+        ("2.20.3", "2.28.3", "10272"),
+        ("2.24.1", "2.28.3", "10272"),
+    ],
+)
+def test_known_bad_updates_are_named_with_their_issue(src, dst, issue):
+    assert issue in update_hazard(src, dst).url
+
+
+@pytest.mark.parametrize(
+    "src,dst",
+    [
+        ("1.7.5", "2.10.1"),   # below the script that drops ping_data_node
+        ("2.1.1", "2.11.2"),   # the function exists from 2.0.0
+        ("2.14.2", "2.28.3"),  # below 2.15: the corrected 2.15 script runs
+        ("2.25.0", "2.28.3"),  # paths from 2.25 drop the views first
+        ("2.20.3", "2.28.0"),  # 2.28.0 has no repair block
+        ("2.20.3", "2.29.0"),  # fixed (#10278)
+        ("2.20", "2.28"),      # not exact releases: no claim
+        ("x", "2.28.3"),
+    ],
+)
+def test_updates_outside_the_hazards_are_not_flagged(src, dst):
+    assert update_hazard(src, dst) is None
+
+
+@pytest.mark.parametrize("hazard", UPDATE_HAZARDS, ids=lambda h: h.url.rsplit("/", 1)[-1])
+def test_every_stop_is_itself_safe_and_between_the_ends(hazard):
+    via = parse_version(hazard.via)
+    assert via >= parse_version(hazard.from_high)
+    assert via < parse_version(hazard.to_low)
+    assert update_hazard(hazard.from_low, hazard.via) is None
+    assert update_hazard(hazard.via, hazard.to_low) is None
