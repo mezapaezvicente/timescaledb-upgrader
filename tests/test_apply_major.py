@@ -165,6 +165,11 @@ def test_the_script_counts_hard_links_to_prove_the_mode():
     assert "-links +1" in _PG_UPGRADE_SCRIPT
 
 
+def test_the_script_never_runs_pg_upgrades_extension_script_and_removes_it():
+    assert "rm -f update_extensions.sql" in _PG_UPGRADE_SCRIPT
+    assert "psql" not in _PG_UPGRADE_SCRIPT
+
+
 def test_a_leader_elsewhere_is_switched_to_ordinal_0_before_anything_stops():
     kube = MajorKube(primary=1)
     report = _apply(_plan(), kube)

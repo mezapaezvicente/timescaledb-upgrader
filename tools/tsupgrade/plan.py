@@ -510,6 +510,9 @@ def render_runbook(plan: Dict[str, Any]) -> str:
             lines.append("         - replicas are re-created, and Patroni's stored state reset "
                          "(pg_upgrade gives the cluster a new system identifier)")
             lines.append("         - restart every instance on {0}".format(step["run_image"]))
+            lines.append("         - do not run the update_extensions.sql pg_upgrade may write: "
+                         "its bare ALTER EXTENSION timescaledb UPDATE goes straight to the "
+                         "image's default release, past any stop this plan makes")
         elif action == "analyze":
             lines.append("{0}. vacuumdb --all --analyze-in-stages: {1}".format(prefix, step["why"]))
     return "\n".join(lines)

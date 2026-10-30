@@ -576,6 +576,12 @@ report() { echo "pg_upgrade $1 failed:"; tail -n 40 "$new"/pg_upgrade_output.d/*
 "$new_bin/pg_upgrade" -b "$old_bin" -B "$new_bin" -d "$data" -D "$new" -U postgres $LINK   || { report ""; exit 1; }
 mv "$data" "$keep"
 mv "$new" "$data"
+# pg_upgrade's suggested script updates timescaledb straight to this image's
+# default release, past any stop the plan makes; the plan's updates replace it.
+if [ -f update_extensions.sql ]; then
+  echo "not run, removed: pg_upgrade's update_extensions.sql:"; sed 's/^/    /' update_extensions.sql
+  rm -f update_extensions.sql
+fi
 # Proof of the mode: with --link the new cluster's relation files are hard
 # links into the old directory; a copy has none.
 echo "relation files sharing an inode with $keep: $(find "$data/base" -type f -links +1 | wc -l)"

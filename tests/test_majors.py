@@ -173,6 +173,12 @@ def test_link_is_carried_into_every_pg_upgrade_and_the_runbook():
     assert "unusable" in render_runbook(plan)
 
 
+def test_the_runbook_warns_off_pg_upgrades_own_extension_script():
+    """pg_upgrade suggests ALTER EXTENSION timescaledb UPDATE, which would go
+    13 -> 15 straight from 2.15.3 to 2.28.3, past the 2.27.2 stop (#10272)."""
+    assert "do not run the update_extensions.sql" in render_runbook(_plan("pg16.15-ts2.30.1"))
+
+
 def test_link_without_a_major_change_is_refused():
     with pytest.raises(PlanRefused, match="--link"):
         build_plan("16.15", "2.13.0", IMAGES[R + "pg16.15-ts2.30.1"][16], matrix=Matrix([]),
