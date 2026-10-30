@@ -80,7 +80,7 @@ for series in "$@"; do
   checks="$(docker exec -i "$NAME" psql -U postgres -X -qtA -F'|' -d "$db" \
               -v expect="$version" -f - < "${HERE}/check.sql" 2>>"$log")"
   echo "$checks" >> "$log"
-  want="version rows still_compressed cagg_survived cagg_matches write_and_refresh decompress"
+  want="version rows still_compressed cagg_survived cagg_matches write_and_refresh decompress jobs"
   bad=""
   for c in $want; do
     echo "$checks" | grep -q "^check|${c}|pass|" || bad="${bad} ${c}"
@@ -89,7 +89,7 @@ for series in "$@"; do
     echo "$TAG $version  CHECK-FAIL:${bad}  $(grep -m1 -E 'ERROR' "$log")"
     failed=1
   else
-    echo "$TAG $version  ok  (7/7 checks)"
+    echo "$TAG $version  ok  (8/8 checks)"
   fi
 done
 exit $failed

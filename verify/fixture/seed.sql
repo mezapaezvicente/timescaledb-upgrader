@@ -6,6 +6,9 @@
 --   fx_metrics   hypertable, 7 daily chunks, 5 devices, one row per minute
 --   fx_hourly    continuous aggregate (hourly avg and count per device)
 --   compression  enabled, the oldest 3 chunks compressed
+--   jobs         fx_job_ok and fx_job_fail, each run once by the scheduler,
+--                so job stats (and from 2.9 job_errors) hold rows; from 2.0,
+--                where add_job arrives
 --   fx_baseline  what check.sql compares against after the upgrade
 --
 -- One script for every source version from 1.7 to 2.29. The syntax that
@@ -19,9 +22,11 @@
 --   * create_hypertable: by_range() where it exists (2.13+), positional before.
 --
 -- Deliberately not covered: time_bucket_ng aggregates (refused from 2.13, and
--- a gate rather than a fixture concern), retention, background policies. No
--- policy is added, so no background job changes the data between seed and
--- check. Values are deterministic, so the same seed is byte-identical.
+-- a gate rather than a fixture concern), retention, background policies, and
+-- user views on timescaledb_information (views.sql, an optional layer: they
+-- block most updates by design, which is the information_views gate's job).
+-- No policy is added and the jobs touch no table, so nothing changes the data
+-- between seed and check. Values are deterministic, so the data is too.
 --
 -- Run with psql -X against a database where the extension is already at the
 -- source version.
@@ -88,11 +93,64 @@ SELECT count(*) AS compressed
           FROM show_chunks('fx_metrics', older_than => TIMESTAMPTZ '2026-01-04 00:00:00+00') AS c) s
 \gset
 
+-- Jobs with a history: one success and one failure, run by the scheduler
+-- rather than run_job(), because only the scheduler records stats and errors.
+-- Daily, so neither runs again during a verification run. The wait is for the
+-- recorded failure, not for a number of runs: a failing job can have started
+-- and not yet finished.
+SELECT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+                WHERE p.proname = 'add_job' AND n.nspname = 'public') AS has_jobs \gset
+
+\if :has_jobs
+CREATE PROCEDURE fx_job_ok(job_id int, config jsonb)
+  LANGUAGE plpgsql AS $$ BEGIN PERFORM 1; END $$;
+CREATE PROCEDURE fx_job_fail(job_id int, config jsonb)
+  LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fx_job_fail: deliberate failure'; END $$;
+SELECT add_job('fx_job_ok', INTERVAL '1 day') AS job_ok,
+       add_job('fx_job_fail', INTERVAL '1 day') AS job_fail \gset
+
+-- psql does not substitute variables in a dollar-quoted body, so the block
+-- finds the jobs by name.
+DO $$
+DECLARE
+  waited int := 0;
+  ok_runs bigint;
+  failures bigint;
+  errors bigint;
+BEGIN
+  LOOP
+    SELECT s.total_runs INTO ok_runs
+      FROM timescaledb_information.jobs j JOIN timescaledb_information.job_stats s USING (job_id)
+     WHERE j.proc_name = 'fx_job_ok';
+    SELECT s.total_failures INTO failures
+      FROM timescaledb_information.jobs j JOIN timescaledb_information.job_stats s USING (job_id)
+     WHERE j.proc_name = 'fx_job_fail';
+    errors := 1;
+    IF EXISTS (SELECT 1 FROM pg_views WHERE schemaname = 'timescaledb_information'
+                  AND viewname = 'job_errors') THEN
+      EXECUTE 'SELECT count(*) FROM timescaledb_information.job_errors WHERE proc_name = ''fx_job_fail'''
+         INTO errors;
+    END IF;
+    EXIT WHEN coalesce(ok_runs, 0) >= 1 AND coalesce(failures, 0) >= 1 AND errors >= 1;
+    IF waited >= 120 THEN
+      RAISE EXCEPTION 'fixture jobs did not run within 120s (ok runs %, failures %, errors %)',
+        ok_runs, failures, errors;
+    END IF;
+    PERFORM pg_sleep(1);
+    waited := waited + 1;
+  END LOOP;
+END $$;
+\set jobs 2
+\else
+\set jobs 0
+\endif
+
 CREATE TABLE fx_baseline AS
 SELECT :'extversion'::text                          AS seeded_at,
        (SELECT count(*) FROM fx_metrics)            AS rows,
        (SELECT sum(value::numeric) FROM fx_metrics) AS total,
        (SELECT count(*) FROM fx_hourly)             AS cagg_rows,
-       :compressed::bigint                          AS compressed;
+       :compressed::bigint                          AS compressed,
+       :jobs::int                                   AS jobs;
 
 SELECT 'seeded' AS fixture, * FROM fx_baseline;

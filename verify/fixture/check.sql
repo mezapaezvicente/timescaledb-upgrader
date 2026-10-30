@@ -33,6 +33,23 @@ SELECT 'check', 'rows',
        format('%s rows, sum %s; seeded %s rows, sum %s at %s', n, t, b.rows, b.total, b.seeded_at)
   FROM (SELECT count(*) AS n, sum(value::numeric) AS t FROM fx_metrics) m, fx_baseline b;
 
+-- The jobs are still registered and their stats still show the success and
+-- the failure. job_errors is not compared: from 2.15 it reads a table the
+-- update itself rebuilds.
+SELECT 'check', 'jobs',
+       CASE WHEN b.jobs = 0 OR (registered = b.jobs AND ok_runs >= 1 AND failures >= 1)
+            THEN 'pass' ELSE 'fail' END,
+       CASE WHEN b.jobs = 0 THEN format('none seeded at %s', b.seeded_at)
+            ELSE format('%s jobs registered, seeded %s; fx_job_ok %s runs, fx_job_fail %s failures',
+                        registered, b.jobs, ok_runs, failures) END
+  FROM fx_baseline b,
+       (SELECT count(*) AS registered,
+               coalesce(sum(s.total_runs) FILTER (WHERE j.proc_name = 'fx_job_ok'), 0) AS ok_runs,
+               coalesce(sum(s.total_failures) FILTER (WHERE j.proc_name = 'fx_job_fail'), 0) AS failures
+          FROM timescaledb_information.jobs j
+          LEFT JOIN timescaledb_information.job_stats s USING (job_id)
+         WHERE j.proc_name IN ('fx_job_ok', 'fx_job_fail')) j;
+
 -- The upgrade must not decompress anything on its own.
 SELECT 'check', 'still_compressed',
        CASE WHEN n = b.compressed THEN 'pass' ELSE 'fail' END,

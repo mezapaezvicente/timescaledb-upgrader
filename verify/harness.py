@@ -62,7 +62,7 @@ SELECTOR = "application=patroni,cluster-name=tsdb"
 PROTECTED_CLUSTERS = ("tsdb-upgrader",)
 CHECKS = (
     "version", "rows", "still_compressed", "cagg_survived",
-    "cagg_matches", "write_and_refresh", "decompress",
+    "cagg_matches", "write_and_refresh", "decompress", "jobs",
 )
 MODES = ("empty", "seeded")
 FIXTURE = REPO / "verify" / "fixture"
