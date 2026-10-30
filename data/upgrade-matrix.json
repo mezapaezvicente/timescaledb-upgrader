@@ -162,9 +162,12 @@
       "source_ts": "2.0",
       "target_pg": "12",
       "target_ts": "2.11",
-      "verdict": "unsupported",
-      "reason": "No measured pg12 image ships both 2.0.x and 2.1 or later: pg12.6-ts2.0.1-p0 stops at 2.0.1 and pg12.22-ts2.11.2 ships 1.7.5 and 2.1.0 onwards, so `tsupgrade plan` refuses the row (bridging stalls at ts2.0.1). The target image exists; nothing bridges to it. A pg12 ts2.1.x image might; unmeasured.",
-      "steps": [],
+      "verdict": "in_place",
+      "reason": "Bridged through pg12.6-ts2.1.1-p2, the only measured pg12 image that ships both 2.0.x and 2.1 or later (2.0.0-2.0.2 and 2.1.0-2.1.1); pg12.6-ts2.0.1-p0 stops at 2.0.1 and pg12.22-ts2.11.2 has no 2.0.x.",
+      "steps": [
+        "roll out pg12.6-ts2.1.1-p2 and update to its newest release (2.1.1)",
+        "roll out pg12.22-ts2.11.2 and update to 2.11.2"
+      ],
       "verified": true,
       "evidence": {
         "empty": "verify/evidence/pg12/2.0-to-2.11.empty.json",

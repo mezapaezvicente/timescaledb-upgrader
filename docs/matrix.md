@@ -23,7 +23,7 @@ A verdict is established only by running that migration with the upgrader itself
 | `11` | `2.1` | `17` | `2.30` | unknown | — | — | — | — |
 | `11` | `2.1` | `18` | `2.30` | unknown | — | — | — | — |
 | `12` | `1.7` | `12` | `2.11` | in place | 12.22 | [empty: pass](../verify/evidence/pg12/1.7-to-2.11.empty.json) · [seeded: pass](../verify/evidence/pg12/1.7-to-2.11.seeded.json) | Passes only with the stop at 2.1.1 that `tsupgrade plan` inserts. A single update from 1.x to 2.10.2 or later fails: `2.10.1--2.10.2.sql` drops `_timescaledb_internal.ping_data_node(name)` without IF EXISTS, and that function only exists from 2.0.0 (#5789, closed upstream without a fix). | [#5789](https://github.com/timescale/timescaledb/issues/5789) |
-| `12` | `2.0` | `12` | `2.11` | **unsupported** | 12.6 | [empty: fail](../verify/evidence/pg12/2.0-to-2.11.empty.json) · [seeded: fail](../verify/evidence/pg12/2.0-to-2.11.seeded.json) | No measured pg12 image ships both 2.0.x and 2.1 or later: pg12.6-ts2.0.1-p0 stops at 2.0.1 and pg12.22-ts2.11.2 ships 1.7.5 and 2.1.0 onwards, so `tsupgrade plan` refuses the row (bridging stalls at ts2.0.1). The target image exists; nothing bridges to it. A pg12 ts2.1.x image might; unmeasured. | — |
+| `12` | `2.0` | `12` | `2.11` | in place | 12.22 | [empty: pass](../verify/evidence/pg12/2.0-to-2.11.empty.json) · [seeded: pass](../verify/evidence/pg12/2.0-to-2.11.seeded.json) | Bridged through pg12.6-ts2.1.1-p2, the only measured pg12 image that ships both 2.0.x and 2.1 or later (2.0.0-2.0.2 and 2.1.0-2.1.1); pg12.6-ts2.0.1-p0 stops at 2.0.1 and pg12.22-ts2.11.2 has no 2.0.x. | — |
 | `12` | `2.1` | `12` | `2.11` | in place | 12.22 | [empty: pass](../verify/evidence/pg12/2.1-to-2.11.empty.json) · [seeded: pass](../verify/evidence/pg12/2.1-to-2.11.seeded.json) | — | — |
 | `12` | `2.2` | `12` | `2.11` | in place | 12.22 | [empty: pass](../verify/evidence/pg12/2.2-to-2.11.empty.json) · [seeded: pass](../verify/evidence/pg12/2.2-to-2.11.seeded.json) | — | — |
 | `12` | `2.3` | `12` | `2.11` | in place | 12.22 | [empty: pass](../verify/evidence/pg12/2.3-to-2.11.empty.json) · [seeded: pass](../verify/evidence/pg12/2.3-to-2.11.seeded.json) | — | — |
@@ -149,6 +149,11 @@ A verdict is established only by running that migration with the upgrader itself
 ### pg12/ts1.7 -> pg12/ts2.11
 
 1. update to 2.1.1 first, then to 2.11.2; `tsupgrade plan` inserts this stop (#5789)
+
+### pg12/ts2.0 -> pg12/ts2.11
+
+1. roll out pg12.6-ts2.1.1-p2 and update to its newest release (2.1.1)
+1. roll out pg12.22-ts2.11.2 and update to 2.11.2
 
 ### pg13/ts2.1 -> pg13/ts2.15
 
