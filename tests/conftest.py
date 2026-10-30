@@ -60,6 +60,9 @@ def valid_entry() -> Dict[str, Any]:
         "evidence": {
             "empty": "verify/evidence/fixture.empty.json",
             "seeded": "verify/evidence/fixture.seeded.json",
+            # A major change: --link has to be shown to work too.
+            "link-empty": "verify/evidence/fixture.link-empty.json",
+            "link-seeded": "verify/evidence/fixture.link-seeded.json",
         },
         "references": ["https://example.invalid/fixture"],
     }

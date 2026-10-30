@@ -59,7 +59,9 @@
       "verified": true,
       "evidence": {
         "empty": "verify/evidence/fixture-series.empty.json",
-        "seeded": "verify/evidence/fixture-series.seeded.json"
+        "seeded": "verify/evidence/fixture-series.seeded.json",
+        "link-empty": "verify/evidence/fixture-series.link-empty.json",
+        "link-seeded": "verify/evidence/fixture-series.link-seeded.json"
       },
       "references": [
         "https://example.invalid/fixture-series"
@@ -79,7 +81,9 @@
       "verified": true,
       "evidence": {
         "empty": "verify/evidence/fixture-pinned.empty.json",
-        "seeded": "verify/evidence/fixture-pinned.seeded.json"
+        "seeded": "verify/evidence/fixture-pinned.seeded.json",
+        "link-empty": "verify/evidence/fixture-pinned.link-empty.json",
+        "link-seeded": "verify/evidence/fixture-pinned.link-seeded.json"
       },
       "references": [
         "https://example.invalid/fixture-pinned"
@@ -96,7 +100,9 @@
       "verified": true,
       "evidence": {
         "empty": "verify/evidence/fixture-unsupported.empty.json",
-        "seeded": "verify/evidence/fixture-unsupported.seeded.json"
+        "seeded": "verify/evidence/fixture-unsupported.seeded.json",
+        "link-empty": "verify/evidence/fixture-unsupported.link-empty.json",
+        "link-seeded": "verify/evidence/fixture-unsupported.link-seeded.json"
       },
       "references": [
         "https://example.invalid/fixture-unsupported"

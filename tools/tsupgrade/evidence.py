@@ -15,7 +15,9 @@ a harness can add what turns out to matter without a schema change:
 ``mode``            ``empty`` or ``seeded``; ``history-empty`` or
                     ``history-seeded`` when the database was created at an
                     older release and updated to the source before the run
-                    (``history`` then names that release)
+                    (``history`` then names that release); ``link-empty`` or
+                    ``link-seeded`` when a PostgreSQL major change ran
+                    ``pg_upgrade --link`` instead of copying
 ``images``          every image the run used, in order, each ``{reference,
                     digest}`` -- a two-image row lists both
 ``pg_version``      the exact server version the extension ran on
@@ -66,7 +68,7 @@ __all__ = [
 ]
 
 EVIDENCE_FORMAT = 1
-MODES = ("empty", "seeded", "history-empty", "history-seeded")
+MODES = ("empty", "seeded", "history-empty", "history-seeded", "link-empty", "link-seeded")
 CONTROLS = ("direct",)
 RESULTS = ("pass", "fail")
 
@@ -228,14 +230,19 @@ def validate_record(doc: Any) -> List[str]:
 def record_path(root: Path, transition: Dict[str, str], mode: str) -> Path:
     """``<root>/pg<major>/<source_ts>-to-<target_ts>.<mode>.json``.
 
+    A row that changes the PostgreSQL major names the target major too
+    (``2.11-to-pg16-2.30``), since several share a source and a series.
     ``mode`` is the record's :func:`evidence_key`, which differs from its
     ``mode`` field only for a control.
 
     One file per row and mode, overwritten by a re-run; git keeps the earlier
     ones, which is where a run before a tool fix stays visible.
     """
+    target = transition["target_ts"]
+    if transition["target_pg"] != transition["source_pg"]:
+        target = "pg{0}-{1}".format(transition["target_pg"], target)
     return root / "pg{0}".format(transition["source_pg"]) / "{0}-to-{1}.{2}.json".format(
-        transition["source_ts"], transition["target_ts"], mode
+        transition["source_ts"], target, mode
     )
 
 

@@ -4,8 +4,10 @@
     python verify/harness.py --list [--pg 15]
     python verify/harness.py --pg 15 [--from 2.13] [--mode both] [--cluster tsdb-verify]
     python verify/harness.py --pg 15 --from 2.20 --history 2.13.1 [--control direct]
+    python verify/harness.py --pg 12 --from 2.11 --to-pg 16 [--link]
 
-For each same-PG matrix row it picks images from the measured contents
+For each matrix row (same-PG, or with ``--to-pg`` the ones changing to that
+major) it picks images from the measured contents
 (``data/image-contents.json``), resolves the row's series to exact releases,
 and then, once per mode (empty, seeded):
 
@@ -27,6 +29,12 @@ staging, the update runs as a single ALTER EXTENSION to the target instead of
 ``plan`` and ``apply``. It shows what a step the planner adds protects
 against, and its records (``direct-history-*``) never verify a row. Only a
 row that runs on one image can be controlled this way.
+
+A row that changes the PostgreSQL major is staged on an image of the source
+major and planned with every measured image carrying a major in between;
+``plan`` routes it through ``pg_upgrade``. ``--link`` plans ``pg_upgrade
+--link`` instead of copying; its records are ``link-empty`` and
+``link-seeded``, and a verified major change needs them as well.
 
 Failures are recorded and the run goes on. A failure to stage or seed is the
 harness's or the environment's, not the row's, so it gets no record -- it is
@@ -109,6 +117,7 @@ class Run:
     candidates: Tuple[str, ...] = ()  # same-major images offered to plan as --via
     history: Optional[str] = None     # created at this release, then updated to source
     control: Optional[str] = None     # "direct": one ALTER instead of plan/apply
+    link: bool = False                # pg_upgrade --link on a major change
 
     @property
     def major(self) -> int:
@@ -116,7 +125,13 @@ class Run:
 
     def mode(self, base: str) -> str:
         """The record mode for a base mode (empty or seeded)."""
+        if self.link:
+            return "link-" + base
         return "history-" + base if self.history else base
+
+    @property
+    def cross(self) -> bool:
+        return self.entry.source_pg != self.entry.target_pg
 
     def key(self, base: str) -> str:
         """What the record is filed and cited as."""
@@ -129,8 +144,15 @@ class Run:
                 "target_pg": e.target_pg, "target_ts": e.target_ts}
 
     @property
+    def stem(self) -> str:
+        """``<source_ts>-to-<target_ts>``, naming the target major on a major change."""
+        e = self.entry
+        target = "pg{0}-{1}".format(e.target_pg, e.target_ts) if self.cross else e.target_ts
+        return "{0}-to-{1}".format(e.source_ts, target)
+
+    @property
     def slug(self) -> str:
-        return "pg{0}/{1}-to-{2}".format(self.major, self.entry.source_ts, self.entry.target_ts)
+        return "pg{0}/{1}".format(self.major, self.stem)
 
 
 @dataclass(frozen=True)
@@ -178,12 +200,12 @@ def resolve(entry: MatrixEntry, contents: ImageContents) -> Union[Run, Unrunnabl
     same-major image that ships it and reaches furthest, and ``plan`` finds
     the bridge. Each series resolves to its newest patch on the image used.
     """
-    if entry.source_pg != entry.target_pg:
-        return Unrunnable(entry, "crosses PostgreSQL majors; out of scope")
     try:
-        major = int(entry.source_pg)
+        major, target_major = int(entry.source_pg), int(entry.target_pg)
     except ValueError:
-        return Unrunnable(entry, "source_pg {0!r} is not a major".format(entry.source_pg))
+        return Unrunnable(entry, "{0!r} -> {1!r} are not majors".format(entry.source_pg, entry.target_pg))
+    if target_major != major:
+        return _resolve_cross(entry, contents, major, target_major)
     images = _images_for(contents, major)
 
     targets = [(ref, inst, sv, _newest_in(inst, entry.target_ts)) for ref, inst, sv in images]
@@ -207,6 +229,45 @@ def resolve(entry: MatrixEntry, contents: ImageContents) -> Union[Run, Unrunnabl
         return Unrunnable(entry, "source {0} is not below target {1}".format(source, target))
     candidates = tuple(ref for ref, _, _ in images if ref != t_ref)
     return Run(entry, s_ref, t_ref, source, target, s_sv, t_sv, candidates)
+
+
+def _resolve_cross(entry: MatrixEntry, contents: ImageContents, major: int,
+                   target_major: int) -> Union[Run, Unrunnable]:
+    """A major change: the target as for any row, on the target major; the
+    source on the source-major image reaching furthest that ships it; and as
+    candidates every measured image carrying any major in between, which is
+    where ``plan`` finds the ``pg_upgrade`` images."""
+    if target_major < major:
+        return Unrunnable(entry, "a PostgreSQL downgrade")
+    targets = [(ref, inst, sv, _newest_in(inst, entry.target_ts))
+               for ref, inst, sv in _images_for(contents, target_major)]
+    targets = [t for t in targets if t[3]]
+    if not targets:
+        return Unrunnable(entry, "no measured pg{0} image ships {1}.x".format(
+            target_major, entry.target_ts))
+    t_ref, _, t_sv, target = max(targets, key=lambda t: (_key(t[3]), _key(t[2])))
+    starts = [(ref, inst, sv, _newest_in(inst, entry.source_ts))
+              for ref, inst, sv in _images_for(contents, major)]
+    starts = [s for s in starts if s[3]]
+    if not starts:
+        return Unrunnable(entry, "no measured pg{0} image ships {1}.x".format(major, entry.source_ts))
+    s_ref, _, s_sv, source = max(starts, key=lambda s: (_key(s[3]), _key(max(s[1], key=_key)),
+                                                       _key(s[2])))
+    candidates = tuple(
+        "{0}:{1}".format(contents.repository, tag)
+        for tag, item in sorted(contents.images.items())
+        if any(major <= int(m) <= target_major for m in (item.get("pg") or {}))
+        and "{0}:{1}".format(contents.repository, tag) != t_ref)
+    return Run(entry, s_ref, t_ref, source, target, s_sv, t_sv, candidates)
+
+
+def with_link(run: Run) -> Union[Run, Unrunnable]:
+    """The same major change, with pg_upgrade --link."""
+    if not run.cross:
+        return Unrunnable(run.entry, "--link only applies to a PostgreSQL major change")
+    if run.history or run.control:
+        return Unrunnable(run.entry, "--link is not combined with --history or --control")
+    return replace(run, link=True)
 
 
 def with_history(run: Run, version: str, contents: ImageContents) -> Union[Run, Unrunnable]:
@@ -244,8 +305,13 @@ def select_rows(
     entries: Sequence[MatrixEntry],
     majors: Sequence[str] = (),
     sources: Sequence[str] = (),
+    to_pgs: Sequence[str] = (),
 ) -> List[MatrixEntry]:
-    rows = [e for e in entries if e.source_pg == e.target_pg]
+    """Same-PG rows; with ``to_pgs``, the rows changing to those majors instead."""
+    if to_pgs:
+        rows = [e for e in entries if e.target_pg in to_pgs and e.source_pg != e.target_pg]
+    else:
+        rows = [e for e in entries if e.source_pg == e.target_pg]
     if majors:
         rows = [e for e in rows if e.source_pg in majors]
     if sources:
@@ -327,12 +393,19 @@ def judge(
 
 
 def images_used(run: Run, plan: Optional[Dict[str, Any]]) -> List[str]:
-    """The start image, then every image the plan rolls onto, in order."""
+    """The start image, then every image the plan runs, in order: rollouts,
+    and for a major change the pg_upgrade image and the one restarted on."""
     seen = [run.start_image]
     for step in (plan or {}).get("steps") or []:
-        image = step.get("image")
-        if step.get("action") == "ensure_image" and image and image not in seen:
-            seen.append(image)
+        if step.get("action") == "ensure_image":
+            names = [step.get("image")]
+        elif step.get("action") == "major_upgrade":
+            names = [step.get("image"), step.get("run_image")]
+        else:
+            continue
+        for image in names:
+            if image and image not in seen:
+                seen.append(image)
     if plan is None and run.target_image not in seen:
         seen.append(run.target_image)
     return seen
@@ -562,6 +635,8 @@ def make_plan(run: Run, path: Path, log: Log) -> Tuple[Optional[Dict[str, Any]],
     args = ["plan", "--from-pg", run.start_pg, "--from-ts", run.source,
             "--target-image", run.target_image, "--target-ts", run.target,
             "--verification-run", "--output", str(path)]
+    if run.link:
+        args.append("--link")
     for ref in run.candidates:
         args += ["--via", ref]
     rc, _, err = tsupgrade(args, log, timeout=300)
@@ -645,7 +720,7 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
             cluster: Cluster, contents: ImageContents, revision: Dict[str, Any]) -> Dict[str, Any]:
     mode, key = run.mode(base), run.key(base)
     out_dir = OUT / "pg{0}".format(run.major)
-    stem = "{0}-to-{1}.{2}".format(run.entry.source_ts, run.entry.target_ts, key)
+    stem = "{0}.{1}".format(run.stem, key)
     log = Log(out_dir / (stem + ".log"))
     started = _now()
     log.write("row {0}  mode {1}  source {2} on {3}  target {4} on {5}{6}{7}".format(
@@ -768,14 +843,20 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="skip rows and modes that already have a record from a clean tree")
     ap.add_argument("--history", metavar="RELEASE",
                     help="create the database at this release, then update it to the source")
+    ap.add_argument("--to-pg", action="append", default=[], dest="to_pgs",
+                    help="run the rows that change to this PostgreSQL major; repeatable")
+    ap.add_argument("--link", action="store_true",
+                    help="on a major change, pg_upgrade --link instead of copying")
     ap.add_argument("--control", choices=CONTROLS,
                     help="negative control: one ALTER EXTENSION instead of plan/apply "
                          "(needs --history)")
     args = ap.parse_args(argv)
 
     contents = load_contents()
-    rows = select_rows(load_matrix().entries, args.pg, args.sources)
+    rows = select_rows(load_matrix().entries, args.pg, args.sources, args.to_pgs)
     resolved = [resolve(e, contents) for e in rows]
+    if args.link:
+        resolved = [with_link(r) if isinstance(r, Run) else r for r in resolved]
     if args.history:
         resolved = [with_history(r, args.history, contents) if isinstance(r, Run) else r
                     for r in resolved]
@@ -785,12 +866,13 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     skipped = [r for r in resolved if isinstance(r, Unrunnable)]
 
     for run in runs:
-        print("{0:<18} {1:>7} -> {2:<7} on {3}{4}{5}{6}".format(
+        print("{0:<18} {1:>7} -> {2:<7} on {3}{4}{5}{6}{7}".format(
             run.slug, run.source, run.target, run.start_image.split(":")[-1],
             "" if run.start_image == run.target_image
             else " then " + run.target_image.split(":")[-1],
             "  (created at {0})".format(run.history) if run.history else "",
-            "  CONTROL {0}".format(run.control) if run.control else ""))
+            "  CONTROL {0}".format(run.control) if run.control else "",
+            "  --link" if run.link else ""))
     for skip in skipped:
         e = skip.entry
         print("{0:<18} skipped: {1}".format(
@@ -813,7 +895,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         plan_path: Optional[Path] = None
         if not run.control:
             out_dir = OUT / "pg{0}".format(run.major)
-            stem = "{0}-to-{1}".format(run.entry.source_ts, run.entry.target_ts)
+            stem = run.stem + (".link" if run.link else "")
             plan_log = Log(out_dir / (stem + ".plan.log"))
             plan_path = out_dir / (stem + ".plan.json")
             plan, plan_err = make_plan(run, plan_path, plan_log)

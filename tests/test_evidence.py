@@ -123,6 +123,12 @@ def test_record_path_is_one_file_per_row_and_mode(tmp_path):
     assert record_path(tmp_path, ROW, "empty") == tmp_path / "pg15" / "2.13-to-2.28.empty.json"
 
 
+def test_a_major_change_names_its_target_major_in_the_path(tmp_path):
+    row = {"source_pg": "12", "source_ts": "2.11", "target_pg": "16", "target_ts": "2.30"}
+    assert record_path(tmp_path, row, "link-seeded") == (
+        tmp_path / "pg12" / "2.11-to-pg16-2.30.link-seeded.json")
+
+
 def test_write_and_load_round_trip(tmp_path):
     path = record_path(tmp_path, ROW, "seeded")
     write_record(path, _record())

@@ -32,6 +32,7 @@ __all__ = [
     "VERDICTS",
     "EVIDENCE_MODES",
     "OPTIONAL_EVIDENCE",
+    "CROSS_PG_EVIDENCE",
     "MatrixError",
     "MatrixEntry",
     "Matrix",
@@ -51,7 +52,11 @@ EVIDENCE_MODES = ("empty", "seeded")
 OPTIONAL_EVIDENCE = (
     "history-empty", "history-seeded",
     "direct-history-empty", "direct-history-seeded",
+    "link-empty", "link-seeded",
 )
+# A PostgreSQL major change is offered with pg_upgrade --link as well as by
+# copying, so a verified one has to show both worked.
+CROSS_PG_EVIDENCE = ("link-empty", "link-seeded")
 
 _REQUIRED_FIELDS = ("source_pg", "source_ts", "target_pg", "target_ts")
 
@@ -180,6 +185,12 @@ def _entry_from_dict(raw: Any, index: int) -> MatrixEntry:
             raise MatrixError(
                 "{0}: verified entries must carry evidence of the empty and "
                 "seeded runs".format(where)
+            )
+        elif str(raw["source_pg"]) != str(raw["target_pg"]) and not set(CROSS_PG_EVIDENCE) <= set(evidence):
+            raise MatrixError(
+                "{0}: a verified PostgreSQL major change must also carry {1}: "
+                "--link is offered, so it has to be shown to work".format(
+                    where, " and ".join(CROSS_PG_EVIDENCE))
             )
     elif evidence is not None:
         raise MatrixError(

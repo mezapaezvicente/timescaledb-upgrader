@@ -94,10 +94,10 @@ def test_source_series_nobody_ships_is_unrunnable():
     assert "2.10.x" in skip.reason
 
 
-def test_cross_pg_rows_are_out_of_scope():
+def test_a_cross_pg_row_needs_a_target_major_image():
     skip = harness.resolve(_row("15", "2.28", "2.28", target_pg="16"), PG15)
     assert isinstance(skip, harness.Unrunnable)
-    assert "crosses" in skip.reason
+    assert "no measured pg16 image" in skip.reason
 
 
 def test_select_rows_keeps_same_pg_and_filters():
@@ -325,3 +325,51 @@ def test_resume_finds_history_and_control_records_by_their_key(tmp_path):
     write_record(record_path(tmp_path, run.transition, "direct-history-empty"), doc)
     assert harness.recorded(run, "empty", tmp_path)
     assert not harness.recorded(harness.with_history(LATE, "2.13.1", PG15), "empty", tmp_path)
+
+
+# --- major changes ----------------------------------------------------------
+
+XPG = ImageContents({"repository": REPO, "images": {
+    "pg12.22-ts2.11.2": {"digest": "sha256:a1", "pg": {"12": {
+        "server_version": "12.22", "installable": ["2.1.0", "2.11.2"]}}},
+    "pg13.12-ts2.11.2-all": {"digest": "sha256:a2", "pg": {
+        "12": {"server_version": "12.16", "installable": ["2.1.0", "2.11.2"]},
+        "13": {"server_version": "13.12", "installable": ["2.1.0", "2.11.2"]}}},
+    "pg13.22-ts2.15.3": {"digest": "sha256:a3", "pg": {"13": {
+        "server_version": "13.22", "installable": ["2.1.0", "2.11.2", "2.15.3"]}}},
+    "pg16.15-ts2.30.1": {"digest": "sha256:a4", "pg": {"16": {
+        "server_version": "16.15", "installable": ["2.13.0", "2.30.1"]}}},
+}})
+
+
+def test_a_major_change_starts_on_the_source_major_and_offers_every_image_between():
+    run = harness.resolve(_row("12", "2.11", "2.15", target_pg="13"), XPG)
+    assert isinstance(run, harness.Run) and run.cross
+    assert (run.start_image, run.source) == (REPO + ":pg12.22-ts2.11.2", "2.11.2")
+    assert (run.target_image, run.target) == (REPO + ":pg13.22-ts2.15.3", "2.15.3")
+    assert REPO + ":pg13.12-ts2.11.2-all" in run.candidates
+    assert REPO + ":pg16.15-ts2.30.1" not in run.candidates  # outside 12..13
+    assert run.slug == "pg12/2.11-to-pg13-2.15"
+
+
+def test_select_rows_takes_major_changes_only_when_asked():
+    rows = [_row("12", "2.11", "2.11"), _row("12", "2.11", "2.15", target_pg="13"),
+            _row("12", "2.11", "2.30", target_pg="16")]
+    assert [r.target_pg for r in harness.select_rows(rows)] == ["12"]
+    assert [r.target_pg for r in harness.select_rows(rows, to_pgs=["13", "16"])] == ["13", "16"]
+
+
+def test_link_is_only_for_a_major_change_and_names_its_records():
+    run = harness.with_link(harness.resolve(_row("12", "2.11", "2.15", target_pg="13"), XPG))
+    assert run.link and run.key("seeded") == "link-seeded"
+    assert "major change" in harness.with_link(RUN).reason
+
+
+def test_images_used_includes_the_pg_upgrade_and_restart_images():
+    run = harness.resolve(_row("12", "2.11", "2.15", target_pg="13"), XPG)
+    plan = {"steps": [
+        {"action": "major_upgrade", "image": REPO + ":pg13.12-ts2.11.2-all",
+         "run_image": REPO + ":pg13.22-ts2.15.3"},
+        {"action": "ensure_image", "image": REPO + ":pg13.22-ts2.15.3"}]}
+    assert harness.images_used(run, plan) == [
+        REPO + ":pg12.22-ts2.11.2", REPO + ":pg13.12-ts2.11.2-all", REPO + ":pg13.22-ts2.15.3"]

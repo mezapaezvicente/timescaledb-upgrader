@@ -116,9 +116,20 @@ def test_evidence_may_add_history_runs_and_controls(write_matrix, valid_entry):
         "empty": "a.json", "seeded": "b.json",
         "history-empty": "c.json", "history-seeded": "d.json",
         "direct-history-empty": "e.json", "direct-history-seeded": "f.json",
+        "link-empty": "g.json", "link-seeded": "h.json",
     }
     entry = load_matrix(write_matrix({"entries": [valid_entry]})).entries[0]
     assert entry.evidence["direct-history-seeded"] == "f.json"
+
+
+def test_a_verified_major_change_needs_its_link_runs_too(write_matrix, valid_entry):
+    """--link is offered for every major change, so it has to be shown to work."""
+    del valid_entry["evidence"]["link-seeded"]
+    with pytest.raises(MatrixError, match="link-empty and link-seeded"):
+        load_matrix(write_matrix({"entries": [valid_entry]}))
+    valid_entry.update(target_pg="16")
+    valid_entry["evidence"].pop("link-empty")
+    assert load_matrix(write_matrix({"entries": [valid_entry]})).entries[0].verified
 
 
 def test_history_runs_never_replace_the_two_runs(write_matrix, valid_entry):

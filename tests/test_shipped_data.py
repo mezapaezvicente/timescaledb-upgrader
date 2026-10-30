@@ -91,7 +91,7 @@ def test_every_verified_row_agrees_with_its_evidence():
         if entry.verdict == "in_place":
             for doc in runs.values():
                 assert doc["versions"]["reached"] == doc["versions"]["target"], where
-            for prefix in ("", "history-"):
+            for prefix in ("", "history-", "link-"):
                 empty, seeded = runs.get(prefix + "empty"), runs.get(prefix + "seeded")
                 if empty is not None:
                     assert empty["result"] == "pass", (where, prefix)
@@ -121,7 +121,7 @@ def test_a_cited_control_shows_the_failure_it_controls_for():
 
 
 def test_every_same_pg_row_is_settled():
-    """Only the cross-PG rows, out of scope, may still be unverified."""
+    """Of the same-PG rows, none may still be unverified."""
     for entry in load_matrix():
         if entry.source_pg == entry.target_pg:
             assert entry.verified, entry.transition
