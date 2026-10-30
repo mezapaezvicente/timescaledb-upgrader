@@ -20,15 +20,15 @@
     "reached": "2.28.3"
   },
   "upgrader": {
-    "commit": "0dc00fd7c768d6082fc9913326159f4b1045927f",
+    "commit": "edf3280a39bb557f2330eb186c8e1f102afbbd5b",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg15/2.16-to-2.28.empty.log",
-  "recorded_at": "2026-10-29T15:56:18Z",
+  "recorded_at": "2026-10-30T03:40:23Z",
   "stage": "done",
-  "started_at": "2026-10-29T15:56:00Z",
-  "finished_at": "2026-10-29T15:56:18Z",
+  "started_at": "2026-10-30T03:39:56Z",
+  "finished_at": "2026-10-30T03:40:23Z",
   "source_pg_version": "15.18",
   "replicas": 2,
   "pods": [
@@ -50,7 +50,7 @@
   "baseline": null,
   "checks": null,
   "plan": {
-    "hops": 1,
+    "hops": 2,
     "path": "verify/out/pg15/2.16-to-2.28.plan.json"
   },
   "apply_exit": 0

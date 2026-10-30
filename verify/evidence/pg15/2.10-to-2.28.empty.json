@@ -21,22 +21,18 @@
   "versions": {
     "source": "2.10.3",
     "target": "2.28.3",
-    "reached": "2.20.3"
+    "reached": "2.28.3"
   },
   "upgrader": {
-    "commit": "0dc00fd7c768d6082fc9913326159f4b1045927f",
+    "commit": "edf3280a39bb557f2330eb186c8e1f102afbbd5b",
     "dirty": false
   },
-  "result": "fail",
+  "result": "pass",
   "log": "verify/out/pg15/2.10-to-2.28.empty.log",
-  "recorded_at": "2026-10-29T15:43:43Z",
-  "failure": {
-    "explanation": "hop 2 update_extension failed: ALTER EXTENSION failed in database verify (already updated: none)",
-    "error": "DETAIL:  The job history will only keep the last 1000 successes and failures and run once each day.\nERROR:  cannot drop table _timescaledb_internal.bgw_job_stat_history because other objects depend on it\nDETAIL:  view timescaledb_information.job_errors depends on table _timescaledb_internal.bgw_job_stat_history\nHINT:  Use DROP ... CASCADE to drop the dependent objects too.\nCONTEXT:  SQL statement \"DROP TABLE _timescaledb_internal.bgw_job_stat_history\""
-  },
-  "stage": "apply",
-  "started_at": "2026-10-29T15:39:59Z",
-  "finished_at": "2026-10-29T15:43:43Z",
+  "recorded_at": "2026-10-30T03:19:26Z",
+  "stage": "done",
+  "started_at": "2026-10-30T03:15:32Z",
+  "finished_at": "2026-10-30T03:19:26Z",
   "source_pg_version": "15.13",
   "replicas": 2,
   "pods": [
@@ -58,8 +54,8 @@
   "baseline": null,
   "checks": null,
   "plan": {
-    "hops": 2,
+    "hops": 3,
     "path": "verify/out/pg15/2.10-to-2.28.plan.json"
   },
-  "apply_exit": 2
+  "apply_exit": 0
 }

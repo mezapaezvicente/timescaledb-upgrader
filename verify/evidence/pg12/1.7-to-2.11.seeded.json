@@ -17,22 +17,18 @@
   "versions": {
     "source": "1.7.5",
     "target": "2.11.2",
-    "reached": "1.7.5"
+    "reached": "2.11.2"
   },
   "upgrader": {
-    "commit": "8cba14f30a918d1a7d183f98fc87726900bcfdc6",
+    "commit": "edf3280a39bb557f2330eb186c8e1f102afbbd5b",
     "dirty": false
   },
-  "result": "fail",
+  "result": "pass",
   "log": "verify/out/pg12/1.7-to-2.11.seeded.log",
-  "recorded_at": "2026-10-29T13:32:27Z",
-  "failure": {
-    "explanation": "hop 1 update_extension failed: ALTER EXTENSION failed in database verify (already updated: none)",
-    "error": "ERROR:  function _timescaledb_internal.ping_data_node(name) does not exist"
-  },
-  "stage": "apply",
-  "started_at": "2026-10-29T13:32:11Z",
-  "finished_at": "2026-10-29T13:32:27Z",
+  "recorded_at": "2026-10-30T03:49:48Z",
+  "stage": "done",
+  "started_at": "2026-10-30T03:49:23Z",
+  "finished_at": "2026-10-30T03:49:48Z",
   "source_pg_version": "12.22",
   "replicas": 2,
   "pods": [
@@ -54,24 +50,28 @@
   "baseline": "seeded|1.7.5|50400|2521572.95|840|3",
   "checks": {
     "version": {
-      "status": "fail",
-      "detail": "extversion 1.7.5, expected 2.11.2"
+      "status": "pass",
+      "detail": "extversion 2.11.2, expected 2.11.2"
     },
     "rows": {
       "status": "pass",
       "detail": "50400 rows, sum 2521572.95; seeded 50400 rows, sum 2521572.95 at 1.7.5"
     },
+    "still_compressed": {
+      "status": "pass",
+      "detail": "3 compressed chunks; seeded 3"
+    },
     "cagg_survived": {
-      "status": "fail",
-      "detail": "840 materialized rows; seeded 840 (could not set materialized_only; count includes real-time rows)"
+      "status": "pass",
+      "detail": "840 materialized rows; seeded 840"
     },
     "cagg_matches": {
-      "status": "fail",
-      "detail": "0 differing buckets; refresh FAILED"
+      "status": "pass",
+      "detail": "0 differing buckets; refresh ran"
     },
     "write_and_refresh": {
-      "status": "fail",
-      "detail": "insert ok, refresh FAILED; 1 new buckets, 60 rows in them"
+      "status": "pass",
+      "detail": "insert ok, refresh ok; 1 new buckets, 60 rows in them"
     },
     "decompress": {
       "status": "pass",
@@ -79,8 +79,8 @@
     }
   },
   "plan": {
-    "hops": 1,
+    "hops": 2,
     "path": "verify/out/pg12/1.7-to-2.11.plan.json"
   },
-  "apply_exit": 2
+  "apply_exit": 0
 }
