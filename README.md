@@ -106,6 +106,24 @@ make clean        # drop the namespace, keep the cluster
 make load-image   # side-load the image from local Docker instead of pulling
 ```
 
+`make load-image` uses `kind load docker-image`. That fails for the
+multi-platform `timescaledb-ha` images when Docker uses the containerd image
+store, which is the Docker Desktop default. The error is
+`ctr: content digest sha256:... not found`
+([kind#3795](https://github.com/kubernetes-sigs/kind/issues/3795), unfixed as
+of kind v0.33.0). Until the script is changed, load a single platform by hand:
+
+```bash
+docker save --platform linux/amd64 "$TSDB_IMAGE" \
+  | docker exec -i "${KIND_CLUSTER}-control-plane" \
+      ctr --namespace=k8s.io images import --digests --snapshotter=overlayfs -
+```
+
+kind's own documented alternative is `docker image save --platform linux/amd64
+-o image.tar "$TSDB_IMAGE"`, then `kind load image-archive image.tar --name
+"$KIND_CLUSTER"`. It works too, but writes a multi-GB temp file. The
+verification harness already loads images the first way.
+
 ### Knobs
 
 Override any of these on the command line:
