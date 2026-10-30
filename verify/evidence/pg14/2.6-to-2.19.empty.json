@@ -20,15 +20,15 @@
     "reached": "2.19.3"
   },
   "upgrader": {
-    "commit": "0dc00fd7c768d6082fc9913326159f4b1045927f",
+    "commit": "f1a4cb26cd8c540664372fe77696781a691afa46",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg14/2.6-to-2.19.empty.log",
-  "recorded_at": "2026-10-29T16:36:44Z",
+  "recorded_at": "2026-10-30T14:20:50Z",
   "stage": "done",
-  "started_at": "2026-10-29T16:36:27Z",
-  "finished_at": "2026-10-29T16:36:44Z",
+  "started_at": "2026-10-30T14:20:32Z",
+  "finished_at": "2026-10-30T14:20:50Z",
   "source_pg_version": "14.19",
   "replicas": 2,
   "pods": [
@@ -49,9 +49,9 @@
   ],
   "baseline": null,
   "checks": null,
+  "apply_exit": 0,
   "plan": {
     "hops": 1,
     "path": "verify/out/pg14/2.6-to-2.19.plan.json"
-  },
-  "apply_exit": 0
+  }
 }

@@ -20,15 +20,15 @@
     "reached": "2.15.3"
   },
   "upgrader": {
-    "commit": "0dc00fd7c768d6082fc9913326159f4b1045927f",
+    "commit": "f1a4cb26cd8c540664372fe77696781a691afa46",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg13/2.13-to-2.15.empty.log",
-  "recorded_at": "2026-10-29T16:53:43Z",
+  "recorded_at": "2026-10-30T14:18:06Z",
   "stage": "done",
-  "started_at": "2026-10-29T16:53:26Z",
-  "finished_at": "2026-10-29T16:53:43Z",
+  "started_at": "2026-10-30T14:17:48Z",
+  "finished_at": "2026-10-30T14:18:06Z",
   "source_pg_version": "13.22",
   "replicas": 2,
   "pods": [
@@ -49,9 +49,9 @@
   ],
   "baseline": null,
   "checks": null,
+  "apply_exit": 0,
   "plan": {
     "hops": 1,
     "path": "verify/out/pg13/2.13-to-2.15.plan.json"
-  },
-  "apply_exit": 0
+  }
 }

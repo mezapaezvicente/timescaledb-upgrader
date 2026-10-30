@@ -20,19 +20,19 @@
     "reached": "2.19.3"
   },
   "upgrader": {
-    "commit": "683f7d776c5c0c40f7fbe601629748e034561704",
+    "commit": "f1a4cb26cd8c540664372fe77696781a691afa46",
     "dirty": false
   },
   "result": "fail",
   "log": "verify/out/pg14/2.6-to-2.19.seeded.log",
-  "recorded_at": "2026-10-29T17:12:31Z",
+  "recorded_at": "2026-10-30T14:21:10Z",
   "failure": {
     "explanation": "fixture checks failed after the upgrade: cagg_survived, cagg_matches, write_and_refresh",
-    "error": "check|cagg_survived|fail|840 materialized rows; seeded 840 (could not set materialized_only; count includes real-time rows)\ncheck|cagg_matches|fail|0 differing buckets; refresh ran\ncheck|write_and_refresh|fail|insert ok, refresh ok; 1 new buckets, 60 rows in them\npsql:<stdin>:44: ERROR:  invalid continuous aggregate query\nDETAIL:  Continuous Aggregates with partials is not supported anymore.\nHINT:  Define the Continuous Aggregate with \"finalized\" parameter set to true."
+    "error": "check|cagg_survived|fail|840 materialized rows; seeded 840 (could not set materialized_only; count includes real-time rows)\ncheck|cagg_matches|fail|0 differing buckets; refresh ran\ncheck|write_and_refresh|fail|insert ok, refresh ok; 1 new buckets, 60 rows in them\npsql:<stdin>:61: ERROR:  invalid continuous aggregate query\nDETAIL:  Continuous Aggregates with partials is not supported anymore.\nHINT:  Define the Continuous Aggregate with \"finalized\" parameter set to true."
   },
   "stage": "check",
-  "started_at": "2026-10-29T17:12:11Z",
-  "finished_at": "2026-10-29T17:12:31Z",
+  "started_at": "2026-10-30T14:20:50Z",
+  "finished_at": "2026-10-30T14:21:10Z",
   "source_pg_version": "14.19",
   "replicas": 2,
   "pods": [
@@ -51,7 +51,7 @@
       "server_version": "14.19"
     }
   ],
-  "baseline": "seeded|2.6.1|50400|2521572.95|840|3",
+  "baseline": "seeded|2.6.1|50400|2521572.95|840|3|2",
   "checks": {
     "version": {
       "status": "pass",
@@ -60,6 +60,10 @@
     "rows": {
       "status": "pass",
       "detail": "50400 rows, sum 2521572.95; seeded 50400 rows, sum 2521572.95 at 2.6.1"
+    },
+    "jobs": {
+      "status": "pass",
+      "detail": "2 jobs registered, seeded 2; fx_job_ok 1 runs, fx_job_fail 1 failures"
     },
     "still_compressed": {
       "status": "pass",
@@ -82,9 +86,9 @@
       "detail": "3 chunks decompressed; 50400 rows, sum 2521572.95 before the new writes"
     }
   },
+  "apply_exit": 0,
   "plan": {
     "hops": 1,
     "path": "verify/out/pg14/2.6-to-2.19.plan.json"
-  },
-  "apply_exit": 0
+  }
 }

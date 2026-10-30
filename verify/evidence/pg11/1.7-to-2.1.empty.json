@@ -20,15 +20,15 @@
     "reached": "2.1.1"
   },
   "upgrader": {
-    "commit": "8b767abe1dc69cf6b394b6ed1c665e52a1e528f3",
+    "commit": "f1a4cb26cd8c540664372fe77696781a691afa46",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg11/1.7-to-2.1.empty.log",
-  "recorded_at": "2026-10-29T13:08:45Z",
+  "recorded_at": "2026-10-30T13:53:43Z",
   "stage": "done",
-  "started_at": "2026-10-29T13:08:30Z",
-  "finished_at": "2026-10-29T13:08:45Z",
+  "started_at": "2026-10-30T13:52:36Z",
+  "finished_at": "2026-10-30T13:53:43Z",
   "source_pg_version": "11.11",
   "replicas": 2,
   "pods": [
@@ -49,9 +49,9 @@
   ],
   "baseline": null,
   "checks": null,
+  "apply_exit": 0,
   "plan": {
     "hops": 1,
     "path": "verify/out/pg11/1.7-to-2.1.plan.json"
-  },
-  "apply_exit": 0
+  }
 }

@@ -20,15 +20,15 @@
     "reached": "2.30.1"
   },
   "upgrader": {
-    "commit": "0dc00fd7c768d6082fc9913326159f4b1045927f",
+    "commit": "f1a4cb26cd8c540664372fe77696781a691afa46",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg17/2.24-to-2.30.seeded.log",
-  "recorded_at": "2026-10-29T16:24:17Z",
+  "recorded_at": "2026-10-30T15:31:20Z",
   "stage": "done",
-  "started_at": "2026-10-29T16:23:58Z",
-  "finished_at": "2026-10-29T16:24:17Z",
+  "started_at": "2026-10-30T15:30:59Z",
+  "finished_at": "2026-10-30T15:31:20Z",
   "source_pg_version": "17.11",
   "replicas": 2,
   "pods": [
@@ -47,7 +47,7 @@
       "server_version": "17.11"
     }
   ],
-  "baseline": "seeded|2.24.0|50400|2521572.95|840|3",
+  "baseline": "seeded|2.24.0|50400|2521572.95|840|3|2",
   "checks": {
     "version": {
       "status": "pass",
@@ -56,6 +56,10 @@
     "rows": {
       "status": "pass",
       "detail": "50400 rows, sum 2521572.95; seeded 50400 rows, sum 2521572.95 at 2.24.0"
+    },
+    "jobs": {
+      "status": "pass",
+      "detail": "2 jobs registered, seeded 2; fx_job_ok 1 runs, fx_job_fail 1 failures"
     },
     "still_compressed": {
       "status": "pass",
@@ -78,9 +82,9 @@
       "detail": "3 chunks decompressed; 50400 rows, sum 2521572.95 before the new writes"
     }
   },
+  "apply_exit": 0,
   "plan": {
     "hops": 1,
     "path": "verify/out/pg17/2.24-to-2.30.plan.json"
-  },
-  "apply_exit": 0
+  }
 }
