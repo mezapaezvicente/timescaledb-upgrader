@@ -247,10 +247,14 @@ def test_major_upgrades_reads_what_pg_upgrade_did_from_the_report():
          "output": ["Linking user relation files",
                     "relation files sharing an inode with /d.pg12: 159", "Upgrade Complete"]},
         {"action": "major_upgrade", "summary": "PostgreSQL 13 -> 15; 2 instance(s) on y",
+         "output": ["Copying user relation files                                 ok",
+                    "relation files sharing an inode with /d.pg13: 0"]},
+        {"action": "major_upgrade", "summary": "PostgreSQL 15 -> 16; 2 instance(s) on z",
          "output": ["Upgrade Complete"]}]}
     assert harness.major_upgrades(report) == [
         {"from_pg": 12, "to_pg": 13, "files": "link", "shared_inodes": 159},
-        {"from_pg": 13, "to_pg": 15, "files": None, "shared_inodes": None}]
+        {"from_pg": 13, "to_pg": 15, "files": "copy", "shared_inodes": 0},
+        {"from_pg": 15, "to_pg": 16, "files": None, "shared_inodes": None}]
     assert harness.major_upgrades(None) == []
 
 

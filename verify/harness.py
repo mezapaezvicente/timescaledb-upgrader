@@ -425,8 +425,10 @@ def major_upgrades(report: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
                                "files": None, "shared_inodes": None}
         for line in step.get("output") or []:
             line = line.strip()
-            if line.endswith("user relation files"):
-                hop["files"] = {"Copying": "copy", "Linking": "link"}.get(line.split()[0])
+            # pg_upgrade 15+ ends the line with its "ok"; 13 prints that apart.
+            said = re.match(r"(Copying|Linking) user relation files\b", line)
+            if said:
+                hop["files"] = {"Copying": "copy", "Linking": "link"}[said.group(1)]
             elif line.startswith("relation files sharing an inode"):
                 count = line.rsplit(":", 1)[-1].strip()
                 hop["shared_inodes"] = int(count) if count.isdigit() else None
