@@ -31,7 +31,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 from .apply import ApplyOptions, ApplyRefused, apply_plan, render_report as render_apply
 from .contents import (
@@ -59,6 +59,7 @@ from .images import (
     fetch_tags,
     load_catalog,
     parse_image_reference,
+    parse_release_tag,
 )
 from .matrix import MatrixError, default_matrix_path, load_matrix
 from .plan import PlanRefused, build_plan, render_runbook
@@ -441,6 +442,35 @@ def cmd_drift(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def _target_major(args: argparse.Namespace) -> Optional[int]:
+    """The PostgreSQL major asked for: --target-pg, else the target tag's."""
+    pg = args.target_pg
+    if pg is None:
+        try:
+            _, _, tag = parse_image_reference(args.target_image)
+        except RegistryError:
+            return None
+        pg = (parse_release_tag(tag) or {}).get("pg")
+    try:
+        return parse_version(pg)[0] if pg else None
+    except InvalidVersion:
+        return None
+
+
+def _measured_majors(references: Sequence[str], contents: ImageContents) -> Dict[str, Dict[int, Any]]:
+    """{reference: {major: measured profile}} for every measured image given."""
+    found: Dict[str, Dict[int, Any]] = {}
+    for ref in references:
+        entry = contents.entry(ref)
+        if entry is None:
+            print("warning: {0} is not measured; a major change cannot use it".format(ref),
+                  file=sys.stderr)
+            continue
+        found[ref] = {int(m): contents.profile(ref, int(m))
+                      for m, per in (entry.get("pg") or {}).items() if per.get("installable")}
+    return found
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     """Build a plan from a stated source and a target image. Offline apart
     from the registry label lookups; it never touches a cluster.
@@ -457,9 +487,15 @@ def cmd_plan(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
     contents = _load_contents(args.contents)
+    target_major = _target_major(args)
+    images = None
+    if target_major is not None and target_major != major and contents is not None:
+        # A major change plans over measured contents only, every major of
+        # every image offered: the labels describe one major per image.
+        images = _measured_majors([args.target_image] + list(args.via), contents)
     try:
         target = _profile(
-            args.target_image, major, catalog, args.registry_timeout, contents
+            args.target_image, target_major or major, catalog, args.registry_timeout, contents
         )
     except RegistryError as exc:
         print("error: {0}".format(exc), file=sys.stderr)
@@ -498,6 +534,8 @@ def cmd_plan(args: argparse.Namespace) -> int:
             target_pg=args.target_pg,
             target_ts=args.target_ts,
             verification_run=args.verification_run,
+            images=images,
+            link=args.link,
         )
     except PlanRefused as exc:
         print("refused: no plan produced", file=sys.stderr)
@@ -756,6 +794,13 @@ def build_parser() -> argparse.ArgumentParser:
         "--contents",
         default=None,
         help="measured image contents (default: data/image-contents.json)",
+    )
+    plan.add_argument(
+        "--link",
+        action="store_true",
+        help="for a PostgreSQL major change: pg_upgrade --link, which hard-links the "
+        "data files instead of copying them (fast, no extra space, but the old "
+        "cluster is unusable once the new one has started)",
     )
     plan.add_argument("--output", default=None, help="also write the plan as JSON here")
     plan.add_argument(
