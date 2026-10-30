@@ -8,147 +8,147 @@ Generated from `data/upgrade-matrix.json` at 2026-09-20T00:51:55Z.
 
 > An `unknown` verdict means nobody has established the answer and written down where it came from. It does **not** mean the upgrade is safe, and it does not mean it is unsafe. Treat these rows as open questions: the tooling refuses to act on them rather than guessing.
 
-Rows marked verified cite the source that establishes them. `no image` rows are verified against the container registry: no such image tag is published.
+A verdict is established only by running that migration with the upgrader itself (`verify/harness.py`), once on an empty database and once on a seeded one. **Evidence** links both records and **PG** is the exact PostgreSQL minor they ran on: a row keyed by a PostgreSQL major is proven only at that minor. `no image` rows are verified against the container registry: no such tag is published. **References** are upstream issues, pull requests and release notes that explain a verdict or a caveat; they are never its proof.
 
-| Source PG | Source TS | Target PG | Target TS | Verdict | Verified | Reason | Source |
-|---|---|---|---|---|---|---|---|
-| `11` | `1.7` | `11` | `2.1` | unknown | no | — | — |
-| `11` | `2.0` | `11` | `2.1` | unknown | no | — | — |
-| `11` | `2.1` | `11` | `2.30` | no image | yes | No timescale/timescaledb-ha tag pairs PostgreSQL 11 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 11 is 2.1. | [source](https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000) |
-| `11` | `2.1` | `12` | `2.11` | unknown | no | — | — |
-| `11` | `2.1` | `13` | `2.15` | unknown | no | — | — |
-| `11` | `2.1` | `14` | `2.19` | unknown | no | — | — |
-| `11` | `2.1` | `15` | `2.28` | unknown | no | — | — |
-| `11` | `2.1` | `16` | `2.30` | unknown | no | — | — |
-| `11` | `2.1` | `17` | `2.30` | unknown | no | — | — |
-| `11` | `2.1` | `18` | `2.30` | unknown | no | — | — |
-| `12` | `1.7` | `12` | `2.11` | unknown | no | — | — |
-| `12` | `2.0` | `12` | `2.11` | unknown | no | — | — |
-| `12` | `2.1` | `12` | `2.11` | unknown | no | — | — |
-| `12` | `2.2` | `12` | `2.11` | unknown | no | — | — |
-| `12` | `2.3` | `12` | `2.11` | unknown | no | — | — |
-| `12` | `2.4` | `12` | `2.11` | unknown | no | — | — |
-| `12` | `2.5` | `12` | `2.11` | unknown | no | — | — |
-| `12` | `2.6` | `12` | `2.11` | unknown | no | — | — |
-| `12` | `2.7` | `12` | `2.11` | unknown | no | — | — |
-| `12` | `2.8` | `12` | `2.11` | unknown | no | — | — |
-| `12` | `2.9` | `12` | `2.11` | unknown | no | — | — |
-| `12` | `2.10` | `12` | `2.11` | unknown | no | — | — |
-| `12` | `2.11` | `12` | `2.30` | no image | yes | No timescale/timescaledb-ha tag pairs PostgreSQL 12 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 12 is 2.11. | [source](https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000) |
-| `12` | `2.11` | `13` | `2.15` | unknown | no | — | — |
-| `12` | `2.11` | `14` | `2.19` | unknown | no | — | — |
-| `12` | `2.11` | `15` | `2.28` | unknown | no | — | — |
-| `12` | `2.11` | `16` | `2.30` | unknown | no | — | — |
-| `12` | `2.11` | `17` | `2.30` | unknown | no | — | — |
-| `12` | `2.11` | `18` | `2.30` | unknown | no | — | — |
-| `13` | `2.1` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.2` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.3` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.4` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.5` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.6` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.7` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.8` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.9` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.10` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.11` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.12` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.13` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.14` | `13` | `2.15` | unknown | no | — | — |
-| `13` | `2.15` | `13` | `2.30` | no image | yes | No timescale/timescaledb-ha tag pairs PostgreSQL 13 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 13 is 2.15. | [source](https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000) |
-| `13` | `2.15` | `14` | `2.19` | unknown | no | — | — |
-| `13` | `2.15` | `15` | `2.28` | unknown | no | — | — |
-| `13` | `2.15` | `16` | `2.30` | unknown | no | — | — |
-| `13` | `2.15` | `17` | `2.30` | unknown | no | — | — |
-| `13` | `2.15` | `18` | `2.30` | unknown | no | — | — |
-| `14` | `2.5` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.6` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.7` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.8` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.9` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.10` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.11` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.12` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.13` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.14` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.15` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.16` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.17` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.18` | `14` | `2.19` | unknown | no | — | — |
-| `14` | `2.19` | `14` | `2.30` | no image | yes | No timescale/timescaledb-ha tag pairs PostgreSQL 14 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 14 is 2.19. | [source](https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000) |
-| `14` | `2.19` | `15` | `2.28` | unknown | no | — | — |
-| `14` | `2.19` | `16` | `2.30` | unknown | no | — | — |
-| `14` | `2.19` | `17` | `2.30` | unknown | no | — | — |
-| `14` | `2.19` | `18` | `2.30` | unknown | no | — | — |
-| `15` | `2.9` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.10` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.11` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.12` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.13` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.14` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.15` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.16` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.17` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.18` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.19` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.20` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.21` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.22` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.23` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.24` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.25` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.26` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.27` | `15` | `2.28` | unknown | no | — | — |
-| `15` | `2.28` | `15` | `2.30` | no image | yes | No timescale/timescaledb-ha tag pairs PostgreSQL 15 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 15 is 2.28. | [source](https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000) |
-| `15` | `2.28` | `16` | `2.30` | unknown | no | — | — |
-| `15` | `2.28` | `17` | `2.30` | unknown | no | — | — |
-| `15` | `2.28` | `18` | `2.30` | unknown | no | — | — |
-| `16` | `2.13` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.14` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.15` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.16` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.17` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.18` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.19` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.20` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.21` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.22` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.23` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.24` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.25` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.26` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.27` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.28` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.29` | `16` | `2.30` | unknown | no | — | — |
-| `16` | `2.30` | `17` | `2.30` | unknown | no | — | — |
-| `16` | `2.30` | `18` | `2.30` | unknown | no | — | — |
-| `17` | `2.17` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.18` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.19` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.20` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.21` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.22` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.23` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.24` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.25` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.26` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.27` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.28` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.29` | `17` | `2.30` | unknown | no | — | — |
-| `17` | `2.30` | `18` | `2.30` | unknown | no | — | — |
-| `18` | `2.23` | `18` | `2.30` | unknown | no | — | — |
-| `18` | `2.24` | `18` | `2.30` | unknown | no | — | — |
-| `18` | `2.25` | `18` | `2.30` | unknown | no | — | — |
-| `18` | `2.26` | `18` | `2.30` | unknown | no | — | — |
-| `18` | `2.27` | `18` | `2.30` | unknown | no | — | — |
-| `18` | `2.28` | `18` | `2.30` | unknown | no | — | — |
-| `18` | `2.29` | `18` | `2.30` | unknown | no | — | — |
+| Source PG | Source TS | Target PG | Target TS | Verdict | PG | Evidence | Reason | References |
+|---|---|---|---|---|---|---|---|---|
+| `11` | `1.7` | `11` | `2.1` | unknown | — | — | — | — |
+| `11` | `2.0` | `11` | `2.1` | unknown | — | — | — | — |
+| `11` | `2.1` | `11` | `2.30` | no image | — | — | No timescale/timescaledb-ha tag pairs PostgreSQL 11 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 11 is 2.1. | [registry](https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000) |
+| `11` | `2.1` | `12` | `2.11` | unknown | — | — | — | — |
+| `11` | `2.1` | `13` | `2.15` | unknown | — | — | — | — |
+| `11` | `2.1` | `14` | `2.19` | unknown | — | — | — | — |
+| `11` | `2.1` | `15` | `2.28` | unknown | — | — | — | — |
+| `11` | `2.1` | `16` | `2.30` | unknown | — | — | — | — |
+| `11` | `2.1` | `17` | `2.30` | unknown | — | — | — | — |
+| `11` | `2.1` | `18` | `2.30` | unknown | — | — | — | — |
+| `12` | `1.7` | `12` | `2.11` | unknown | — | — | — | — |
+| `12` | `2.0` | `12` | `2.11` | unknown | — | — | — | — |
+| `12` | `2.1` | `12` | `2.11` | unknown | — | — | — | — |
+| `12` | `2.2` | `12` | `2.11` | unknown | — | — | — | — |
+| `12` | `2.3` | `12` | `2.11` | unknown | — | — | — | — |
+| `12` | `2.4` | `12` | `2.11` | unknown | — | — | — | — |
+| `12` | `2.5` | `12` | `2.11` | unknown | — | — | — | — |
+| `12` | `2.6` | `12` | `2.11` | unknown | — | — | — | — |
+| `12` | `2.7` | `12` | `2.11` | unknown | — | — | — | — |
+| `12` | `2.8` | `12` | `2.11` | unknown | — | — | — | — |
+| `12` | `2.9` | `12` | `2.11` | unknown | — | — | — | — |
+| `12` | `2.10` | `12` | `2.11` | unknown | — | — | — | — |
+| `12` | `2.11` | `12` | `2.30` | no image | — | — | No timescale/timescaledb-ha tag pairs PostgreSQL 12 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 12 is 2.11. | [registry](https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000) |
+| `12` | `2.11` | `13` | `2.15` | unknown | — | — | — | — |
+| `12` | `2.11` | `14` | `2.19` | unknown | — | — | — | — |
+| `12` | `2.11` | `15` | `2.28` | unknown | — | — | — | — |
+| `12` | `2.11` | `16` | `2.30` | unknown | — | — | — | — |
+| `12` | `2.11` | `17` | `2.30` | unknown | — | — | — | — |
+| `12` | `2.11` | `18` | `2.30` | unknown | — | — | — | — |
+| `13` | `2.1` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.2` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.3` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.4` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.5` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.6` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.7` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.8` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.9` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.10` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.11` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.12` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.13` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.14` | `13` | `2.15` | unknown | — | — | — | — |
+| `13` | `2.15` | `13` | `2.30` | no image | — | — | No timescale/timescaledb-ha tag pairs PostgreSQL 13 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 13 is 2.15. | [registry](https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000) |
+| `13` | `2.15` | `14` | `2.19` | unknown | — | — | — | — |
+| `13` | `2.15` | `15` | `2.28` | unknown | — | — | — | — |
+| `13` | `2.15` | `16` | `2.30` | unknown | — | — | — | — |
+| `13` | `2.15` | `17` | `2.30` | unknown | — | — | — | — |
+| `13` | `2.15` | `18` | `2.30` | unknown | — | — | — | — |
+| `14` | `2.5` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.6` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.7` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.8` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.9` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.10` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.11` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.12` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.13` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.14` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.15` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.16` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.17` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.18` | `14` | `2.19` | unknown | — | — | — | — |
+| `14` | `2.19` | `14` | `2.30` | no image | — | — | No timescale/timescaledb-ha tag pairs PostgreSQL 14 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 14 is 2.19. | [registry](https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000) |
+| `14` | `2.19` | `15` | `2.28` | unknown | — | — | — | — |
+| `14` | `2.19` | `16` | `2.30` | unknown | — | — | — | — |
+| `14` | `2.19` | `17` | `2.30` | unknown | — | — | — | — |
+| `14` | `2.19` | `18` | `2.30` | unknown | — | — | — | — |
+| `15` | `2.9` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.10` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.11` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.12` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.13` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.14` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.15` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.16` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.17` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.18` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.19` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.20` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.21` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.22` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.23` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.24` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.25` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.26` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.27` | `15` | `2.28` | unknown | — | — | — | — |
+| `15` | `2.28` | `15` | `2.30` | no image | — | — | No timescale/timescaledb-ha tag pairs PostgreSQL 15 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 15 is 2.28. | [registry](https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000) |
+| `15` | `2.28` | `16` | `2.30` | unknown | — | — | — | — |
+| `15` | `2.28` | `17` | `2.30` | unknown | — | — | — | — |
+| `15` | `2.28` | `18` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.13` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.14` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.15` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.16` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.17` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.18` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.19` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.20` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.21` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.22` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.23` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.24` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.25` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.26` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.27` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.28` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.29` | `16` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.30` | `17` | `2.30` | unknown | — | — | — | — |
+| `16` | `2.30` | `18` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.17` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.18` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.19` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.20` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.21` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.22` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.23` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.24` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.25` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.26` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.27` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.28` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.29` | `17` | `2.30` | unknown | — | — | — | — |
+| `17` | `2.30` | `18` | `2.30` | unknown | — | — | — | — |
+| `18` | `2.23` | `18` | `2.30` | unknown | — | — | — | — |
+| `18` | `2.24` | `18` | `2.30` | unknown | — | — | — | — |
+| `18` | `2.25` | `18` | `2.30` | unknown | — | — | — | — |
+| `18` | `2.26` | `18` | `2.30` | unknown | — | — | — | — |
+| `18` | `2.27` | `18` | `2.30` | unknown | — | — | — | — |
+| `18` | `2.28` | `18` | `2.30` | unknown | — | — | — | — |
+| `18` | `2.29` | `18` | `2.30` | unknown | — | — | — | — |
 
 ## Verdicts
 
 | Verdict | Meaning |
 |---|---|
-| `in place` | The existing data directory can be upgraded without exporting the data. |
+| `in place` | The existing data directory can be upgraded without exporting the data. A caveat in the reason still applies. |
 | `dump + restore` | The data must be exported and reloaded into a new instance. |
 | `unsupported` | This transition is not a supported path. |
 | `no image` | No published `timescaledb-ha` image exists for the target pair. |

@@ -56,6 +56,10 @@ def valid_entry() -> Dict[str, Any]:
         "verdict": "in_place",
         "reason": "fixture",
         "steps": [],
-        "source_url": "https://example.invalid/fixture",
         "verified": True,
+        "evidence": {
+            "empty": "verify/evidence/fixture.empty.json",
+            "seeded": "verify/evidence/fixture.seeded.json",
+        },
+        "references": ["https://example.invalid/fixture"],
     }

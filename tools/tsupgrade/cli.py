@@ -149,7 +149,8 @@ def cmd_matrix_scaffold(args: argparse.Namespace) -> int:
 
 def cmd_matrix_render(args: argparse.Namespace) -> int:
     matrix = load_matrix(args.matrix)
-    text = render_markdown(matrix)
+    # Evidence paths are relative to the repository, wherever the matrix is.
+    text = render_markdown(matrix, root=default_matrix_path().parents[1])
 
     if args.output == "-":
         sys.stdout.write(text)
@@ -211,7 +212,11 @@ def cmd_matrix_lookup(args: argparse.Namespace) -> int:
         print("verdict    : {0}".format(entry.verdict or "unknown"))
         print("verified   : {0}".format("yes" if entry.verified else "no"))
         print("reason     : {0}".format(entry.reason or "-"))
-        print("source     : {0}".format(entry.source_url or "-"))
+        if entry.evidence:
+            for mode, path in sorted(entry.evidence.items()):
+                print("evidence   : {0}: {1}".format(mode, path))
+        for ref in entry.references:
+            print("reference  : {0}".format(ref))
         if entry.steps:
             print("steps      :")
             for i, step in enumerate(entry.steps, 1):

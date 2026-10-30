@@ -1224,8 +1224,8 @@ def check_matrix(
         )
         if entry.reason:
             details.append("     reason: {0}".format(entry.reason))
-        if entry.source_url:
-            details.append("     source: {0}".format(entry.source_url))
+        for ref in entry.references:
+            details.append("     reference: {0}".format(ref))
         for i, step in enumerate(entry.steps, 1):
             details.append("     step {0}: {1}".format(i, step))
 

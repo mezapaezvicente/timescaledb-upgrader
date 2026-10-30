@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generated_at": "2026-01-01T00:00:00Z",
-  "note": "Fixture data for the unit tests. The versions here are arbitrary and the source URLs are deliberately unresolvable (example.invalid). Nothing in this file is a real compatibility claim.",
+  "note": "Fixture data for the unit tests. The versions here are arbitrary, the evidence paths do not exist and the references are deliberately unresolvable (example.invalid). Nothing in this file is a real compatibility claim.",
   "entries": [
     {
       "source_pg": "15",
@@ -13,8 +13,14 @@
       "steps": [
         "ALTER EXTENSION timescaledb UPDATE;"
       ],
-      "source_url": "https://example.invalid/fixture-in-place",
-      "verified": true
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/fixture-in-place.empty.json",
+        "seeded": "verify/evidence/fixture-in-place.seeded.json"
+      },
+      "references": [
+        "https://example.invalid/fixture-in-place"
+      ]
     },
     {
       "source_pg": "15",
@@ -24,8 +30,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -35,8 +42,11 @@
       "verdict": "no_image",
       "reason": "fixture: no such tag is published",
       "steps": [],
-      "source_url": "https://example.invalid/fixture-registry",
-      "verified": true
+      "verified": true,
+      "evidence": null,
+      "references": [
+        "https://example.invalid/fixture-registry"
+      ]
     },
     {
       "source_pg": "16",
@@ -46,8 +56,14 @@
       "verdict": "in_place",
       "reason": "fixture: series-wide row",
       "steps": [],
-      "source_url": "https://example.invalid/fixture-series",
-      "verified": true
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/fixture-series.empty.json",
+        "seeded": "verify/evidence/fixture-series.seeded.json"
+      },
+      "references": [
+        "https://example.invalid/fixture-series"
+      ]
     },
     {
       "source_pg": "16.15",
@@ -60,8 +76,14 @@
         "pg_dump the source",
         "restore into the target"
       ],
-      "source_url": "https://example.invalid/fixture-pinned",
-      "verified": true
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/fixture-pinned.empty.json",
+        "seeded": "verify/evidence/fixture-pinned.seeded.json"
+      },
+      "references": [
+        "https://example.invalid/fixture-pinned"
+      ]
     },
     {
       "source_pg": "12",
@@ -71,8 +93,14 @@
       "verdict": "unsupported",
       "reason": "fixture: not a listed path",
       "steps": [],
-      "source_url": "https://example.invalid/fixture-unsupported",
-      "verified": true
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/fixture-unsupported.empty.json",
+        "seeded": "verify/evidence/fixture-unsupported.seeded.json"
+      },
+      "references": [
+        "https://example.invalid/fixture-unsupported"
+      ]
     }
   ]
 }

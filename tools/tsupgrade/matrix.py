@@ -1,14 +1,20 @@
 """Loader and lookup for the upgrade compatibility matrix.
 
 The matrix is *data*, not code: a JSON file that this module reads. Adding a
-verified upgrade path means editing JSON and citing a source, not editing
-Python.
+verified upgrade path means running it and editing JSON, not editing Python.
 
-Every entry carries a ``verified`` flag and a ``source_url``. An entry whose
-verdict has not been established from a real source has ``verdict: null``,
-``verified: false`` and ``source_url: null``. That is a deliberate, load-bearing
-state: callers are expected to surface it as *unknown* and refuse to proceed,
-rather than treating a missing verdict as permission.
+A row is verified only by running that migration with the upgrader itself, on
+an empty database and on a seeded one (``verify/harness.py``). Its
+``evidence`` names the two records those runs left in ``verify/evidence/``.
+The one exception is ``no_image``, which the registry answers: such a row
+carries the registry listing in ``references`` instead. ``references``
+otherwise holds upstream issues, pull requests and release notes that explain
+a verdict; they are never its proof.
+
+An entry whose verdict has not been established has ``verdict: null`` and
+``verified: false``. That is a deliberate, load-bearing state: callers are
+expected to surface it as *unknown* and refuse to proceed, rather than
+treating a missing verdict as permission.
 """
 
 from __future__ import annotations
@@ -22,6 +28,7 @@ from .versions import InvalidVersion, pg_matches, ts_matches
 
 __all__ = [
     "VERDICTS",
+    "EVIDENCE_MODES",
     "MatrixError",
     "MatrixEntry",
     "Matrix",
@@ -32,6 +39,9 @@ __all__ = [
 # The verdicts an entry may carry. None is also permitted and means
 # "not established" -- see the module docstring.
 VERDICTS = frozenset({"in_place", "dump_restore", "unsupported", "no_image"})
+
+# The two runs every verified row has evidence for, by the evidence key.
+EVIDENCE_MODES = ("empty", "seeded")
 
 _REQUIRED_FIELDS = ("source_pg", "source_ts", "target_pg", "target_ts")
 
@@ -51,12 +61,14 @@ class MatrixEntry:
     verdict: Optional[str] = None
     reason: str = ""
     steps: Sequence[str] = field(default_factory=tuple)
-    source_url: Optional[str] = None
     verified: bool = False
+    # {"empty": path, "seeded": path}, repo-relative, or None.
+    evidence: Optional[Dict[str, str]] = field(default=None, hash=False, compare=True)
+    references: Sequence[str] = field(default_factory=tuple)
 
     @property
     def is_known(self) -> bool:
-        """True when this row carries a verdict backed by a cited source."""
+        """True when this row carries a verdict backed by verification runs."""
         return self.verdict is not None and self.verified
 
     @property
@@ -76,8 +88,9 @@ class MatrixEntry:
             "verdict": self.verdict,
             "reason": self.reason,
             "steps": list(self.steps),
-            "source_url": self.source_url,
             "verified": self.verified,
+            "evidence": dict(self.evidence) if self.evidence else None,
+            "references": list(self.references),
         }
 
 
@@ -112,6 +125,33 @@ def _entry_from_dict(raw: Any, index: int) -> MatrixEntry:
     if not isinstance(steps, list) or any(not isinstance(s, str) for s in steps):
         raise MatrixError("{0}: 'steps' must be a list of strings".format(where))
 
+    if "source_url" in raw:
+        raise MatrixError(
+            "{0}: 'source_url' is no longer a field; proof goes in 'evidence' "
+            "and upstream links in 'references'".format(where)
+        )
+
+    references = raw.get("references") or []
+    if not isinstance(references, list) or any(
+        not isinstance(r, str) or not r.strip() for r in references
+    ):
+        raise MatrixError(
+            "{0}: 'references' must be a list of non-empty strings".format(where)
+        )
+
+    evidence = raw.get("evidence")
+    if evidence is not None:
+        if (
+            not isinstance(evidence, dict)
+            or sorted(evidence) != sorted(EVIDENCE_MODES)
+            or any(not isinstance(v, str) or not v.strip() for v in evidence.values())
+        ):
+            raise MatrixError(
+                "{0}: 'evidence' must map exactly {1} to record paths".format(
+                    where, " and ".join(EVIDENCE_MODES)
+                )
+            )
+
     # A verified row has to say what verified it, and has to have a verdict.
     # This invariant is what keeps "verified" from decaying into decoration.
     if verified:
@@ -119,10 +159,21 @@ def _entry_from_dict(raw: Any, index: int) -> MatrixEntry:
             raise MatrixError(
                 "{0}: verified entries must carry a verdict".format(where)
             )
-        if not raw.get("source_url"):
+        if verdict == "no_image":
+            if not references:
+                raise MatrixError(
+                    "{0}: a verified no_image entry must carry the registry "
+                    "listing in references".format(where)
+                )
+        elif evidence is None:
             raise MatrixError(
-                "{0}: verified entries must carry a source_url".format(where)
+                "{0}: verified entries must carry evidence of the empty and "
+                "seeded runs".format(where)
             )
+    elif evidence is not None:
+        raise MatrixError(
+            "{0}: an unverified entry must not carry evidence".format(where)
+        )
 
     entry = MatrixEntry(
         source_pg=str(raw["source_pg"]),
@@ -132,8 +183,9 @@ def _entry_from_dict(raw: Any, index: int) -> MatrixEntry:
         verdict=verdict,
         reason=raw.get("reason") or "",
         steps=tuple(steps),
-        source_url=raw.get("source_url"),
         verified=verified,
+        evidence=dict(evidence) if evidence is not None else None,
+        references=tuple(references),
     )
 
     # Fail at load time, not at lookup time, on unparseable versions.

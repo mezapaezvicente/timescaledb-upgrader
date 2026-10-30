@@ -215,8 +215,9 @@ def _check_matrix(
         "transition": entry.transition,
         "verdict": entry.verdict,
         "verified": entry.verified,
-        "source_url": entry.source_url,
         "reason": entry.reason,
+        "evidence": dict(entry.evidence) if entry.evidence else None,
+        "references": list(entry.references),
     }
     if not entry.is_known:
         out.unestablished(
@@ -401,8 +402,8 @@ def render_runbook(plan: Dict[str, Any]) -> str:
                 m["verdict"] or "unknown", "verified" if m["verified"] else "not verified"
             )
         )
-        if m.get("source_url"):
-            lines.append("          {0}".format(m["source_url"]))
+        for ref in m.get("references") or []:
+            lines.append("          {0}".format(ref))
     lines.append("writes  : nothing -- this is a plan; `tsupgrade apply` executes it")
 
     for warning in plan["warnings"]:

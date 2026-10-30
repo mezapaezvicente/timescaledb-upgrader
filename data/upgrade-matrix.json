@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "generated_at": "2026-09-20T00:51:55Z",
-  "note": "Transitions are scaffolded from data/images.json by `make matrix-scaffold`. Only no_image verdicts are set automatically, because only the registry can answer them. Every other verdict must be filled in by a human with a source_url.",
+  "note": "Transitions are scaffolded from data/images.json by `make matrix-scaffold`. no_image verdicts are set from the registry. Every other verdict comes only from verification runs by the upgrader itself (verify/harness.py), on an empty and a seeded database, and names both evidence records. Preflight results from a user's cluster are never written here.",
   "verdicts": [
     "in_place",
     "dump_restore",
@@ -18,8 +18,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "11",
@@ -29,8 +30,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "11",
@@ -40,8 +42,11 @@
       "verdict": "no_image",
       "reason": "No timescale/timescaledb-ha tag pairs PostgreSQL 11 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 11 is 2.1.",
       "steps": [],
-      "source_url": "https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000",
-      "verified": true
+      "verified": true,
+      "evidence": null,
+      "references": [
+        "https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000"
+      ]
     },
     {
       "source_pg": "11",
@@ -51,8 +56,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "11",
@@ -62,8 +68,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "11",
@@ -73,8 +80,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "11",
@@ -84,8 +92,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "11",
@@ -95,8 +104,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "11",
@@ -106,8 +116,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "11",
@@ -117,8 +128,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -128,8 +140,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -139,8 +152,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -150,8 +164,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -161,8 +176,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -172,8 +188,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -183,8 +200,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -194,8 +212,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -205,8 +224,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -216,8 +236,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -227,8 +248,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -238,8 +260,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -249,8 +272,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -260,8 +284,11 @@
       "verdict": "no_image",
       "reason": "No timescale/timescaledb-ha tag pairs PostgreSQL 12 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 12 is 2.11.",
       "steps": [],
-      "source_url": "https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000",
-      "verified": true
+      "verified": true,
+      "evidence": null,
+      "references": [
+        "https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000"
+      ]
     },
     {
       "source_pg": "12",
@@ -271,8 +298,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -282,8 +310,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -293,8 +322,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -304,8 +334,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -315,8 +346,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "12",
@@ -326,8 +358,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -337,8 +370,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -348,8 +382,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -359,8 +394,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -370,8 +406,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -381,8 +418,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -392,8 +430,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -403,8 +442,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -414,8 +454,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -425,8 +466,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -436,8 +478,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -447,8 +490,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -458,8 +502,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -469,8 +514,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -480,8 +526,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -491,8 +538,11 @@
       "verdict": "no_image",
       "reason": "No timescale/timescaledb-ha tag pairs PostgreSQL 13 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 13 is 2.15.",
       "steps": [],
-      "source_url": "https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000",
-      "verified": true
+      "verified": true,
+      "evidence": null,
+      "references": [
+        "https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000"
+      ]
     },
     {
       "source_pg": "13",
@@ -502,8 +552,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -513,8 +564,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -524,8 +576,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -535,8 +588,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "13",
@@ -546,8 +600,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -557,8 +612,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -568,8 +624,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -579,8 +636,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -590,8 +648,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -601,8 +660,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -612,8 +672,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -623,8 +684,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -634,8 +696,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -645,8 +708,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -656,8 +720,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -667,8 +732,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -678,8 +744,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -689,8 +756,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -700,8 +768,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -711,8 +780,11 @@
       "verdict": "no_image",
       "reason": "No timescale/timescaledb-ha tag pairs PostgreSQL 14 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 14 is 2.19.",
       "steps": [],
-      "source_url": "https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000",
-      "verified": true
+      "verified": true,
+      "evidence": null,
+      "references": [
+        "https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000"
+      ]
     },
     {
       "source_pg": "14",
@@ -722,8 +794,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -733,8 +806,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -744,8 +818,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "14",
@@ -755,8 +830,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -766,8 +842,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -777,8 +854,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -788,8 +866,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -799,8 +878,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -810,8 +890,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -821,8 +902,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -832,8 +914,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -843,8 +926,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -854,8 +938,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -865,8 +950,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -876,8 +962,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -887,8 +974,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -898,8 +986,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -909,8 +998,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -920,8 +1010,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -931,8 +1022,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -942,8 +1034,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -953,8 +1046,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -964,8 +1058,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -975,8 +1070,11 @@
       "verdict": "no_image",
       "reason": "No timescale/timescaledb-ha tag pairs PostgreSQL 15 with TimescaleDB 2.30. The newest TimescaleDB series published for PostgreSQL 15 is 2.28.",
       "steps": [],
-      "source_url": "https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000",
-      "verified": true
+      "verified": true,
+      "evidence": null,
+      "references": [
+        "https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000"
+      ]
     },
     {
       "source_pg": "15",
@@ -986,8 +1084,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -997,8 +1096,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "15",
@@ -1008,8 +1108,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1019,8 +1120,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1030,8 +1132,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1041,8 +1144,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1052,8 +1156,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1063,8 +1168,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1074,8 +1180,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1085,8 +1192,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1096,8 +1204,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1107,8 +1216,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1118,8 +1228,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1129,8 +1240,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1140,8 +1252,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1151,8 +1264,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1162,8 +1276,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1173,8 +1288,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1184,8 +1300,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1195,8 +1312,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1206,8 +1324,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "16",
@@ -1217,8 +1336,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1228,8 +1348,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1239,8 +1360,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1250,8 +1372,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1261,8 +1384,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1272,8 +1396,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1283,8 +1408,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1294,8 +1420,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1305,8 +1432,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1316,8 +1444,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1327,8 +1456,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1338,8 +1468,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1349,8 +1480,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1360,8 +1492,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "17",
@@ -1371,8 +1504,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "18",
@@ -1382,8 +1516,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "18",
@@ -1393,8 +1528,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "18",
@@ -1404,8 +1540,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "18",
@@ -1415,8 +1552,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "18",
@@ -1426,8 +1564,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "18",
@@ -1437,8 +1576,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     },
     {
       "source_pg": "18",
@@ -1448,8 +1588,9 @@
       "verdict": null,
       "reason": "",
       "steps": [],
-      "source_url": null,
-      "verified": false
+      "verified": false,
+      "evidence": null,
+      "references": []
     }
   ]
 }

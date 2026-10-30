@@ -5,7 +5,7 @@ The behaviour these pin down is what keeps the toolkit honest:
 * a lookup that finds nothing must say so, rather than falling back to
   something plausible;
 * an entry with no established verdict must not read as an approval;
-* a row that claims to be verified must carry the source that verified it.
+* a row that claims to be verified must name the runs that verified it.
 """
 
 from __future__ import annotations
@@ -83,9 +83,61 @@ def test_unknown_verdict_is_rejected(write_matrix, valid_entry):
         load_matrix(write_matrix({"entries": [valid_entry]}))
 
 
-def test_a_verified_entry_must_cite_a_source(write_matrix, valid_entry):
-    valid_entry["source_url"] = None
-    with pytest.raises(MatrixError, match="must carry a source_url"):
+def test_a_verified_entry_must_name_its_evidence(write_matrix, valid_entry):
+    valid_entry["evidence"] = None
+    with pytest.raises(MatrixError, match="must carry evidence"):
+        load_matrix(write_matrix({"entries": [valid_entry]}))
+
+
+def test_references_are_not_evidence(write_matrix, valid_entry):
+    """Upstream links explain a verdict; only the upgrader's own runs prove it."""
+    valid_entry.update(evidence=None, references=["https://example.invalid/issue"])
+    with pytest.raises(MatrixError, match="must carry evidence"):
+        load_matrix(write_matrix({"entries": [valid_entry]}))
+
+
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        {"empty": "a.json"},
+        {"empty": "a.json", "seeded": "b.json", "other": "c.json"},
+        {"empty": "a.json", "seeded": ""},
+        ["a.json", "b.json"],
+    ],
+)
+def test_evidence_must_name_exactly_the_two_runs(write_matrix, valid_entry, evidence):
+    valid_entry["evidence"] = evidence
+    with pytest.raises(MatrixError, match="must map exactly empty and seeded"):
+        load_matrix(write_matrix({"entries": [valid_entry]}))
+
+
+def test_a_no_image_entry_may_cite_the_registry_instead(write_matrix, valid_entry):
+    valid_entry.update(verdict="no_image", evidence=None,
+                       references=["https://example.invalid/tags"])
+    assert load_matrix(write_matrix({"entries": [valid_entry]})).entries[0].is_known
+
+
+def test_a_no_image_entry_needs_the_registry_listing(write_matrix, valid_entry):
+    valid_entry.update(verdict="no_image", references=[])
+    with pytest.raises(MatrixError, match="the registry listing"):
+        load_matrix(write_matrix({"entries": [valid_entry]}))
+
+
+def test_an_unverified_entry_must_not_carry_evidence(write_matrix, valid_entry):
+    valid_entry.update(verified=False, verdict=None)
+    with pytest.raises(MatrixError, match="must not carry evidence"):
+        load_matrix(write_matrix({"entries": [valid_entry]}))
+
+
+def test_references_must_be_a_list_of_strings(write_matrix, valid_entry):
+    valid_entry["references"] = "https://example.invalid/x"
+    with pytest.raises(MatrixError, match="'references' must be a list"):
+        load_matrix(write_matrix({"entries": [valid_entry]}))
+
+
+def test_a_leftover_source_url_fails_loudly(write_matrix, valid_entry):
+    valid_entry["source_url"] = "https://example.invalid/x"
+    with pytest.raises(MatrixError, match="no longer a field"):
         load_matrix(write_matrix({"entries": [valid_entry]}))
 
 
@@ -96,7 +148,7 @@ def test_a_verified_entry_must_have_a_verdict(write_matrix, valid_entry):
 
 
 def test_an_unverified_entry_needs_neither(write_matrix, valid_entry):
-    valid_entry.update(verified=False, verdict=None, source_url=None, reason="")
+    valid_entry.update(verified=False, verdict=None, evidence=None, references=[], reason="")
     matrix = load_matrix(write_matrix({"entries": [valid_entry]}))
     assert len(matrix) == 1
     assert matrix.entries[0].is_known is False
@@ -139,7 +191,8 @@ def test_exact_match_returns_the_entry(basic_matrix_path):
     assert entry.verdict == "in_place"
     assert entry.verified is True
     assert entry.is_known is True
-    assert entry.source_url == "https://example.invalid/fixture-in-place"
+    assert entry.evidence["seeded"] == "verify/evidence/fixture-in-place.seeded.json"
+    assert entry.references == ("https://example.invalid/fixture-in-place",)
     assert entry.steps == ("ALTER EXTENSION timescaledb UPDATE;",)
 
 
@@ -206,7 +259,7 @@ def test_unverified_entry_is_returned_but_not_known(basic_matrix_path):
     assert entry.verified is False
     assert entry.is_known is False
     assert entry.reason == ""
-    assert entry.source_url is None
+    assert entry.evidence is None
 
 
 def test_unverified_entry_is_distinguishable_from_a_miss(basic_matrix_path):

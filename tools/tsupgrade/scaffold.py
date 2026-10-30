@@ -129,8 +129,9 @@ def _blank_entry(transition: Transition, catalog: ImageCatalog) -> Dict[str, Any
                 )
             ),
             "steps": [],
-            "source_url": catalog.source_url,
             "verified": True,
+            "evidence": None,
+            "references": [catalog.source_url] if catalog.source_url else [],
         }
 
     return {
@@ -141,8 +142,9 @@ def _blank_entry(transition: Transition, catalog: ImageCatalog) -> Dict[str, Any
         "verdict": None,
         "reason": "",
         "steps": [],
-        "source_url": None,
         "verified": False,
+        "evidence": None,
+        "references": [],
     }
 
 
@@ -189,7 +191,8 @@ def scaffold_matrix(
             "Transitions are scaffolded from data/images.json by "
             "`make matrix-scaffold`. Only no_image verdicts are set "
             "automatically, because only the registry can answer them. Every "
-            "other verdict must be filled in by a human with a source_url."
+            "other verdict comes from verification runs by the upgrader "
+            "(verify/harness.py), with both evidence records named."
         ),
         "verdicts": ["in_place", "dump_restore", "unsupported", "no_image", None],
         "entries": kept,

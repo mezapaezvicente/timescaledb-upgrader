@@ -39,7 +39,7 @@ def _entry(src_pg, src_ts, tgt_pg, tgt_ts, verdict=None, verified=False):
         src_pg, src_ts, tgt_pg, tgt_ts,
         verdict=verdict,
         verified=verified,
-        source_url="https://example.invalid/x" if verified else None,
+        evidence={"empty": "e.json", "seeded": "s.json"} if verified else None,
     )
 
 

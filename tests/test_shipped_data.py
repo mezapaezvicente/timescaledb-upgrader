@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import pytest
 
+from tsupgrade.evidence import load_record
 from tsupgrade.images import load_catalog
-from tsupgrade.matrix import VERDICTS, default_matrix_path, load_matrix
+from tsupgrade.matrix import EVIDENCE_MODES, VERDICTS, default_matrix_path, load_matrix
+
+REPO = default_matrix_path().parents[1]
 
 pytestmark = pytest.mark.skipif(
     not default_matrix_path().exists(),
@@ -29,26 +32,71 @@ def test_shipped_catalog_loads():
     assert catalog.source_url
 
 
-def test_every_verified_row_cites_a_source():
+def test_every_verified_row_names_its_proof():
     """The invariant the loader enforces, restated against real data."""
     for entry in load_matrix():
         if entry.verified:
             assert entry.verdict in VERDICTS, entry.transition
-            assert entry.source_url, entry.transition
+            if entry.verdict == "no_image":
+                assert entry.references, entry.transition
+            else:
+                assert entry.evidence, entry.transition
 
 
 def test_no_unverified_row_smuggles_in_a_verdict():
-    """An unverified row must stay blank -- no verdict, no reason, no source.
+    """An unverified row must stay blank -- no verdict, reason or evidence.
 
     This is the rule that keeps guesses out of the matrix. If someone fills in a
-    verdict, they have to flip `verified` and cite where it came from, and this
-    test is what makes that non-optional.
+    verdict, they have to flip `verified` and name the runs that established
+    it, and this test is what makes that non-optional.
     """
     for entry in load_matrix():
         if not entry.verified:
             assert entry.verdict is None, entry.transition
             assert entry.reason == "", entry.transition
-            assert entry.source_url is None, entry.transition
+            assert entry.evidence is None, entry.transition
+            assert not entry.steps, entry.transition
+
+
+def _records(entry):
+    records = {m: load_record(REPO / entry.evidence[m]) for m in EVIDENCE_MODES}
+    for mode, doc in records.items():
+        assert doc["mode"] == mode, (entry.transition, mode)
+        assert doc["transition"] == {
+            "source_pg": entry.source_pg, "source_ts": entry.source_ts,
+            "target_pg": entry.target_pg, "target_ts": entry.target_ts,
+        }, (entry.transition, mode)
+    return records
+
+
+def test_every_verified_row_agrees_with_its_evidence():
+    """A verdict says what the runs showed, and nothing they did not.
+
+    * ``in_place``: the upgrade itself completed in both runs and the empty run
+      passed. A seeded run may fail only in the fixture checks after the
+      upgrade, and only with the caveat written in ``reason``.
+    * ``unsupported``: some run failed before the upgrade completed, or the
+      planner refused it outright.
+    """
+    for entry in load_matrix():
+        if not entry.verified or not entry.evidence:
+            continue
+        records = _records(entry)
+        empty, seeded = records["empty"], records["seeded"]
+        where = entry.transition
+        if entry.verdict == "in_place":
+            for doc in records.values():
+                assert doc["versions"]["reached"] == doc["versions"]["target"], where
+            assert empty["result"] == "pass", where
+            if seeded["result"] != "pass":
+                assert seeded["stage"] == "check", where
+                assert entry.reason, where
+        elif entry.verdict == "unsupported":
+            assert any(d["result"] == "fail" and d["stage"] in ("plan", "apply")
+                       for d in records.values()), where
+        else:
+            pytest.fail("no evidence rule for verdict {0!r} ({1})".format(entry.verdict, where))
+
 
 
 def test_no_duplicate_transitions():
