@@ -743,6 +743,12 @@ def _await_pg_upgrade(cluster: _Cluster, pod: str, waiting: List[str]) -> str:
         cluster.sleep(opts.poll_interval)
 
 
+# What the pg_upgrade pod takes from the StatefulSet's pod template, so it
+# can be scheduled, and pull its image, wherever the database pods can.
+_SCHEDULING = ("tolerations", "nodeSelector", "affinity", "imagePullSecrets",
+               "serviceAccountName", "priorityClassName")
+
+
 def _major_upgrade(step, cluster, kube, opts, output, state):
     old, new = step["from_pg"], step["to_pg"]
     image = pinned(step["image"], step.get("digest"))
@@ -809,13 +815,17 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
     cluster.wait_for("every instance to stop", lambda: not cluster.pods())
     output.append("scaled statefulset/{0} to 0".format(opts.statefulset))
 
-    # 3. pg_upgrade on ordinal 0's disk.
+    # 3. pg_upgrade on ordinal 0's disk, scheduled as the database pods are:
+    # where they may run (taints, selectors, affinity), with their pull
+    # secrets, account and resources. Without these it can sit Pending on a
+    # cluster with dedicated database nodes or a private registry.
     spec = {
         "apiVersion": "v1",
-        "spec": {
+        "spec": dict({key: template[key] for key in _SCHEDULING if template.get(key)}, **{
             "restartPolicy": "Never",
             "securityContext": template.get("securityContext") or {},
-            "containers": [{
+            "containers": [dict({"resources": container["resources"]} if container.get("resources")
+                                else {}, **{
                 "name": "pg-upgrade",
                 "image": image,
                 "imagePullPolicy": "IfNotPresent",
@@ -829,10 +839,10 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
                     {"name": "LINK", "value": "--link" if step["link"] else ""},
                 ],
                 "volumeMounts": [{"name": claim, "mountPath": mount}],
-            }],
+            })],
             "volumes": [{"name": claim, "persistentVolumeClaim": {
                 "claimName": "{0}-{1}".format(claim, first)}}],
-        },
+        }),
     }
     rc, out, err = kube.run(["run", pod, "--image", image, "--restart=Never",
                              "--labels", "app.kubernetes.io/part-of=timescaledb-upgrader",

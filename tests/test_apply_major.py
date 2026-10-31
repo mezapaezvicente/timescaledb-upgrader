@@ -431,3 +431,33 @@ def test_the_preflight_before_a_pg_upgrade_checks_its_disk_in_the_planned_mode()
 def test_the_script_lists_the_old_directories_left_on_the_disk(tmp_path):
     rc, out, data = _script(tmp_path, "ok", link="")
     assert "to remove once the result is accepted: {0}.pg12".format(data.as_posix()) in out
+
+
+def test_the_upgrade_pod_is_scheduled_like_the_database_pods():
+    """R6: on tainted database nodes, behind a node selector or a private
+    registry, a pod without these would sit Pending."""
+    kube = MajorKube()
+    template = {
+        "tolerations": [{"key": "db", "operator": "Exists", "effect": "NoSchedule"}],
+        "nodeSelector": {"pool": "db"},
+        "affinity": {"nodeAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": {}}},
+        "imagePullSecrets": [{"name": "registry"}],
+        "serviceAccountName": "tsdb-patroni",
+    }
+    resources = {"requests": {"memory": "2Gi"}, "limits": {"memory": "4Gi"}}
+    original = kube.json
+
+    def json_(args, namespaced=True):
+        doc = original(args, namespaced)
+        if args[:2] == ["get", "statefulset"]:
+            doc["spec"]["template"]["spec"].update(template)
+            doc["spec"]["template"]["spec"]["containers"][0]["resources"] = resources
+        return doc
+    kube.json = json_
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+    spec = kube.spec_seen["spec"]
+    for key, value in template.items():
+        assert spec[key] == value, key
+    assert spec["containers"][0]["resources"] == resources
+    assert spec["securityContext"]["runAsUser"] == 1000
