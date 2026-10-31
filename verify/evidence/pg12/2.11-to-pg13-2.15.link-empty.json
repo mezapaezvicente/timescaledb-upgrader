@@ -28,29 +28,29 @@
     "reached": "2.15.3"
   },
   "upgrader": {
-    "commit": "9773080d86b80009b74bf0214c7fc3a9d7779464",
+    "commit": "bdb8c59def84e1ac6756e4c0e8993fc869930c51",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg12/2.11-to-pg13-2.15.link-empty.log",
-  "recorded_at": "2026-10-30T18:35:12Z",
+  "recorded_at": "2026-10-31T08:58:23Z",
   "stage": "done",
-  "started_at": "2026-10-30T18:31:19Z",
-  "finished_at": "2026-10-30T18:35:12Z",
+  "started_at": "2026-10-31T08:55:14Z",
+  "finished_at": "2026-10-31T08:58:23Z",
   "source_pg_version": "12.22",
   "replicas": 2,
   "pods": [
     {
       "pod": "tsdb-0",
       "role": "primary",
-      "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+      "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3@sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
       "image_id": "docker.io/library/import-2026-10-29@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
       "server_version": "13.22"
     },
     {
       "pod": "tsdb-1",
       "role": "replica",
-      "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+      "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3@sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
       "image_id": "docker.io/library/import-2026-10-29@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
       "server_version": "13.22"
     }
@@ -61,6 +61,30 @@
   "plan": {
     "hops": 2,
     "path": "verify/out/pg12/2.11-to-pg13-2.15.link.plan.json"
+  },
+  "route": {
+    "start": {
+      "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+      "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+    },
+    "steps": [
+      {
+        "action": "major_upgrade",
+        "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+        "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+        "from_pg": 12,
+        "to_pg": 13,
+        "ts": "2.11.2",
+        "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+        "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+        "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+        "to": "2.15.3"
+      }
+    ]
   },
   "major_upgrades": [
     {
