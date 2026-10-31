@@ -148,6 +148,35 @@ def _bridges(profiles: Profiles, a: int, b: int) -> List[str]:
     return sorted(refs, key=lambda r: (tag_major(r) == b, r), reverse=True)
 
 
+def _pg_upgrade_options(
+    profiles: Profiles, a: int, b: int, current: str, target_ts: str
+) -> List[Tuple[str, str]]:
+    """``(image, release)`` pairs that can run ``pg_upgrade`` from ``a`` to ``b``,
+    best first.
+
+    A pair qualifies when the image ships ``release`` for both majors and the
+    release is not below where the database is nor above the target. Best
+    means: the highest shared release first (update the extension as far as
+    possible on the old major, which is TimescaleDB's documented order), and
+    for one release, the image tagged with the new major before the others
+    (:func:`_bridges`' order), since that is the image whose new-major
+    binaries the cluster will keep running.
+    """
+    bridges = _bridges(profiles, a, b)
+    preference = {ref: i for i, ref in enumerate(bridges)}
+    options = []
+    for ref in bridges:
+        shared = set(profiles[ref][a].installable) & set(profiles[ref][b].installable)
+        options.extend((ref, x) for x in shared if _key(current) <= _key(x) <= _key(target_ts))
+
+    def best_first(option: Tuple[str, str]) -> Tuple[Tuple[int, ...], int]:
+        ref, release = option
+        # Negated: a higher release, then an earlier image in _bridges, sorts first.
+        return tuple(-p for p in _key(release)), preference[ref]
+
+    return sorted(options, key=best_first)
+
+
 def find_route(
     source_major: int,
     source_ts: str,
@@ -191,14 +220,7 @@ def _try(
         chosen = None
         problem = "no image ships one TimescaleDB release for both pg{0} and pg{1} at or above {2}".format(
             a, b, current)
-        options = []
-        for ref in _bridges(profiles, a, b):
-            shared = set(profiles[ref][a].installable) & set(profiles[ref][b].installable)
-            for x in shared:
-                if _key(current) <= _key(x) <= _key(target_ts):
-                    options.append((_key(x), ref, x))
-        rank = {ref: i for i, ref in enumerate(_bridges(profiles, a, b))}
-        for _, _, ref, x in sorted((k, -rank[r], r, x) for k, r, x in options)[::-1]:
+        for ref, x in _pg_upgrade_options(profiles, a, b, current, target_ts):
             if not any(p.accepts(x) for p in _runners(profiles, b)):
                 problem = "no pg{0} image ships {1} to restart on".format(b, x)
                 continue
