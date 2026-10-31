@@ -25,7 +25,11 @@ NEW = REPO + "pg13.22-ts2.15.3"
 
 
 class MajorKube(FakeKube):
-    def __init__(self, primary=0, upgrade_phase="Succeeded", **kw):
+    """``phases``: what the upgrade pod reports on each look, the last one
+    repeating; ``leftover``: the phase of an upgrade pod already there."""
+
+    def __init__(self, primary=0, upgrade_phase="Succeeded", phases=None, leftover=None,
+                 fail_pvc=False, **kw):
         super().__init__(OLD, "12.22", {"verify": "2.11.2"}, replicas=1)
         for pod in self.pods:
             pod["role"] = "primary" if pod["name"] == "tsdb-{0}".format(primary) else "replica"
@@ -33,7 +37,10 @@ class MajorKube(FakeKube):
         self.major = 12
         self.sysid = "7000000000000000001"
         self.upgrade_phase = upgrade_phase
-        self.upgrade_pod = None
+        self.phases = list(phases or [upgrade_phase])
+        self.upgrade_pod = "tsdb-pg-upgrade-12-13" if leftover else None
+        self.leftover = leftover
+        self.fail_pvc = fail_pvc
         self.spec_seen = None
 
     def json(self, args, namespaced=True):
@@ -46,11 +53,24 @@ class MajorKube(FakeKube):
                                     "volumeMounts": [{"name": "pgdata",
                                                       "mountPath": "/home/postgres/pgdata"}]}]}},
                 "volumeClaimTemplates": [{"metadata": {"name": "pgdata"}}]}}
-        if args[:2] == ["get", "pod"] and args[2] == self.upgrade_pod:
-            return {"status": {"phase": self.upgrade_phase}}
         return super().json(args, namespaced)
 
+    def _upgrade_status(self):
+        if self.leftover:
+            return {"phase": self.leftover}
+        phase = self.phases.pop(0) if len(self.phases) > 1 else self.phases[0]
+        self.upgrade_phase = phase
+        status = {"phase": phase}
+        if phase == "Pending":
+            status["containerStatuses"] = [{"state": {"waiting": {
+                "reason": "ErrImagePull", "message": "pull access denied"}}}]
+        return status
+
     def run(self, args, namespaced=True):
+        if args[:2] == ["get", "pod"] and args[2].startswith("tsdb-pg-upgrade-"):
+            if args[2] != self.upgrade_pod:
+                return 0, "", ""
+            return 0, json.dumps({"status": self._upgrade_status()}), ""
         if args[0] == "scale":
             n = int(args[-1].split("=")[1])
             self.writes.append("scale {0}".format(n))
@@ -69,6 +89,8 @@ class MajorKube(FakeKube):
             self.writes.append("run {0} on {1}".format(args[1], args[args.index("--image") + 1]))
             return 0, "", ""
         if args[0] == "logs":
+            if self.leftover:
+                return 0, "upgraded to PostgreSQL 13 (an earlier run)", ""
             if self.upgrade_phase != "Succeeded":
                 return 0, "pg_upgrade --check failed:\nlocale mismatch", ""
             env = {e["name"]: e["value"] for e in self.spec_seen["spec"]["containers"][0]["env"]}
@@ -76,8 +98,11 @@ class MajorKube(FakeKube):
             return 0, "\n".join(["{0} user relation files".format(said)] + ["ok"] * 20
                                 + ["upgraded to PostgreSQL 13"]), ""
         if args[:2] == ["delete", "pod"] and args[2].startswith("tsdb-pg-upgrade-"):
+            self.writes.append("delete pod " + args[2])
             return 0, "", ""
         if args[:2] == ["delete", "pvc"]:
+            if self.fail_pvc:
+                return 1, "", "persistentvolumeclaims is forbidden"
             self.writes.append("delete pvc " + args[2])
             return 0, "", ""
         if args[:2] == ["delete", "endpoints,configmaps"]:
@@ -116,11 +141,25 @@ def _plan(link=False):
     }
 
 
-def _apply(plan, kube):
-    return apply_plan(plan, ApplyOptions(poll_interval=0, rollout_timeout=5,
-                                         acknowledge_verification=True,
-                                         selector="application=patroni,cluster-name=tsdb"),
-                      kube=kube, preflight=_all_pass, sleep=lambda s: None)
+class Clock:
+    """Time that moves only when apply sleeps."""
+
+    def __init__(self):
+        self.now = 0.0
+
+    def __call__(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += max(seconds, 1.0)
+
+
+def _apply(plan, kube, **opts):
+    clock = Clock()
+    opts = dict(dict(poll_interval=1, rollout_timeout=5, acknowledge_verification=True,
+                     selector="application=patroni,cluster-name=tsdb"), **opts)
+    return apply_plan(plan, ApplyOptions(**opts), kube=kube, preflight=_all_pass,
+                      sleep=clock.sleep, clock=clock)
 
 
 def test_major_upgrade_writes_in_the_one_safe_order():
@@ -130,6 +169,7 @@ def test_major_upgrade_writes_in_the_one_safe_order():
     assert kube.writes == [
         "scale 0",
         "run tsdb-pg-upgrade-12-13 on " + BOTH,
+        "delete pod tsdb-pg-upgrade-12-13",
         "delete pvc pgdata-tsdb-1",
         "delete dcs application=patroni,cluster-name=tsdb",
         "set image " + NEW,
@@ -186,7 +226,7 @@ def test_a_failed_pg_upgrade_deletes_nothing_and_says_how_to_start_again():
     failure = report["failure"]
     assert failure["action"] == "major_upgrade"
     assert "locale mismatch" in failure["error"]
-    assert any("kubectl scale statefulset/tsdb --replicas=2" in l for l in failure["error"])
+    assert any("kubectl -n timescale scale statefulset/tsdb --replicas=2" in l for l in failure["error"])
 
 
 @pytest.mark.parametrize("mutate,reason", [
@@ -200,3 +240,76 @@ def test_malformed_major_steps_are_refused(mutate, reason):
     mutate(plan["steps"][0])
     reasons = check_plan(plan, ApplyOptions(acknowledge_verification=True))
     assert any(reason in r for r in reasons), reasons
+
+
+# --- the wait, the leftover pod, and what every failure says (R2) ------------
+
+def test_a_long_pg_upgrade_is_waited_for_without_a_limit_by_default():
+    """Copy mode on a real database outlasts any rollout timeout."""
+    kube = MajorKube(phases=["Pending"] + ["Running"] * 50 + ["Succeeded"])
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+
+
+def test_running_past_the_pg_upgrade_timeout_keeps_the_pod_and_says_how_to_go_on():
+    kube = MajorKube(phases=["Running"])
+    report = _apply(_plan(), kube, pg_upgrade_timeout=10)
+    assert report["result"] == "fail"
+    assert not any(w.startswith("delete") for w in kube.writes)
+    failure = report["failure"]
+    assert "still running in pod tsdb-pg-upgrade-12-13" in failure["summary"]
+    error = "\n".join(failure["error"])
+    assert "do not start the cluster while it runs" in error
+    assert "logs -f tsdb-pg-upgrade-12-13" in error
+    assert "delete pvc pgdata-tsdb-1" in error and "--replicas=2" in error
+
+
+def test_a_pod_that_never_starts_fails_after_the_rollout_timeout_and_is_left():
+    kube = MajorKube(phases=["Pending"])
+    report = _apply(_plan(), kube)
+    assert report["result"] == "fail"
+    failure = report["failure"]
+    assert "has not started" in failure["summary"] and "ErrImagePull" in failure["summary"]
+    assert "data is untouched" in failure["summary"]
+    error = "\n".join(failure["error"])
+    assert "delete pod tsdb-pg-upgrade-12-13" in error
+    assert "scale statefulset/tsdb --replicas=2" in error
+    assert "delete pod tsdb-pg-upgrade-12-13" not in kube.writes
+
+
+@pytest.mark.parametrize("phase", ["Running", "Pending"])
+def test_an_upgrade_pod_already_running_is_refused_not_deleted(phase):
+    kube = MajorKube(leftover=phase)
+    report = _apply(_plan(), kube)
+    assert report["result"] == "fail"
+    assert kube.writes == []
+    assert "already exists and is {0}".format(phase) in report["failure"]["summary"]
+
+
+@pytest.mark.parametrize("phase", ["Succeeded", "Failed"])
+def test_a_finished_pod_from_an_earlier_run_is_shown_and_refused(phase):
+    kube = MajorKube(leftover=phase)
+    report = _apply(_plan(), kube)
+    assert kube.writes == []
+    failure = report["failure"]
+    assert "left from an earlier run ({0})".format(phase) in failure["summary"]
+    assert "upgraded to PostgreSQL 13 (an earlier run)" in failure["error"]
+
+
+def test_a_failure_after_pg_upgrade_says_the_data_is_upgraded_and_how_to_finish():
+    kube = MajorKube(fail_pvc=True)
+    report = _apply(_plan(), kube)
+    assert report["result"] == "fail"
+    error = "\n".join(report["failure"]["error"])
+    assert "upgraded to PostgreSQL 13" in error and "do not start it on PostgreSQL 12" in error
+    assert "/home/postgres/pgdata/data.pg12" in error
+    assert "set image statefulset/tsdb timescaledb=" + NEW in error
+    assert "data untouched" not in error
+
+
+def test_every_failure_after_the_scale_to_0_says_how_to_start_again():
+    """A failed pg_upgrade and a pod that cannot be created both leave the
+    cluster stopped; the report must say so."""
+    for kube in (MajorKube(upgrade_phase="Failed"), MajorKube(phases=["Pending"])):
+        report = _apply(_plan(), kube)
+        assert any("scale statefulset/tsdb --replicas=2" in l for l in report["failure"]["error"])

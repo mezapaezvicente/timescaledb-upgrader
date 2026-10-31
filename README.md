@@ -402,7 +402,12 @@ to 0, runs `pg_upgrade` in a pod on ordinal 0's disk (matching the old
 cluster's data checksums), deletes the replicas' disks and Patroni's DCS
 state (`pg_upgrade` gives the cluster a new system identifier), and restarts
 everything on the new major's image; Patroni re-clones the replicas. The plan
-ends with `vacuumdb --all --analyze-in-stages`. By default `pg_upgrade`
+ends with `vacuumdb --all --analyze-in-stages`. `apply` waits for `pg_upgrade` as long as
+it runs (`--pg-upgrade-timeout` sets a limit; a pod that never starts fails
+after `--rollout-timeout`). When it stops waiting, the pod keeps running and
+the report says how to watch it and the commands that finish the upgrade. An
+upgrade pod already there is refused, never deleted. Every failure after the
+cluster is stopped says what state it left and how to go on. By default `pg_upgrade`
 copies, and the old data directory stays beside the new one to go back to;
 `plan --link` hard-links instead, which is fast and needs no space but leaves
 the old directory unusable. A failure before anything is deleted leaves the

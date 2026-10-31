@@ -55,9 +55,19 @@ A major upgrade, under Patroni, in this order:
 5. the StatefulSet is set to the new major's image and scaled back up.
    Patroni starts ordinal 0 on the upgraded directory and re-clones the rest.
 
-A failure before step 4 leaves the cluster stopped with its old data
-intact, and the report says how to start it again. ``apply`` does not do it
-on its own: whether to go back is the operator's call.
+Every failure after step 2 carries what it left behind and how to go on:
+before ``pg_upgrade`` has succeeded, the cluster is stopped with its old data
+intact and the report says how to start it again; after, the report lists
+the commands that finish the upgrade by hand. ``apply`` does neither on its
+own: whether to go back is the operator's call.
+
+The wait for ``pg_upgrade`` has its own limit (``pg_upgrade_timeout``, none by
+default), since a copy takes as long as the database is large; a pod that has
+not started at all fails after ``rollout_timeout``. When apply stops waiting,
+the pod keeps running and the report says how to watch it. An upgrade pod
+already there (running, or left from an earlier run) is refused, never
+deleted: it may be working on the disk, or hold the only account of what
+happened to it.
 
 Pod order on an image rollout: replicas first, the primary last. Patroni
 releases the leader key when its pod is stopped, so with replicas the primary's
@@ -132,6 +142,9 @@ class ApplyOptions:
     matrix_path: Optional[str] = None
     timeout: float = 30.0
     rollout_timeout: float = 600.0
+    # How long a running pg_upgrade pod is waited for; 0 is no limit. A pod
+    # that has not started is bounded by rollout_timeout instead.
+    pg_upgrade_timeout: float = 0.0
     # Where Patroni keeps the data directory, and where each major's binaries
     # are; both as the timescale/timescaledb-ha images lay them out.
     data_dir: str = "/home/postgres/pgdata/data"
@@ -604,15 +617,95 @@ def _step_major_upgrade(step: Dict[str, Any], cluster: _Cluster) -> Tuple[str, L
     opts = cluster.opts
     kube = cluster.kube
     output: List[str] = []
+    # What a failure from here on leaves behind and how to go on; replaced as
+    # the upgrade moves through its stages, and attached to every failure.
+    state: List[str] = []
     try:
-        return _major_upgrade(step, cluster, kube, opts, output)
+        return _major_upgrade(step, cluster, kube, opts, output, state)
     except (_StepFailed, PreflightError) as exc:
         summary = exc.summary if isinstance(exc, _StepFailed) else str(exc)
         extra = exc.output if isinstance(exc, _StepFailed) else []
-        raise _StepFailed(summary, output + extra) from exc
+        raise _StepFailed(summary, output + extra + [l for l in state if l not in extra]) from exc
 
 
-def _major_upgrade(step, cluster, kube, opts, output):
+def _kubectl(opts: ApplyOptions, *args: str) -> str:
+    """A kubectl command line for the operator, in this run's context and namespace."""
+    context = ["--context", opts.context] if opts.context else []
+    return " ".join(["kubectl"] + context + ["-n", opts.namespace] + list(args))
+
+
+def _pod_phase(kube: Kube, pod: str) -> Optional[Dict[str, Any]]:
+    """The pod's status, or None when there is no such pod."""
+    rc, out, err = kube.run(["get", "pod", pod, "--ignore-not-found", "-o", "json"])
+    if rc != 0:
+        raise _StepFailed("cannot look for pod {0}".format(pod), [err or out])
+    return (json.loads(out).get("status") or {}) if out.strip() else None
+
+
+def _why_pending(status: Dict[str, Any]) -> str:
+    for c in status.get("containerStatuses") or []:
+        waiting = (c.get("state") or {}).get("waiting") or {}
+        if waiting.get("reason"):
+            return " ".join(filter(None, [waiting["reason"], waiting.get("message")]))
+    for cond in status.get("conditions") or []:
+        if cond.get("status") == "False" and cond.get("message"):
+            return cond["message"]
+    return "no reason given"
+
+
+def _finish_by_hand(opts: ApplyOptions, claim: str, replicas: int, run_image: str) -> List[str]:
+    """What apply does after a successful pg_upgrade, as commands."""
+    lines = [_kubectl(opts, "delete", "pvc", "{0}-{1}-{2}".format(claim, opts.statefulset, i))
+             for i in range(1, replicas)]
+    return lines + [
+        _kubectl(opts, "delete", "endpoints,configmaps", "-l", opts.selector),
+        _kubectl(opts, "set", "image", "statefulset/" + opts.statefulset,
+                 "{0}={1}".format(opts.container, run_image)),
+        _kubectl(opts, "scale", "statefulset/" + opts.statefulset, "--replicas={0}".format(replicas)),
+    ]
+
+
+def _await_pg_upgrade(cluster: _Cluster, pod: str, waiting: List[str]) -> str:
+    """Wait for the pod to finish; returns its phase.
+
+    A pod that never starts is bounded by ``rollout_timeout``: nothing has run
+    yet. Once it runs, ``pg_upgrade_timeout`` (0: no limit), because a copy of
+    a real database takes as long as it takes. Either way the pod is left
+    alone: apply stops waiting, it does not stop the upgrade.
+    """
+    opts, kube = cluster.opts, cluster.kube
+    started = cluster.clock()
+    running_since: Optional[float] = None
+    while True:
+        status = _pod_phase(kube, pod) or {}
+        phase = status.get("phase")
+        if phase in ("Succeeded", "Failed"):
+            return phase
+        now = cluster.clock()
+        if phase == "Running":
+            running_since = now if running_since is None else running_since
+            if opts.pg_upgrade_timeout and now - running_since >= opts.pg_upgrade_timeout:
+                raise _StepFailed(
+                    "pg_upgrade is still running in pod {0} after {1:.0f}s; apply stopped "
+                    "waiting, the upgrade goes on".format(pod, now - running_since),
+                    ["do not start the cluster while it runs: PostgreSQL must not open "
+                     "ordinal 0's data directory under pg_upgrade",
+                     "watch it: " + _kubectl(opts, "logs", "-f", pod),
+                     "when it shows Succeeded (" + _kubectl(opts, "get", "pod", pod)
+                     + "), finish by hand:"] + ["    " + l for l in waiting]
+                    + ["if it shows Failed instead, its log says why, and the data is as a "
+                       "failed pg_upgrade leaves it"])
+        elif now - started >= opts.rollout_timeout:
+            raise _StepFailed(
+                "the pg_upgrade pod {0} has not started after {1:.0f}s ({2}: {3}); "
+                "nothing has run, the data is untouched".format(
+                    pod, now - started, phase or "no phase", _why_pending(status)),
+                ["the pod is left as it is; if it starts later it runs pg_upgrade, so delete "
+                 "it before starting the cluster: " + _kubectl(opts, "delete", "pod", pod)])
+        cluster.sleep(opts.poll_interval)
+
+
+def _major_upgrade(step, cluster, kube, opts, output, state):
     old, new = step["from_pg"], step["to_pg"]
     image = pinned(step["image"], step.get("digest"))
     run_image = pinned(step["run_image"], step.get("run_digest"))
@@ -630,6 +723,26 @@ def _major_upgrade(step, cluster, kube, opts, output):
     if mount is None:
         raise _StepFailed("container {0} does not mount {1}".format(opts.container, claim))
     first = "{0}-0".format(opts.statefulset)
+    pod = "{0}-pg-upgrade-{1}-{2}".format(opts.statefulset, old, new)
+
+    # 0. An upgrade pod left from an earlier run may still be working on the
+    # disk, or holds the only account of what happened to it: never delete it.
+    leftover = _pod_phase(kube, pod)
+    if leftover is not None:
+        phase = leftover.get("phase") or "no phase"
+        if phase in ("Succeeded", "Failed"):
+            _, log, _ = kube.run(["logs", pod])
+            raise _StepFailed(
+                "pod {0} is left from an earlier run ({1}); nothing was done".format(pod, phase),
+                [l for l in log.splitlines() if l.strip()][-40:]
+                + ["read its log above, then delete it yourself ("
+                   + _kubectl(opts, "delete", "pod", pod) + ") and plan again from the "
+                   "cluster's state as it is now"])
+        raise _StepFailed(
+            "pod {0} already exists and is {1}: a pg_upgrade may be running on ordinal 0's "
+            "disk; nothing was done".format(pod, phase),
+            ["watch it: " + _kubectl(opts, "logs", "-f", pod),
+             "do not start the cluster while it runs"])
 
     # 1. The data has to be on ordinal 0's disk.
     primary = cluster.primary()
@@ -651,14 +764,14 @@ def _major_upgrade(step, cluster, kube, opts, output):
     rc, out, err = kube.run(["scale", "statefulset/" + opts.statefulset, "--replicas=0"])
     if rc != 0:
         raise _StepFailed("kubectl scale to 0 failed", [err or out])
+    state[:] = ["the cluster is stopped and its data untouched; to start it again on "
+                "PostgreSQL {0}: {1}".format(old, _kubectl(
+                    opts, "scale", "statefulset/" + opts.statefulset,
+                    "--replicas={0}".format(replicas)))]
     cluster.wait_for("every instance to stop", lambda: not cluster.pods())
-    stopped = ("the cluster is stopped and its data untouched; to start it again on "
-               "PostgreSQL {0}: kubectl scale statefulset/{1} --replicas={2}".format(
-                   old, opts.statefulset, replicas))
     output.append("scaled statefulset/{0} to 0".format(opts.statefulset))
 
     # 3. pg_upgrade on ordinal 0's disk.
-    pod = "{0}-pg-upgrade-{1}-{2}".format(opts.statefulset, old, new)
     spec = {
         "apiVersion": "v1",
         "spec": {
@@ -683,27 +796,26 @@ def _major_upgrade(step, cluster, kube, opts, output):
                 "claimName": "{0}-{1}".format(claim, first)}}],
         },
     }
-    kube.run(["delete", "pod", pod, "--ignore-not-found", "--wait=true"])
     rc, out, err = kube.run(["run", pod, "--image", image, "--restart=Never",
                              "--labels", "app.kubernetes.io/part-of=timescaledb-upgrader",
                              "--overrides", json.dumps(spec)])
     if rc != 0:
-        raise _StepFailed("cannot start the pg_upgrade pod: " + (err or out), [stopped])
+        raise _StepFailed("cannot start the pg_upgrade pod: " + (err or out))
 
-    def finished() -> bool:
-        phase = kube.json(["get", "pod", pod]).get("status", {}).get("phase")
-        return phase in ("Succeeded", "Failed")
-
-    cluster.wait_for("pg_upgrade in pod {0}".format(pod), finished)
-    phase = kube.json(["get", "pod", pod]).get("status", {}).get("phase")
+    finish = _finish_by_hand(opts, claim, replicas, run_image)
+    phase = _await_pg_upgrade(cluster, pod, finish)
     _, log, _ = kube.run(["logs", pod])
     lines = [l for l in log.splitlines() if l.strip()]
     if phase != "Succeeded":
         raise _StepFailed("pg_upgrade {0} -> {1} failed in {2}".format(old, new, image),
-                          lines[-40:] + [stopped])
+                          lines[-40:])
     # pg_upgrade's own word on copy or link sits mid-log, above the tail.
     output.extend([l for l in lines[:-12] if "user relation files" in l] + lines[-12:])
     kube.run(["delete", "pod", pod, "--wait=false"])
+    state[:] = ["ordinal 0's data directory is upgraded to PostgreSQL {0} and the cluster is "
+                "stopped; do not start it on PostgreSQL {1}'s image. The old directory is "
+                "{2}.pg{1}. To finish by hand:".format(new, old, opts.data_dir)] + [
+                    "    " + l for l in finish]
 
     # 4. The replicas' copies and Patroni's stored state belong to the old cluster.
     for i in range(1, replicas):
@@ -727,6 +839,8 @@ def _major_upgrade(step, cluster, kube, opts, output):
                              "--replicas={0}".format(replicas)])
     if rc != 0:
         raise _StepFailed("kubectl scale back to {0} failed".format(replicas), [err or out])
+    state[:] = ["the cluster was started on PostgreSQL {0} ({1}); the replicas re-clone from "
+                "ordinal 0. Check it with {2}".format(new, run_image, _kubectl(opts, "get", "pods"))]
 
     def back() -> bool:
         pods = cluster.pods()

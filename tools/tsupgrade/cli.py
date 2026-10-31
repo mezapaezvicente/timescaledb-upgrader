@@ -615,6 +615,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         matrix_path=args.matrix,
         timeout=args.timeout,
         rollout_timeout=args.rollout_timeout,
+        pg_upgrade_timeout=args.pg_upgrade_timeout,
     )
     if plan.get("mode") == "verification" and args.acknowledge_verification_run:
         print(
@@ -874,6 +875,12 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--timeout", type=float, default=30.0)
     apply.add_argument(
         "--rollout-timeout", type=float, default=600.0, dest="rollout_timeout"
+    )
+    apply.add_argument(
+        "--pg-upgrade-timeout", type=float, default=0.0, dest="pg_upgrade_timeout",
+        help="seconds to wait for a running pg_upgrade pod; 0 (the default) waits as long as "
+        "it runs. apply stops waiting, the upgrade does not stop; a pod that never starts "
+        "fails after --rollout-timeout",
     )
     apply.add_argument("--report", default=None, help="also write the report as JSON here")
     apply.add_argument("--json", action="store_true")
