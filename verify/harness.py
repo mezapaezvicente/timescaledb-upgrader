@@ -79,8 +79,8 @@ sys.path.insert(0, str(TOOLS))
 
 from tsupgrade.contents import ImageContents, load_contents  # noqa: E402
 from tsupgrade.evidence import (  # noqa: E402
-    EvidenceError, build_record, evidence_key, load_record, record_path, upgrader_revision,
-    write_record)
+    EvidenceError, build_record, evidence_key, load_record, record_path, staleness,
+    upgrader_revision, write_record)
 from tsupgrade.matrix import MatrixEntry, default_matrix_path, load_matrix, route_problems  # noqa: E402
 from tsupgrade.plan import pinned, route_of  # noqa: E402
 from tsupgrade.preflight import patroni_role  # noqa: E402
@@ -907,13 +907,15 @@ def refused_record(run: Run, base: str, plan_err: str, plan_log: Log,
             "detail": "plan refused", "record": str(path), "log": str(plan_log.path)}
 
 
-def recorded(run: Run, base: str, root: Path = EVIDENCE) -> bool:
-    """A valid record from a clean tree already exists for this row and mode."""
+def recorded(run: Run, base: str, root: Path = EVIDENCE, git=None) -> bool:
+    """A valid record already exists for this row and mode that still
+    speaks for this checkout: clean, and no change to the code that decides
+    a run since its commit (:func:`evidence.staleness`)."""
     try:
         doc = load_record(record_path(root, run.transition, run.key(base)))
     except EvidenceError:
         return False
-    return doc["upgrader"].get("dirty") is False
+    return staleness(doc["upgrader"], REPO, git=git) is None
 
 
 def routes_for(entries: Sequence[MatrixEntry], root: Path = REPO) -> Tuple[Dict[int, Dict[str, Any]], List[str]]:
@@ -976,7 +978,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--replicas", type=int, default=2)
     ap.add_argument("--list", action="store_true", help="show the resolved rows and stop")
     ap.add_argument("--resume", action="store_true",
-                    help="skip rows and modes that already have a record from a clean tree")
+                    help="skip rows and modes whose record still speaks for this checkout: "
+                         "clean, and no change since to the code that decides a run")
     ap.add_argument("--history", metavar="RELEASE",
                     help="create the database at this release, then update it to the source")
     ap.add_argument("--to-pg", action="append", default=[], dest="to_pgs",

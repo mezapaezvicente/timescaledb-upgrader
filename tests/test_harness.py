@@ -273,12 +273,15 @@ def test_resume_skips_only_clean_valid_records(tmp_path):
             pg_version="15.18", source=RUN.source, target=RUN.target, reached=RUN.target,
             passed=True, log="verify/out/x.log", upgrader={"commit": "abc", "dirty": dirty})
 
-    assert not harness.recorded(RUN, "empty", tmp_path)
+    unchanged = lambda *args: ""  # noqa: E731 - git log: nothing since
+    assert not harness.recorded(RUN, "empty", tmp_path, git=unchanged)
     write_record(record_path(tmp_path, RUN.transition, "empty"), record(True))
-    assert not harness.recorded(RUN, "empty", tmp_path)
+    assert not harness.recorded(RUN, "empty", tmp_path, git=unchanged)
     write_record(record_path(tmp_path, RUN.transition, "empty"), record(False))
-    assert harness.recorded(RUN, "empty", tmp_path)
-    assert not harness.recorded(RUN, "seeded", tmp_path)
+    assert harness.recorded(RUN, "empty", tmp_path, git=unchanged)
+    assert not harness.recorded(RUN, "seeded", tmp_path, git=unchanged)
+    # A clean record from before a change to apply.py does not count.
+    assert not harness.recorded(RUN, "empty", tmp_path, git=lambda *args: "abc1234")
 
 
 # --- history and controls ---------------------------------------------------
@@ -341,8 +344,8 @@ def test_resume_finds_history_and_control_records_by_their_key(tmp_path):
         passed=False, explanation="the direct update failed", error="ERROR: x",
         log="verify/out/x.log", upgrader={"commit": "abc", "dirty": False})
     write_record(record_path(tmp_path, run.transition, "direct-history-empty"), doc)
-    assert harness.recorded(run, "empty", tmp_path)
-    assert not harness.recorded(harness.with_history(LATE, "2.13.1", PG15), "empty", tmp_path)
+    assert harness.recorded(run, "empty", tmp_path, git=lambda *a: "")
+    assert not harness.recorded(harness.with_history(LATE, "2.13.1", PG15), "empty", tmp_path, git=lambda *a: "")
 
 
 # --- major changes ----------------------------------------------------------
