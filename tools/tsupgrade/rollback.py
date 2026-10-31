@@ -48,6 +48,7 @@ from .apply import (
     _pod_phase,
     _run_on_ordinal_0,
     _StepFailed,
+    load_script,
 )
 from .preflight import Kube, PreflightError
 
@@ -58,16 +59,7 @@ ROLLBACK_FORMAT = 1
 LOST_WRITES = ("every write made since the upgrade is lost: the old data directory is the "
                "cluster as it was when pg_upgrade ran, extension updates included")
 
-_SWAP_SCRIPT = r"""
-set -euo pipefail
-data="$DATA"; keep="$KEPT"; aside="$DATA.rolled-back-pg$TO"
-[ -d "$keep" ] || { echo "$keep is not there; nothing to go back to"; exit 2; }
-[ -e "$keep/global/pg_control.old" ] && { echo "$keep was upgraded with --link; it is not usable"; exit 2; }
-[ -e "$aside" ] && { echo "$aside already exists; refusing to overwrite it"; exit 2; }
-mv "$data" "$aside"
-mv "$keep" "$data"
-echo "PostgreSQL $TO's data directory is now $aside; PostgreSQL $FROM's is back at $data"
-"""
+_SWAP_SCRIPT = load_script("rollback_swap.sh")
 
 
 class RollbackRefused(Exception):

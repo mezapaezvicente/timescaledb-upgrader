@@ -1,0 +1,80 @@
+#!/usr/bin/env bash
+# pg_upgrade on ordinal 0's disk, in a one-off pod on the image carrying both
+# majors, as the StatefulSet's user. apply.py starts it and reads its log,
+# which is the major_upgrade step's output: one message per stage.
+#
+# Environment (all set by apply): FROM, TO (majors), PG_BIN_OLD, PG_BIN_NEW,
+# DATA (the data directory), LINK ("--link" or empty), and the old cluster's
+# template0: ENCODING, LC_COLLATE, LC_CTYPE, LOCALE_PROVIDER (libc, icu or
+# builtin), PROVIDER_LOCALE.
+#
+# On failure the EXIT trap says what was changed ("old cluster disabled:",
+# "old data directory moved:"), which apply turns into how to go back.
+set -euo pipefail
+: "${FROM:?}" "${TO:?}" "${PG_BIN_OLD:?}" "${PG_BIN_NEW:?}" "${DATA:?}" "${LINK?}"
+: "${ENCODING:?}" "${LC_COLLATE:?}" "${LC_CTYPE:?}" "${LOCALE_PROVIDER:?}" "${PROVIDER_LOCALE?}"
+old_bin="$PG_BIN_OLD"; new_bin="$PG_BIN_NEW"; data="$DATA"
+new="$data.new"; keep="$data.pg$FROM"
+cd "$(dirname "$data")"
+
+on_exit() {
+  local rc=$? d
+  if [ "$rc" -ne 0 ]; then
+    for d in "$data" "$keep"; do
+      if [ -e "$d/global/pg_control.old" ]; then echo "old cluster disabled: $d/global/pg_control.old"; fi
+    done
+    if [ -d "$keep" ] && [ ! -d "$data" ]; then echo "old data directory moved: $keep"; fi
+  fi
+  exit "$rc"
+}
+trap on_exit EXIT
+
+for b in "$old_bin" "$new_bin"; do
+  [ -x "$b/pg_upgrade" ] || [ -x "$b/postgres" ] || { echo "this image has no $b"; exit 2; }
+done
+[ -e "$keep" ] && { echo "$keep already exists; refusing to overwrite it"; exit 2; }
+rm -rf "$new"
+
+# Data checksums must match, and PostgreSQL 18's initdb turns them on by default.
+sums=$("$old_bin/pg_controldata" "$data" | sed -n 's/^Data page checksum version: *//p')
+args=(-U postgres)
+if [ "$sums" != 0 ]; then
+  args+=(--data-checksums)
+elif "$new_bin/initdb" --help | grep -q -- --no-data-checksums; then
+  args+=(--no-data-checksums)
+fi
+# The old cluster's encoding, locale and provider (from its template0), or
+# pg_upgrade --check refuses the new cluster (13-15) during the outage.
+args+=(-E "$ENCODING" --lc-collate="$LC_COLLATE" --lc-ctype="$LC_CTYPE")
+case "$LOCALE_PROVIDER" in
+  icu) args+=(--locale-provider=icu --icu-locale="$PROVIDER_LOCALE") ;;
+  builtin) args+=(--locale-provider=builtin --builtin-locale="$PROVIDER_LOCALE") ;;
+esac
+echo "old cluster: PostgreSQL $FROM, data checksums ${sums:-unknown}; initdb ${args[*]}"
+"$new_bin/initdb" "${args[@]}" -D "$new" >/dev/null
+echo "shared_preload_libraries = 'timescaledb'" >> "$new/postgresql.conf"
+
+report() {
+  echo "pg_upgrade $1 failed:"
+  tail -n 40 "$new"/pg_upgrade_output.d/*/*.txt "$new"/pg_upgrade_output.d/*/log/* 2>/dev/null || true
+}
+upgrade=("$new_bin/pg_upgrade" -b "$old_bin" -B "$new_bin" -d "$data" -D "$new" -U postgres)
+if [ -n "$LINK" ]; then upgrade+=(--link); fi
+"${upgrade[@]}" --check || { report --check; exit 1; }
+"${upgrade[@]}" || { report ""; exit 1; }
+mv "$data" "$keep"
+mv "$new" "$data"
+
+# pg_upgrade's suggested script updates timescaledb straight to this image's
+# default release, past any stop the plan makes; the plan's updates replace it.
+if [ -f update_extensions.sql ]; then
+  echo "not run, removed: pg_upgrade's update_extensions.sql:"; sed 's/^/    /' update_extensions.sql
+  rm -f update_extensions.sql
+fi
+# Proof of the mode: with --link the new cluster's relation files are hard
+# links into the old directory; a copy has none.
+echo "relation files sharing an inode with $keep: $(find "$data/base" -type f -links +1 | wc -l)"
+echo "upgraded to PostgreSQL $TO; the old data directory is $keep"
+kept=()
+for d in "$data".pg*; do kept+=("$d"); done
+echo "old data directories on this disk, to remove once the result is accepted: ${kept[*]}"

@@ -28,4 +28,11 @@ if ! "$PY" -c 'import pytest' >/dev/null 2>&1; then
   exit 1
 fi
 
+# The scripts apply and rollback run in pods: lint them when shellcheck is here.
+if command -v shellcheck >/dev/null 2>&1; then
+  shellcheck tools/tsupgrade/scripts/*.sh || exit 1
+else
+  echo "note: shellcheck not installed; tools/tsupgrade/scripts/*.sh not linted" >&2
+fi
+
 exec "$PY" -m pytest "$@"
