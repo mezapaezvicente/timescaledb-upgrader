@@ -493,6 +493,15 @@ def build_plan(
         if isinstance(hop, MajorHop):
             steps.extend(
                 [
+                    # Against the image the cluster restarts on, before anything stops.
+                    {
+                        "hop": i,
+                        "action": "preflight",
+                        "image": hop.run_image,
+                        "target_pg": _tag_versions(hop.run_image).get("pg") or str(hop.to_pg),
+                        "target_ts": hop.ts,
+                        "pg_upgrade": {"from_pg": hop.from_pg, "to_pg": hop.to_pg, "link": link},
+                    },
                     {
                         "hop": i,
                         "action": "major_upgrade",
@@ -610,6 +619,10 @@ def render_runbook(plan: Dict[str, Any]) -> str:
         if action == "preflight":
             lines.append("{0}. preflight against {1} (target ts{2}); stop on any FAIL".format(
                 prefix, step["image"], step["target_ts"]))
+            if step.get("pg_upgrade"):
+                lines.append("         - and ordinal 0's disk: {0}".format(
+                    "a margin for the new catalog (--link)" if step["pg_upgrade"]["link"]
+                    else "the data directory's size free again, for the copy"))
         elif action == "ensure_image":
             lines.append("{0}. make sure every instance runs {1} (roll it out if not)".format(
                 prefix, pinned(step["image"], step.get("digest"))))
@@ -636,6 +649,8 @@ def render_runbook(plan: Dict[str, Any]) -> str:
             lines.append("         - {0}".format(
                 "the old data directory is unusable afterwards (hard links)" if step["link"]
                 else "the old data directory is kept, to go back to"))
+            lines.append("         - it stays on ordinal 0's disk as <data>.pg{0}; remove it once "
+                         "the result is accepted".format(step["from_pg"]))
             lines.append("         - replicas are re-created, and Patroni's stored state reset "
                          "(pg_upgrade gives the cluster a new system identifier)")
             lines.append("         - restart every instance on {0}".format(

@@ -20,6 +20,7 @@ from tsupgrade.preflight import (
     _parse_df,
     check_matrix,
     check_pg_minor_floor,
+    check_pg_upgrade_headroom,
     render_report,
     worst_status,
 )
@@ -279,3 +280,56 @@ def test_patroni_role_treats_the_old_master_label_as_primary():
     assert patroni_role({"role": "replica"}) == "replica"
     assert patroni_role({}) == "unknown"
     assert patroni_role(None) == "unknown"
+
+
+# --------------------------------------------------------------------------
+# Disk headroom for pg_upgrade (copy needs the data directory again)
+# --------------------------------------------------------------------------
+
+GIB = 1024 ** 3
+
+
+class DiskKube:
+    def __init__(self, data_kib, free_kib, left=""):
+        self.data_kib, self.free_kib, self.left = data_kib, free_kib, left
+        self.seen = []
+
+    def exec(self, pod, container, argv):
+        self.seen.append((pod, argv[0]))
+        if argv[0] == "du":
+            return 0, "{0}\t{1}".format(self.data_kib, argv[-1]), ""
+        if argv[0] == "df":
+            return 0, ("Filesystem 1024-blocks Used Available Capacity Mounted on\n"
+                       "/dev/x 999999999 1 {0} 1% /home/postgres/pgdata".format(self.free_kib)), ""
+        return 0, self.left, ""
+
+
+INSTANCES = [Instance("tsdb-1", role="replica", data_directory="/home/postgres/pgdata/data"),
+             Instance("tsdb-0", role="primary", data_directory="/home/postgres/pgdata/data")]
+
+
+@pytest.mark.parametrize("link,free_gib,status", [
+    (False, 9, FAIL),    # a copy of 10 GiB does not fit in 9
+    (False, 12, PASS),
+    (True, 9, PASS),     # linking needs only a margin
+    (True, 0.1, FAIL),
+])
+def test_pg_upgrade_headroom_needs_the_data_directory_again_only_when_copying(link, free_gib, status):
+    kube = DiskKube(10 * GIB // 1024, int(free_gib * GIB) // 1024)
+    result = check_pg_upgrade_headroom(kube, PreflightOptions("x", pg_upgrade_link=link), INSTANCES)
+    assert result.status == status, result.details
+    assert all(pod == "tsdb-0" for pod, _ in kube.seen)
+
+
+def test_pg_upgrade_headroom_lists_the_directories_earlier_hops_left():
+    kube = DiskKube(1024, 10 * GIB // 1024,
+                    left="/home/postgres/pgdata/data.pg12\n/home/postgres/pgdata/data.pg13\n")
+    result = check_pg_upgrade_headroom(kube, PreflightOptions("x", pg_upgrade_link=False), INSTANCES)
+    assert any("data.pg12, /home/postgres/pgdata/data.pg13" in d and "remove them" in d
+               for d in result.details)
+
+
+def test_pg_upgrade_headroom_without_ordinal_0_is_unknown():
+    result = check_pg_upgrade_headroom(DiskKube(1, 1), PreflightOptions("x", pg_upgrade_link=False),
+                                       INSTANCES[:1])
+    assert result.status == UNKNOWN

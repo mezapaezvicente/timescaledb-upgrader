@@ -236,6 +236,9 @@ def check_plan(plan: Any, opts: ApplyOptions) -> List[str]:
                 )
         elif action in ("preflight", "ensure_image") and not step.get("image"):
             reasons.append("steps[{0}]: {1} needs an image".format(i, action))
+        elif action == "preflight" and step.get("pg_upgrade") is not None and not isinstance(
+                (step["pg_upgrade"] or {}).get("link"), bool):
+            reasons.append("steps[{0}]: preflight's pg_upgrade needs link true or false".format(i))
         elif action == "verify_version" and not step.get("expect"):
             reasons.append("steps[{0}]: verify_version needs expect".format(i))
         elif action == "major_upgrade":
@@ -414,6 +417,7 @@ def _step_preflight(
             matrix_path=opts.matrix_path,
             timeout=opts.timeout,
             registry_timeout=opts.registry_timeout,
+            pg_upgrade_link=(step.get("pg_upgrade") or {}).get("link"),
         )
     )
     lines = ["{0}: {1} - {2}".format(r.name, r.status, r.summary) for r in results]
@@ -619,6 +623,7 @@ fi
 # links into the old directory; a copy has none.
 echo "relation files sharing an inode with $keep: $(find "$data/base" -type f -links +1 | wc -l)"
 echo "upgraded to PostgreSQL $TO; the old data directory is $keep"
+echo "old data directories on this disk, to remove once the result is accepted: $(ls -d "$data".pg* | tr '\n' ' ')"
 """
 
 

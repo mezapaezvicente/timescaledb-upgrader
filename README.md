@@ -397,6 +397,13 @@ bash scripts/tsupgrade.sh plan --from-pg 12.22 --from-ts 2.11.2 \
   --target-image timescale/timescaledb-ha:pg16.15-ts2.30.1 --output plan.json
 ```
 
+Every `pg_upgrade` is preceded by a preflight against the image the cluster
+restarts on, which also checks ordinal 0's disk: a copy needs the data
+directory's size free again (WAL included), `--link` only a margin. Each hop
+keeps the old directory as `<data>.pg<old major>` on that disk, so a chain
+such as 12 → 13 → 15 → 16 by copying ends with three of them; preflight and
+`apply` list them, to remove once the result is accepted.
+
 Under Patroni, `apply` moves the leader to ordinal 0, scales the StatefulSet
 to 0, runs `pg_upgrade` in a pod on ordinal 0's disk (matching the old
 cluster's data checksums), deletes the replicas' disks and Patroni's DCS

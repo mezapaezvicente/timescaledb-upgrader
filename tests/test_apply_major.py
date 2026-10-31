@@ -412,3 +412,22 @@ def test_the_script_swaps_the_directories_on_success(tmp_path):
     assert (data / "base" / "1" / "1234").exists()
     assert (data.parent / "data.pg12" / "global" / "pg_control").exists()
     assert "upgraded to PostgreSQL 13" in out
+
+
+def test_the_preflight_before_a_pg_upgrade_checks_its_disk_in_the_planned_mode():
+    seen = []
+    plan = _plan(link=True)
+    plan["steps"].insert(0, {"hop": 1, "action": "preflight", "image": NEW, "target_pg": "13.22",
+                             "target_ts": "2.11.2",
+                             "pg_upgrade": {"from_pg": 12, "to_pg": 13, "link": True}})
+    clock = Clock()
+    apply_plan(plan, ApplyOptions(poll_interval=1, rollout_timeout=5, acknowledge_verification=True),
+               kube=MajorKube(), preflight=lambda o: seen.append(o) or _all_pass(o),
+               sleep=clock.sleep, clock=clock)
+    assert [o.pg_upgrade_link for o in seen] == [True]
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash")
+def test_the_script_lists_the_old_directories_left_on_the_disk(tmp_path):
+    rc, out, data = _script(tmp_path, "ok", link="")
+    assert "to remove once the result is accepted: {0}.pg12".format(data.as_posix()) in out

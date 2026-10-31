@@ -238,3 +238,19 @@ def test_a_major_downgrade_is_refused():
     with pytest.raises(PlanRefused, match="downgrade"):
         build_plan("16.15", "2.13.0", IMAGES[R + "pg15.18-ts2.28.3"][15], matrix=Matrix([]),
                    verification_run=True, images=IMAGES)
+
+
+def test_every_pg_upgrade_is_preceded_by_a_preflight_with_its_mode():
+    """Nothing checked the cluster before the first stop; now each major hop
+    starts with a preflight against the image it restarts on (R3)."""
+    plan = _plan("pg16.15-ts2.30.1", link=True)
+    assert plan["steps"][0]["action"] == "preflight"
+    steps = plan["steps"]
+    for i, step in enumerate(steps):
+        if step["action"] == "major_upgrade":
+            before = steps[i - 1]
+            assert before["action"] == "preflight"
+            assert before["image"] == step["run_image"] and before["target_ts"] == step["ts"]
+            assert before["pg_upgrade"] == {"from_pg": step["from_pg"], "to_pg": step["to_pg"],
+                                            "link": True}
+    assert "remove it once the result is accepted" in render_runbook(plan)

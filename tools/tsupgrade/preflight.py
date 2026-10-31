@@ -105,6 +105,9 @@ class PreflightOptions:
     matrix_path: Optional[str] = None
     timeout: float = 30.0
     registry_timeout: float = 15.0
+    # Set before a pg_upgrade: True for --link, False for a copy. Adds the
+    # check that ordinal 0's disk can hold what pg_upgrade writes there.
+    pg_upgrade_link: Optional[bool] = None
 
 
 # Older Patroni labels the leader `master` whatever the configuration asks
@@ -692,6 +695,69 @@ def check_disk_headroom(
     )
 
 
+# A copy needs the data directory's size again, plus a margin; a link only
+# the new catalog and some room, whichever is larger.
+PG_UPGRADE_COPY_FACTOR = 1.1
+PG_UPGRADE_LINK_MARGIN = 256 * 1024 * 1024
+PG_UPGRADE_LINK_FRACTION = 0.02
+
+
+def check_pg_upgrade_headroom(
+    kube: Kube, opts: PreflightOptions, instances: Sequence[Instance]
+) -> CheckResult:
+    """Can ordinal 0's disk hold what pg_upgrade writes next to the data?
+
+    ``pg_upgrade`` runs on ordinal 0's volume and keeps the old directory
+    beside the new one (``<data>.pg<old>``). A copy writes the whole data
+    directory again, WAL included, so it needs that much free; ``--link``
+    hard-links the relation files and needs only the new catalog. Earlier
+    ``<data>.pg<N>`` directories from previous hops are on the same disk,
+    already counted as used, and listed so they can be removed once the
+    result is accepted.
+    """
+    title = "Disk headroom for pg_upgrade on ordinal 0"
+    link = bool(opts.pg_upgrade_link)
+    first = next((i for i in instances if not i.error and i.pod.endswith("-0")), None)
+    if first is None or not first.data_directory:
+        return CheckResult("pg_upgrade_disk", title, UNKNOWN,
+                           "no reachable ordinal 0 with a known data directory", [])
+    data = first.data_directory.rstrip("/")
+    parent = data.rsplit("/", 1)[0] or "/"
+    rc, out, err = kube.exec(first.pod, opts.container, ["du", "-sk", data])
+    try:
+        size = int(out.split()[0]) * 1024 if rc == 0 else None
+    except (IndexError, ValueError):
+        size = None
+    rc, df_out, df_err = kube.exec(first.pod, opts.container, ["df", "-Pk", parent])
+    usage = _parse_df(df_out) if rc == 0 else None
+    details: List[str] = []
+    _, ls_out, _ = kube.exec(first.pod, opts.container,
+                             ["sh", "-c", "ls -d {0}.pg* 2>/dev/null || true".format(data)])
+    left = [l.strip() for l in ls_out.splitlines() if l.strip()]
+    if left:
+        details.append("earlier data directories on this disk, kept by previous pg_upgrade runs: "
+                       "{0}; remove them once the result is accepted".format(", ".join(left)))
+    if size is None or usage is None:
+        details.append("{0} : cannot read the size of {1} or the free space at {2} ({3})".format(
+            first.pod, data, parent, (err or df_err or "du/df failed").splitlines()[:1]))
+        return CheckResult("pg_upgrade_disk", title, UNKNOWN, "could not measure", details)
+    if link:
+        needed = max(PG_UPGRADE_LINK_MARGIN, size * PG_UPGRADE_LINK_FRACTION)
+        how = "--link: the relation files are hard-linked, so only a margin"
+    else:
+        needed = size * PG_UPGRADE_COPY_FACTOR
+        how = "copy: the data directory again, {0}x".format(PG_UPGRADE_COPY_FACTOR)
+    ok = usage["free"] >= needed
+    details.insert(0, "{0} : {1} is {2}; {3} free at {4}; need >= {5} ({6}) -> {7}".format(
+        first.pod, data, _human(size), _human(usage["free"]), parent, _human(needed), how,
+        "ok" if ok else "SHORT"))
+    details.append(
+        "Free space is what df reports inside the pod. Provisioners that do not "
+        "enforce quotas (local-path, hostPath) report the whole node disk.")
+    return CheckResult("pg_upgrade_disk", title, PASS if ok else FAIL,
+                       "{0} needed, {1} free".format(_human(needed), _human(usage["free"])), details)
+
+
 def check_permissions(
     kube: Kube, opts: PreflightOptions, instances: Sequence[Instance]
 ) -> CheckResult:
@@ -1268,6 +1334,8 @@ def run_preflight(opts: PreflightOptions) -> List[CheckResult]:
     results.append(check_abi_break(instances))
     results.append(check_pg_minor_floor(instances, target_pg, target_ts))
     results.append(check_disk_headroom(kube, opts, instances))
+    if opts.pg_upgrade_link is not None:
+        results.append(check_pg_upgrade_headroom(kube, opts, instances))
     results.append(check_permissions(kube, opts, instances))
     results.append(check_drift(kube, opts, instances))
     results.append(check_gates(kube, opts, instances, target_ts))
