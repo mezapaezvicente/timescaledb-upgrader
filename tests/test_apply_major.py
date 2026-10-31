@@ -555,3 +555,67 @@ def test_a_finished_major_upgrade_reports_what_a_rollback_needs():
         "system_identifier_before": "7000000000000000001",
     }
     assert "detail" not in report["steps"][1]
+
+
+# --- each stage's failure, and one instance (R16) ----------------------------
+
+def test_a_failed_switchover_stops_nothing():
+    kube = MajorKube(primary=1)
+    exec_ = kube.exec
+
+    def refusing(pod, container, argv):
+        if argv[:2] == ["patronictl", "switchover"]:
+            return 1, "", "Error: candidate tsdb-0 is lagging"
+        return exec_(pod, container, argv)
+    kube.exec = refusing
+    report = _apply(_plan(), kube)
+    assert report["result"] == "fail"
+    assert kube.writes == []
+    assert "switchover to tsdb-0 failed" in report["failure"]["summary"]
+    assert "lagging" in "\n".join(report["failure"]["error"])
+
+
+def test_a_stop_that_never_finishes_says_how_to_start_again():
+    kube = MajorKube()
+    run = kube.run
+
+    def stuck(args, namespaced=True):
+        if args[0] == "scale" and args[-1] == "--replicas=0":
+            kube.writes.append("scale 0")
+            return 0, "", ""  # the pods never go away
+        return run(args, namespaced)
+    kube.run = stuck
+    report = _apply(_plan(), kube)
+    assert report["result"] == "fail"
+    assert "every instance to stop" in report["failure"]["summary"]
+    assert kube.writes == ["scale 0"]
+    assert any("--replicas=2" in l for l in report["failure"]["error"])
+
+
+def test_a_cluster_that_does_not_come_back_says_it_was_started_on_the_new_major():
+    kube = MajorKube()
+    run = kube.run
+
+    def never_ready(args, namespaced=True):
+        if args[0] == "scale" and args[-1] != "--replicas=0":
+            kube.writes.append("scale " + args[-1].split("=")[1])
+            kube.pods = []  # nothing starts
+            return 0, "", ""
+        return run(args, namespaced)
+    kube.run = never_ready
+    report = _apply(_plan(), kube)
+    assert report["result"] == "fail"
+    assert "instance(s) ready on" in report["failure"]["summary"]
+    error = "\n".join(report["failure"]["error"])
+    assert "started on PostgreSQL 13" in error and "get pods" in error
+    assert "data untouched" not in error
+
+
+def test_one_instance_has_no_replica_disk_to_delete():
+    kube = MajorKube()
+    kube.replicas = 1
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+    assert not any(w.startswith("delete pvc") for w in kube.writes)
+    assert "scale 1" in kube.writes
+    assert report["steps"][0]["detail"]["replicas"] == 1

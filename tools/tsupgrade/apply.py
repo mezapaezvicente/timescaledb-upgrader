@@ -598,14 +598,12 @@ _PG_UPGRADE_SCRIPT = load_script("pg_upgrade.sh")
 
 
 def _step_major_upgrade(step: MajorUpgrade, cluster: _Cluster) -> _Outcome:
-    opts = cluster.opts
-    kube = cluster.kube
     output: List[str] = []
     # What a failure from here on leaves behind and how to go on; replaced as
     # the upgrade moves through its stages, and attached to every failure.
     state: List[str] = []
     try:
-        return _major_upgrade(step, cluster, kube, opts, output, state)
+        return _major_upgrade(step, cluster, output, state)
     except (_StepFailed, PreflightError) as exc:
         summary = exc.summary if isinstance(exc, _StepFailed) else str(exc)
         extra = exc.output if isinstance(exc, _StepFailed) else []
@@ -836,131 +834,203 @@ def _run_on_ordinal_0(kube: Kube, sts: Dict[str, Any], opts: ApplyOptions, pod: 
                      "--overrides", json.dumps(spec)])
 
 
-def _major_upgrade(step, cluster, kube, opts, output, state):
-    old, new = step.from_pg, step.to_pg
-    image = pinned(step.image, step.digest)
-    run_image = pinned(step.run_image, step.run_digest)
-    sts = kube.json(["get", "statefulset", opts.statefulset])
-    replicas = int(sts.get("spec", {}).get("replicas") or 1)
-    template = sts.get("spec", {}).get("template", {}).get("spec", {})
-    container = next((c for c in template.get("containers") or []
-                      if c.get("name") == opts.container), {})
-    claim, _ = _volume(sts, opts)
-    first = "{0}-0".format(opts.statefulset)
-    pod = "{0}-pg-upgrade-{1}-{2}".format(opts.statefulset, old, new)
-    # What the cluster ran before, for a rollback to start it on again.
-    template_image = container.get("image")
+@dataclass
+class _Hop:
+    """One major upgrade, as its stages see it. ``output`` and ``state`` are
+    shared with the step: what was done, and what a failure now leaves."""
 
-    # 0. An upgrade pod left from an earlier run may still be working on the
-    # disk, or holds the only account of what happened to it: never delete it.
-    leftover = _pod_phase(kube, pod)
-    if leftover is not None:
-        phase = leftover.get("phase") or "no phase"
-        if phase in ("Succeeded", "Failed"):
-            _, log, _ = kube.run(["logs", pod])
-            raise _StepFailed(
-                "pod {0} is left from an earlier run ({1}); nothing was done".format(pod, phase),
-                [l for l in log.splitlines() if l.strip()][-40:]
-                + ["read its log above, then delete it yourself ("
-                   + _kubectl(opts, "delete", "pod", pod) + ") and plan again from the "
-                   "cluster's state as it is now"])
+    step: MajorUpgrade
+    cluster: _Cluster
+    sts: Dict[str, Any]
+    output: List[str]
+    state: List[str]
+    scope: str = ""
+    dcs: List[str] = field(default_factory=list)
+    locale: Dict[str, str] = field(default_factory=dict)
+    system_identifier: str = ""
+
+    @property
+    def opts(self) -> ApplyOptions:
+        return self.cluster.opts
+
+    @property
+    def kube(self) -> Kube:
+        return self.cluster.kube
+
+    @property
+    def replicas(self) -> int:
+        return int(self.sts.get("spec", {}).get("replicas") or 1)
+
+    @property
+    def claim(self) -> str:
+        return _volume(self.sts, self.opts)[0]
+
+    @property
+    def first(self) -> str:
+        return "{0}-0".format(self.opts.statefulset)
+
+    @property
+    def pod(self) -> str:
+        return "{0}-pg-upgrade-{1}-{2}".format(self.opts.statefulset, self.step.from_pg, self.step.to_pg)
+
+    @property
+    def image(self) -> str:
+        return pinned(self.step.image, self.step.digest)
+
+    @property
+    def run_image(self) -> str:
+        return pinned(self.step.run_image, self.step.run_digest)
+
+    @property
+    def old_image(self) -> Optional[str]:
+        """What the cluster ran before, for a rollback to start it on again."""
+        template = self.sts.get("spec", {}).get("template", {}).get("spec", {})
+        return next((c.get("image") for c in template.get("containers") or []
+                     if c.get("name") == self.opts.container), None)
+
+    def scale_command(self) -> str:
+        return _kubectl(self.opts, "scale", "statefulset/" + self.opts.statefulset,
+                        "--replicas={0}".format(self.replicas))
+
+
+def _refuse_leftover_pod(hop: _Hop) -> None:
+    """0. An upgrade pod left from an earlier run may still be working on the
+    disk, or holds the only account of what happened to it: never delete it."""
+    leftover = _pod_phase(hop.kube, hop.pod)
+    if leftover is None:
+        return
+    phase = leftover.get("phase") or "no phase"
+    if phase in ("Succeeded", "Failed"):
+        _, log, _ = hop.kube.run(["logs", hop.pod])
         raise _StepFailed(
-            "pod {0} already exists and is {1}: a pg_upgrade may be running on ordinal 0's "
-            "disk; nothing was done".format(pod, phase),
-            ["watch it: " + _kubectl(opts, "logs", "-f", pod),
-             "do not start the cluster while it runs"])
+            "pod {0} is left from an earlier run ({1}); nothing was done".format(hop.pod, phase),
+            [l for l in log.splitlines() if l.strip()][-40:]
+            + ["read its log above, then delete it yourself ("
+               + _kubectl(hop.opts, "delete", "pod", hop.pod) + ") and plan again from the "
+               "cluster's state as it is now"])
+    raise _StepFailed(
+        "pod {0} already exists and is {1}: a pg_upgrade may be running on ordinal 0's "
+        "disk; nothing was done".format(hop.pod, phase),
+        ["watch it: " + _kubectl(hop.opts, "logs", "-f", hop.pod),
+         "do not start the cluster while it runs"])
 
-    # 1. The data has to be on ordinal 0's disk.
+
+def _read_old_cluster(hop: _Hop) -> str:
+    """1a. What has to be read while the old cluster still runs: Patroni's
+    scope and objects (deleted by name later, when no pod can say), the
+    locale initdb must copy, and the system identifier. Returns the primary."""
+    cluster, opts = hop.cluster, hop.opts
     primary = cluster.primary()
     if primary is None:
         raise _StepFailed("no ready primary")
-    # Patroni's state is deleted by name later, when no pod can say its scope.
-    scope = _patroni_scope(kube, primary, opts.container)
-    dcs, others = _dcs_objects(kube, opts, scope)
+    hop.scope = _patroni_scope(hop.kube, primary, opts.container)
+    hop.dcs, others = _dcs_objects(hop.kube, opts, hop.scope)
     if others:
         raise _StepFailed(
             "the pod selector {0} also matches {1}, which are not Patroni's objects for scope "
             "{2}; apply deletes Patroni's state by name and will not guess. Nothing was "
-            "done".format(opts.selector, ", ".join(others), scope))
-    locale = _old_locale(cluster, primary, old)
-    output.append("old cluster's template0: {0}".format(
-        ", ".join("{0}={1}".format(k.lower(), v) for k, v in locale.items() if v)))
-    rc, out, _ = cluster.psql(primary, opts.admin_db,
-                              "SELECT system_identifier FROM pg_control_system()")
-    sysid_before = out.strip()
-    output.append("before: primary {0}, system identifier {1}".format(primary, sysid_before))
-    if primary != first:
-        rc, out, err = kube.exec(primary, opts.container, [
-            "patronictl", "switchover", "--leader", primary, "--candidate", first, "--force"])
-        if rc != 0:
-            raise _StepFailed("patronictl switchover to {0} failed".format(first), [err or out])
-        cluster.wait_for("{0} to become the primary".format(first),
-                         lambda: cluster.primary() == first)
-        output.append("switched the primary over to {0}".format(first))
+            "done".format(opts.selector, ", ".join(others), hop.scope))
+    hop.locale = _old_locale(cluster, primary, hop.step.from_pg)
+    hop.output.append("old cluster's template0: {0}".format(
+        ", ".join("{0}={1}".format(k.lower(), v) for k, v in hop.locale.items() if v)))
+    _, out, _ = cluster.psql(primary, opts.admin_db, "SELECT system_identifier FROM pg_control_system()")
+    hop.system_identifier = out.strip()
+    hop.output.append("before: primary {0}, system identifier {1}".format(primary, hop.system_identifier))
+    return primary
 
-    # 2. Stop everything, cleanly.
-    rc, out, err = kube.run(["scale", "statefulset/" + opts.statefulset, "--replicas=0"])
+
+def _move_leader(hop: _Hop, primary: str) -> None:
+    """1b. The data has to be on ordinal 0's disk: the StatefulSet is
+    OrderedReady, so ordinal 0 starts first and alone."""
+    if primary == hop.first:
+        return
+    rc, out, err = hop.kube.exec(primary, hop.opts.container, [
+        "patronictl", "switchover", "--leader", primary, "--candidate", hop.first, "--force"])
+    if rc != 0:
+        raise _StepFailed("patronictl switchover to {0} failed".format(hop.first), [err or out])
+    hop.cluster.wait_for("{0} to become the primary".format(hop.first),
+                         lambda: hop.cluster.primary() == hop.first)
+    hop.output.append("switched the primary over to {0}".format(hop.first))
+
+
+def _stop(hop: _Hop) -> None:
+    """2. Stop every instance, cleanly."""
+    rc, out, err = hop.kube.run(["scale", "statefulset/" + hop.opts.statefulset, "--replicas=0"])
     if rc != 0:
         raise _StepFailed("kubectl scale to 0 failed", [err or out])
-    state[:] = ["the cluster is stopped and its data untouched; to start it again on "
-                "PostgreSQL {0}: {1}".format(old, _kubectl(
-                    opts, "scale", "statefulset/" + opts.statefulset,
-                    "--replicas={0}".format(replicas)))]
-    cluster.wait_for("every instance to stop", lambda: not cluster.pods())
-    output.append("scaled statefulset/{0} to 0".format(opts.statefulset))
+    hop.state[:] = ["the cluster is stopped and its data untouched; to start it again on "
+                    "PostgreSQL {0}: {1}".format(hop.step.from_pg, hop.scale_command())]
+    hop.cluster.wait_for("every instance to stop", lambda: not hop.cluster.pods())
+    hop.output.append("scaled statefulset/{0} to 0".format(hop.opts.statefulset))
 
-    # 3. pg_upgrade on ordinal 0's disk.
-    rc, out, err = _run_on_ordinal_0(kube, sts, opts, pod, image, _PG_UPGRADE_SCRIPT, dict({
+
+def _finish_list(hop: _Hop) -> List[str]:
+    """The commands that finish the upgrade by hand. There is no listing
+    again by hand, so it names the failover object a switchover may have
+    left, in the kind Patroni uses here."""
+    kinds = {d.split("/", 1)[0] for d in hop.dcs}
+    return _finish_by_hand(hop.opts, hop.claim, hop.replicas, hop.run_image, sorted(
+        set(hop.dcs) | {"{0}/{1}-failover".format(k, hop.scope) for k in kinds}))
+
+
+def _run_pg_upgrade(hop: _Hop) -> None:
+    """3. pg_upgrade on ordinal 0's disk."""
+    step, opts, kube = hop.step, hop.opts, hop.kube
+    old, new = step.from_pg, step.to_pg
+    rc, out, err = _run_on_ordinal_0(kube, hop.sts, opts, hop.pod, hop.image, _PG_UPGRADE_SCRIPT, dict({
         "FROM": str(old), "TO": str(new),
         "PG_BIN_OLD": opts.pg_bin.format(old), "PG_BIN_NEW": opts.pg_bin.format(new),
         "DATA": opts.data_dir, "LINK": "--link" if step.link else "",
-    }, **locale))
+    }, **hop.locale))
     if rc != 0:
         raise _StepFailed("cannot start the pg_upgrade pod: " + (err or out))
-
-    # By hand there is no listing again, so name the failover object a
-    # switchover may have left, in the kind Patroni uses here.
-    kinds = {d.split("/", 1)[0] for d in dcs}
-    finish = _finish_by_hand(opts, claim, replicas, run_image, sorted(
-        set(dcs) | {"{0}/{1}-failover".format(k, scope) for k in kinds}))
-    phase = _await_pg_upgrade(cluster, pod, finish)
-    _, log, _ = kube.run(["logs", pod])
+    finish = _finish_list(hop)
+    phase = _await_pg_upgrade(hop.cluster, hop.pod, finish)
+    _, log, _ = kube.run(["logs", hop.pod])
     lines = [l for l in log.splitlines() if l.strip()]
     if phase != "Succeeded":
-        state[:] = _after_failed_upgrade(lines, opts, old, replicas, claim) or state
-        raise _StepFailed("pg_upgrade {0} -> {1} failed in {2}".format(old, new, image),
+        hop.state[:] = _after_failed_upgrade(lines, opts, old, hop.replicas, hop.claim) or hop.state
+        raise _StepFailed("pg_upgrade {0} -> {1} failed in {2}".format(old, new, hop.image),
                           lines[-40:])
     # pg_upgrade's own word on copy or link sits mid-log, above the tail.
-    output.extend([l for l in lines[:-12] if "user relation files" in l] + lines[-12:])
-    output.append("backups: " + BACKUPS_AT_A_MAJOR_UPGRADE)
-    kube.run(["delete", "pod", pod, "--wait=false"])
-    state[:] = ["ordinal 0's data directory is upgraded to PostgreSQL {0} and the cluster is "
-                "stopped; do not start it on PostgreSQL {1}'s image. The old directory is "
-                "{2}.pg{1}{3}. To finish by hand:".format(
-                    new, old, opts.data_dir,
-                    "; with --link it is reusable only while the new cluster has never started, "
-                    "after renaming its global/pg_control.old back to global/pg_control"
-                    if step.link else "")] + ["    " + l for l in finish]
+    hop.output.extend([l for l in lines[:-12] if "user relation files" in l] + lines[-12:])
+    hop.output.append("backups: " + BACKUPS_AT_A_MAJOR_UPGRADE)
+    kube.run(["delete", "pod", hop.pod, "--wait=false"])
+    hop.state[:] = ["ordinal 0's data directory is upgraded to PostgreSQL {0} and the cluster is "
+                    "stopped; do not start it on PostgreSQL {1}'s image. The old directory is "
+                    "{2}.pg{1}{3}. To finish by hand:".format(
+                        new, old, opts.data_dir,
+                        "; with --link it is reusable only while the new cluster has never "
+                        "started, after renaming its global/pg_control.old back to "
+                        "global/pg_control" if step.link else "")] + ["    " + l for l in finish]
 
-    # 4. The replicas' copies and Patroni's stored state belong to the old cluster.
-    for i in range(1, replicas):
-        name = "{0}-{1}-{2}".format(claim, opts.statefulset, i)
+
+def _reset_replicas_and_dcs(hop: _Hop) -> None:
+    """4. The replicas' copies and Patroni's stored state belong to the old
+    cluster, whose system identifier the upgraded one no longer has."""
+    opts, kube = hop.opts, hop.kube
+    for i in range(1, hop.replicas):
+        name = "{0}-{1}-{2}".format(hop.claim, opts.statefulset, i)
         rc, out, err = kube.run(["delete", "pvc", name, "--ignore-not-found", "--wait=true"])
         if rc != 0:
             raise _StepFailed("cannot delete {0}".format(name), [err or out])
-        output.append("deleted {0}".format(name))
-    # Listed again: a switchover since (step 1) leaves a <scope>-failover.
-    dcs, others = _dcs_objects(kube, opts, scope)
+        hop.output.append("deleted {0}".format(name))
+    # Listed again: a switchover since (1b) leaves a <scope>-failover.
+    dcs, others = _dcs_objects(kube, opts, hop.scope)
     if dcs:
         rc, out, err = kube.run(["delete"] + dcs + ["--ignore-not-found"])
         if rc != 0:
             raise _StepFailed("cannot reset Patroni's state", [err or out])
-    output.append("reset Patroni's state for scope {0}: {1}".format(
-        scope, ", ".join(dcs) or "nothing found"))
+    hop.output.append("reset Patroni's state for scope {0}: {1}".format(
+        hop.scope, ", ".join(dcs) or "nothing found"))
     if others:
-        output.append("left alone, not Patroni's: " + ", ".join(others))
+        hop.output.append("left alone, not Patroni's: " + ", ".join(others))
 
-    # 5. The new major's image, every instance back.
+
+def _start(hop: _Hop) -> None:
+    """5. The new major's image, every instance back, on the new major."""
+    opts, kube, cluster = hop.opts, hop.kube, hop.cluster
+    new, run_image, replicas = hop.step.to_pg, hop.run_image, hop.replicas
     rc, out, err = kube.run(["set", "image", "statefulset/" + opts.statefulset,
                              "{0}={1}".format(opts.container, run_image)])
     if rc != 0:
@@ -969,8 +1039,9 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
                              "--replicas={0}".format(replicas)])
     if rc != 0:
         raise _StepFailed("kubectl scale back to {0} failed".format(replicas), [err or out])
-    state[:] = ["the cluster was started on PostgreSQL {0} ({1}); the replicas re-clone from "
-                "ordinal 0. Check it with {2}".format(new, run_image, _kubectl(opts, "get", "pods"))]
+    hop.state[:] = ["the cluster was started on PostgreSQL {0} ({1}); the replicas re-clone from "
+                    "ordinal 0. Check it with {2}".format(new, run_image,
+                                                          _kubectl(opts, "get", "pods"))]
 
     def back() -> bool:
         pods = cluster.pods()
@@ -986,15 +1057,29 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
     major, _, sysid = out.strip().partition("|")
     if rc != 0 or major != str(new):
         raise _StepFailed("the primary runs PostgreSQL {0}, not {1}".format(major or "?", new))
-    output.append("after: primary {0} on PostgreSQL {1}, system identifier {2}".format(
+    hop.output.append("after: primary {0} on PostgreSQL {1}, system identifier {2}".format(
         primary, major, sysid))
+
+
+def _major_upgrade(step: MajorUpgrade, cluster: _Cluster, output: List[str],
+                   state: List[str]) -> _Outcome:
+    sts = cluster.kube.json(["get", "statefulset", cluster.opts.statefulset])
+    hop = _Hop(step, cluster, sts, output, state)
+    _volume(sts, cluster.opts)  # no data volume: fail here, before anything
+    _refuse_leftover_pod(hop)
+    _move_leader(hop, _read_old_cluster(hop))
+    _stop(hop)
+    _run_pg_upgrade(hop)
+    _reset_replicas_and_dcs(hop)
+    _start(hop)
+    opts = cluster.opts
     return _Outcome("PostgreSQL {0} -> {1}; {2} instance(s) on {3}".format(
-        old, new, replicas, run_image), output, detail={
-            "from_pg": old, "to_pg": new, "link": step.link,
-            "old_image": template_image, "run_image": run_image,
-            "data": opts.data_dir, "kept": "{0}.pg{1}".format(opts.data_dir, old),
-            "replicas": replicas, "claim": claim, "scope": scope,
-            "system_identifier_before": sysid_before,
+        step.from_pg, step.to_pg, hop.replicas, hop.run_image), output, detail={
+            "from_pg": step.from_pg, "to_pg": step.to_pg, "link": step.link,
+            "old_image": hop.old_image, "run_image": hop.run_image,
+            "data": opts.data_dir, "kept": "{0}.pg{1}".format(opts.data_dir, step.from_pg),
+            "replicas": hop.replicas, "claim": hop.claim, "scope": hop.scope,
+            "system_identifier_before": hop.system_identifier,
         })
 
 
