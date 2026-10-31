@@ -10,8 +10,11 @@ fork of them. Nothing here depends on those charts. The tooling talks to a live
 cluster and a live database, so it works the same whether your StatefulSet came
 from a chart, a fork, Kustomize, or hand-written YAML.
 
-> **Status:** Phases 1–3 are complete. The upgrade and rollback paths
-> themselves are not implemented yet — see [Roadmap](#roadmap).
+> **Status:** preflight, `plan` and `apply` are complete: extension updates,
+> image rollouts and PostgreSQL major upgrades with `pg_upgrade`, each plan
+> pinned to the route its matrix row was verified on. `rollback` undoes a
+> copy-mode major upgrade. Every same-PG row of the matrix and 7 of its 28
+> cross-PG rows are established by running them — see [Roadmap](#roadmap).
 
 ---
 
@@ -349,7 +352,8 @@ command that writes. They are separate so a plan can be read, diffed and
 approved before anything touches a cluster.
 
 ```bash
-bash scripts/tsupgrade.sh plan --from-pg 15.13 --from-ts 2.12.2   --target-image timescale/timescaledb-ha:pg15.18-ts2.28.3 --output plan.json
+bash scripts/tsupgrade.sh plan --from-pg 15.13 --from-ts 2.12.2 \
+  --target-image timescale/timescaledb-ha:pg15.18-ts2.28.3 --output plan.json
 bash scripts/tsupgrade.sh apply plan.json --report report.json
 ```
 
@@ -363,6 +367,14 @@ plan says so. Every image in a plan carries its digest, and `apply` rolls
 out `image@sha256:...`, so a tag pushed again later cannot change what runs.
 `--via` offers other images, for `--verification-run` only.
 
+**A source between rows takes two plans.** Rows start at a series the
+harness verified from, so a cluster on an older series than any row (pg14
+2.13 towards pg16, say) gets no plan of its own. When two verified rows
+cover the way, the refusal names both: first the same-major update to the
+series a row starts from, then the major change from there. Each plan is the
+route its own records ran; they are not joined into one, because no record
+ran the whole.
+
 A plan is a list of hops: one image the cluster must run, then one `ALTER
 EXTENSION timescaledb UPDATE TO '<v>'`. Each hop runs preflight against its
 image (any FAIL stops), rolls the StatefulSet onto it if needed (replicas
@@ -372,8 +384,11 @@ every database on every instance reports the new version.
 
 `apply` refuses, having written nothing, when the cluster is not in the state
 the plan was made from, when an update step carries SQL other than the one
-statement its version implies, and when the plan was built with
-`--verification-run` unless `--acknowledge-verification-run` is also given.
+statement its version implies, when the StatefulSet does not update
+`OnDelete` (with `RollingUpdate` the controller would replace pods itself,
+the primary included, while `apply` deletes them in its own order), and when
+the plan was built with `--verification-run` unless
+`--acknowledge-verification-run` is also given.
 It stops at the first failing step, keeps the error verbatim, and reports what
 it had already done. It never retries or rolls back on its own.
 
@@ -381,56 +396,120 @@ it had already done. It never retries or rolls back on its own.
 TimescaleDB must be at the source version, because a real upgrade has to
 cover them all.
 
+### Without `apply`: a script for any deployment
+
+`apply` drives a Patroni StatefulSet itself, so it cannot run under an
+operator, which would fight it for the pods. The version stepping does not
+depend on Patroni, and it is the part operators leave to you: the stops for
+known TimescaleDB bugs, the images that ship each release, the release
+`pg_upgrade` needs on both majors, never running `update_extensions.sql`.
+`plan --format script` writes the plan as a commented shell script. It runs
+the `ALTER EXTENSION`s and the version checks with `psql -X` against the
+primary (`PG*` variables, `DATABASES`), and stops at each step only your
+deployment can do (rolling out an image, the `pg_upgrade`), saying exactly
+what that step must do.
+
+```bash
+bash scripts/tsupgrade.sh plan --from-pg 15.13 --from-ts 2.20.3 \
+  --target-image timescale/timescaledb-ha:pg15.18-ts2.28.3 --format script > upgrade.sh
+DATABASES="app metrics" PGHOST=... bash upgrade.sh
+```
+
 ### Changing the PostgreSQL major
 
 A target on a newer major is planned as a route of `pg_upgrade` hops between
 same-major segments, from the measured contents of the route's images (an
 `-all` tag carries several majors' binaries, but not every major: none pairs
-pg12 with anything past pg13). Each `pg_upgrade` runs inside an
-image carrying both majors, at a TimescaleDB release both sides ship, so the
-old major is updated to that release first. The route takes the fewest
+pg12 with anything past pg13). Each `pg_upgrade` runs inside an image
+carrying both majors, at a TimescaleDB release both sides ship, so the old
+major is updated to that release first. The route takes the fewest
 `pg_upgrade` runs, and the same-major segments keep their stops: pg12 2.11 to
-pg16 runs 12 → 13, 13 → 15 and 15 → 16, and stops at 2.27.2 on pg15 on the way.
+pg16 runs 12 → 13, 13 → 15 and 15 → 16, and stops at 2.27.2 on pg15 on the
+way.
 
 ```bash
 bash scripts/tsupgrade.sh plan --from-pg 12.22 --from-ts 2.11.2 \
   --target-image timescale/timescaledb-ha:pg16.15-ts2.30.1 --output plan.json
 ```
 
-Every `pg_upgrade` is preceded by a preflight against the image the cluster
-restarts on, which also checks ordinal 0's disk: a copy needs the data
-directory's size free again (WAL included), `--link` only a margin. Each hop
-keeps the old directory as `<data>.pg<old major>` on that disk, so a chain
-such as 12 → 13 → 15 → 16 by copying ends with three of them; preflight and
-`apply` list them, to remove once the result is accepted.
+**How `apply` runs one.** Under Patroni it moves the leader to ordinal 0,
+scales the StatefulSet to 0, and runs `pg_upgrade` in a pod on ordinal 0's
+disk, scheduled like the database pods. That pod's `initdb` takes the old
+cluster's data checksums, encoding, locale and locale provider (from its
+`template0`), or `pg_upgrade --check` would refuse it mid-outage. Then
+`apply` deletes the replicas' disks and Patroni's state in the DCS, since
+`pg_upgrade` gives the cluster a new system identifier. Patroni's objects are
+deleted by name, for the scope Patroni reports, and `apply` refuses up front
+if the pod selector also matches endpoints or configmaps that are not
+Patroni's. Last, it restarts everything on the new major's image; Patroni
+re-clones the replicas. The plan ends with `vacuumdb --all
+--analyze-in-stages`.
 
-Under Patroni, `apply` moves the leader to ordinal 0, scales the StatefulSet
-to 0, runs `pg_upgrade` in a pod on ordinal 0's disk (matching the old
-cluster's data checksums), deletes the replicas' disks and Patroni's DCS
-state (`pg_upgrade` gives the cluster a new system identifier), and restarts
-everything on the new major's image; Patroni re-clones the replicas. The plan
-ends with `vacuumdb --all --analyze-in-stages`. `apply` waits for `pg_upgrade` as long as
-it runs (`--pg-upgrade-timeout` sets a limit; a pod that never starts fails
-after `--rollout-timeout`). When it stops waiting, the pod keeps running and
-the report says how to watch it and the commands that finish the upgrade. An
-upgrade pod already there is refused, never deleted. Every failure after the
-cluster is stopped says what state it left and how to go on. After a failed
-`--link`, that includes whether linking had begun: if it had, `pg_upgrade`
-renamed the old cluster's `global/pg_control` to `pg_control.old`, and the
-report says to rename it back before starting the old major (the
-documented recovery; the new cluster is never started by then). By default `pg_upgrade`
-copies, and the old data directory stays beside the new one to go back to;
-`plan --link` hard-links instead, which is fast and needs no space but leaves
-the old directory unusable. A failure before anything is deleted leaves the
-cluster stopped with its data intact, and says how to start it again.
+By default `pg_upgrade` copies, and the old data directory stays beside the
+new one as `<data>.pg<old major>`, to go back to. `plan --link` hard-links
+instead, which is fast and needs no space but leaves the old directory
+unusable once the new cluster has started. Both modes are verified on kind
+for every verified cross-PG row, and the records show what `pg_upgrade` did:
+copied files, or hard links into the old directory.
 
 `pg_upgrade` may write an `update_extensions.sql` holding a bare
 `ALTER EXTENSION timescaledb UPDATE`. `apply` never runs it, and removes it:
 run on the new cluster, it goes straight to that image's default release,
 past any stop the plan makes (after 13 → 15, from 2.15.3 to 2.28.3, past the
-2.27.2 stop). Both modes are verified on kind
-for the seven rows from pg11 2.1 and pg12 2.11, and the records show what
-`pg_upgrade` did: copied files, or hard links into the old directory.
+2.27.2 stop).
+
+**Waiting, and when something fails.** `apply` waits for `pg_upgrade` as long
+as it runs (`--pg-upgrade-timeout` sets a limit; a pod that never starts
+fails after `--rollout-timeout`). When it stops waiting, the pod keeps
+running, and the report says how to watch it and lists the commands that
+finish the upgrade. An upgrade pod already there is refused, never deleted.
+Every failure after the cluster is stopped says what state it left and how to
+go on. A failure before `pg_upgrade` has succeeded leaves the cluster stopped
+with its data intact. After a failed `--link`, the report also says whether
+linking had begun: if it had, `pg_upgrade` renamed the old cluster's
+`global/pg_control` to `pg_control.old`, and the old major starts again
+once it is renamed back (the documented recovery; the new cluster is never
+started by then).
+
+**Checked before anything stops.** Every `pg_upgrade` is preceded by a
+preflight against the image the cluster restarts on. It adds three checks:
+
+- *Disk on ordinal 0.* A copy needs the data directory's size free again,
+  WAL included; `--link` only a margin. Each hop keeps its old directory, so
+  a chain such as 12 → 13 → 15 → 16 by copying ends with three of them;
+  preflight and `apply` list them, to remove once the result is accepted.
+- *Other extensions.* The matrix verdicts cover TimescaleDB only. Preflight
+  lists the other extensions installed in each database and the libraries
+  their C functions use (as `pg_upgrade --check` selects them), and checks
+  them against what the target image and the `pg_upgrade` image ship for the
+  new major, measured (`make image-contents`). A missing library fails. This
+  check runs before every same-major hop too.
+- *Backups.* `archive_mode = on` is flagged (below).
+
+Separately, the images do not share one glibc: the Debian 10 tags
+(`pg11.11-ts2.1.1-p0`, `pg12.6-*`) carry 2.28, the Ubuntu 22.04 ones 2.35. A
+database with a libc collation other than C/POSIX sorts its text indexes by
+glibc's rules, so preflight warns when any hop changes glibc under one, and
+names the check to run afterwards (`amcheck`'s `bt_index_check`, or
+`REINDEX`).
+
+**Backups break at a major upgrade.** `pg_upgrade` gives the cluster a new
+system identifier, so backups and the WAL archive made before no longer
+match it. Take a full backup before. Afterwards, with pgBackRest, run
+`stanza-upgrade` (`--no-online` while the database is down) and take a new
+full backup (pgBackRest's "Upgrading PostgreSQL", for the 2.54–2.59 the
+images ship). The data directory keeps its path, so `pg1-path` does not
+change. The runbook and `apply`'s report say the same.
+
+**Going back from a copy.** `tsupgrade rollback --report report.json
+--discard-writes-since-upgrade` undoes the last major upgrade in an `apply`
+report. It stops the cluster, puts `<data>.pg<old>` back in place (the new
+directory goes to `<data>.rolled-back-pg<new>`), deletes the replicas' disks
+and Patroni's state, and starts the old image again, checking that the old
+system identifier is back. Every write since the upgrade is lost, extension
+updates included, which is why the flag is required. It refuses after
+`--link`, and after an upgrade that did not finish (whose report says how to
+start the old cluster instead).
 
 ---
 
@@ -464,8 +543,12 @@ tests/             unit tests over the loader, lookup and shipped data
 - [x] **Phase 3** — read-only preflight checks against a live instance
 - [x] **Phase 4** — drift classifier, update-script gates, measured image contents
 - [x] **Phase 5** — `plan` and `apply` (extension updates and image rollouts)
-- [ ] Verification harness and a matrix established by running every row
-- [ ] Rollback execution
+- [x] Verification harness; every same-PG row and 7 of 28 cross-PG rows
+      established by running them with the upgrader (the rest in progress)
+- [x] PostgreSQL major upgrades (`pg_upgrade` under Patroni, copy or `--link`)
+- [x] Rollback of a copy-mode major upgrade (`tsupgrade rollback`)
+- [x] `plan --format script`, for deployments `apply` cannot drive
+- [ ] Rehearsal on a copy of your own data
 - [ ] Maintenance-window estimation
 
 ---

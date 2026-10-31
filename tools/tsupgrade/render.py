@@ -191,6 +191,14 @@ def render_markdown(
             "they are never its proof."
         )
         out.append("")
+        out.append(
+            "A verdict covers TimescaleDB and the route its records ran: the test "
+            "databases hold `plpgsql` and `timescaledb` and nothing else. Other "
+            "extensions (PostGIS, `timescaledb_toolkit`, `pg_stat_statements`, ...) "
+            "are checked by preflight against the measured contents of each image, "
+            "not by these verdicts."
+        )
+        out.append("")
 
     out.append("| Source PG | Source TS | Target PG | Target TS | Verdict | PG | Evidence | Reason | References |")
     out.append("|---|---|---|---|---|---|---|---|---|")

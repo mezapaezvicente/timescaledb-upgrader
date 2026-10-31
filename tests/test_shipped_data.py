@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from tsupgrade.evidence import load_record
+from tsupgrade.evidence import load_record, staleness
 from tsupgrade.images import load_catalog
 from tsupgrade.matrix import VERDICTS, default_matrix_path, load_matrix
 
@@ -220,15 +220,6 @@ def test_every_route_a_row_cites_is_the_one_its_records_ran():
                 assert record.get("route") == entry.route, (entry.transition, key)
 
 
-# What decides how a verification run goes. A record made before a change to
-# any of these ran code that no longer ships.
-VERDICT_CODE = (
-    "tools/tsupgrade/plan.py", "tools/tsupgrade/apply.py", "tools/tsupgrade/majors.py",
-    "tools/tsupgrade/drift.py", "tools/tsupgrade/gates.py", "tools/tsupgrade/preflight.py",
-    "tools/tsupgrade/scripts",
-)
-
-
 def _git(*args):
     import subprocess
     try:
@@ -244,17 +235,9 @@ def stale_records(entries, git=_git):
     found = []
     for entry in entries:
         for key, path in (entry.evidence or {}).items():
-            upgrader = load_record(REPO / path)["upgrader"]
-            commit = upgrader.get("commit")
-            if upgrader.get("dirty") is not False or not commit:
-                found.append((entry.transition, key, "not from a clean tree"))
-                continue
-            changed = git("log", "--format=%h", commit + "..HEAD", "--", *VERDICT_CODE)
-            if changed is None:
-                found.append((entry.transition, key, "commit {0} is not in this history".format(commit[:8])))
-            elif changed:
-                found.append((entry.transition, key, "ran {0}; changed since by {1}".format(
-                    commit[:8], " ".join(changed.split()))))
+            why = staleness(load_record(REPO / path)["upgrader"], REPO, git=git)
+            if why:
+                found.append((entry.transition, key, why))
     return found
 
 

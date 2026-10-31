@@ -46,6 +46,12 @@ image is known by its tag only, so after loading the harness also names it
 by its registry digest, once Docker confirms that the local image is the one
 pulled from that digest.
 
+``--rollback`` (a copy-mode major change only) is evidence for
+``tsupgrade rollback``, not for the row: after ``apply`` passes, the run goes
+back from the last major upgrade, and the version and the fixture checks are
+judged against the *source*. Its records are ``rollback-empty`` and
+``rollback-seeded``, and no matrix row cites them.
+
 Failures are recorded and the run goes on. A failure to stage or seed is the
 harness's or the environment's, not the row's, so it gets no record -- it is
 reported and logged only.
@@ -79,8 +85,8 @@ sys.path.insert(0, str(TOOLS))
 
 from tsupgrade.contents import ImageContents, load_contents  # noqa: E402
 from tsupgrade.evidence import (  # noqa: E402
-    EvidenceError, build_record, evidence_key, load_record, record_path, upgrader_revision,
-    write_record)
+    EvidenceError, build_record, evidence_key, load_record, record_path, staleness,
+    upgrader_revision, write_record)
 from tsupgrade.matrix import MatrixEntry, default_matrix_path, load_matrix, route_problems  # noqa: E402
 from tsupgrade.plan import pinned, route_of  # noqa: E402
 from tsupgrade.preflight import patroni_role  # noqa: E402
@@ -129,6 +135,7 @@ class Run:
     history: Optional[str] = None     # created at this release, then updated to source
     control: Optional[str] = None     # "direct": one ALTER instead of plan/apply
     link: bool = False                # pg_upgrade --link on a major change
+    rollback: bool = False            # then tsupgrade rollback; ends at the source
 
     @property
     def major(self) -> int:
@@ -138,7 +145,15 @@ class Run:
         """The record mode for a base mode (empty or seeded)."""
         if self.link:
             return "link-" + base
+        if self.rollback:
+            return "rollback-" + base
         return "history-" + base if self.history else base
+
+    @property
+    def end(self) -> str:
+        """The release the run must end at: the target, or after a rollback
+        the source again."""
+        return self.source if self.rollback else self.target
 
     @property
     def cross(self) -> bool:
@@ -281,6 +296,15 @@ def with_link(run: Run) -> Union[Run, Unrunnable]:
     return replace(run, link=True)
 
 
+def with_rollback(run: Run) -> Union[Run, Unrunnable]:
+    """The same copy-mode major change, then back with tsupgrade rollback."""
+    if not run.cross:
+        return Unrunnable(run.entry, "--rollback only applies to a PostgreSQL major change")
+    if run.link or run.history or run.control:
+        return Unrunnable(run.entry, "--rollback is for a copy, without --history or --control")
+    return replace(run, rollback=True)
+
+
 def with_history(run: Run, version: str, contents: ImageContents) -> Union[Run, Unrunnable]:
     """The same row, staged by creating at ``version`` and updating to the source.
 
@@ -368,6 +392,7 @@ def judge(
     reached: Optional[str],
     checks: Optional[Dict[str, Tuple[str, str]]],
     check_stderr: str = "",
+    back: Optional[Dict[str, Any]] = None,
 ) -> Tuple[bool, Optional[str], Optional[str], str]:
     """(passed, explanation, error, stage). ``stage`` is where it stopped.
 
@@ -387,9 +412,14 @@ def judge(
             f.get("hop", "?"), f.get("action", "?"), f.get("summary", "no summary"))
         return (False, explanation,
                 error_lines(f.get("error") or []) or f.get("summary") or "failed", "apply")
-    if reached != run.target:
+    if run.rollback and (back or {}).get("result") != "pass":
+        failure = (back or {}).get("failure") or {}
+        return (False, "rollback failed: {0}".format(failure.get("summary") or "no result"),
+                error_lines(failure.get("error") or []) or "rollback failed", "rollback")
+    if reached != run.end:
         return (False,
-                "apply reported success but the database is at {0}, not {1}".format(reached, run.target),
+                "{0} reported success but the database is at {1}, not {2}".format(
+                    "rollback" if run.rollback else "apply", reached, run.end),
                 "extversion {0}".format(reached), "verify")
     if mode == "seeded":
         checks = checks or {}
@@ -398,7 +428,8 @@ def judge(
             detail = ["check|{0}|{1}|{2}".format(c, *checks[c]) if c in checks
                       else "check|{0}|missing|printed nothing (errored)".format(c) for c in bad]
             server = [l for l in check_stderr.splitlines() if ERROR_LINE.search(l)]
-            return (False, "fixture checks failed after the upgrade: " + ", ".join(bad),
+            return (False, "fixture checks failed after the {0}: ".format(
+                "rollback" if run.rollback else "upgrade") + ", ".join(bad),
                     "\n".join(detail + server[:8]), "check")
     return (True, None, None, "done")
 
@@ -825,6 +856,7 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
                 "log": str(log.path)}
     start_pg = server_version(cluster, log) or run.start_pg
 
+    back: Optional[Dict[str, Any]] = None  # tsupgrade rollback's result, on a rollback run
     if run.control:
         apply_rc, report, apply_err = direct_update(cluster, run, log)
     else:
@@ -837,19 +869,30 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
              "--context", cluster.context, "--namespace", NAMESPACE, "--selector", SELECTOR,
              "--database", DATABASE, "--report", str(report_path)], log)
         report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else None
+        if run.rollback and report and report.get("result") == "pass":
+            log.section("rollback")
+            rb_rc, rb_out, _ = tsupgrade(
+                ["rollback", "--report", str(report_path), "--discard-writes-since-upgrade",
+                 "--context", cluster.context, "--namespace", NAMESPACE, "--selector", SELECTOR,
+                 "--json"], log)
+            try:
+                back = json.loads(rb_out)
+            except ValueError:
+                back = {"result": "fail", "failure": {"summary": "rollback exited {0} without a "
+                                                                 "report".format(rb_rc)}}
 
     log.section("after")
     reached = extversion(cluster, log)
     pg_version = server_version(cluster, log)
     checks, check_err = None, ""
     if base == "seeded" and reached is not None:
-        log.section("check.sql, expect {0}".format(run.target))
-        rc, out, check_err = cluster.psql(DATABASE, "-qtA", "-F", "|", "-v", "expect=" + run.target,
+        log.section("check.sql, expect {0}".format(run.end))
+        rc, out, check_err = cluster.psql(DATABASE, "-qtA", "-F", "|", "-v", "expect=" + run.end,
                                   "-f", "-", stdin=(FIXTURE / "check.sql").read_text(encoding="utf-8"),
                                   log=log)
         checks = parse_checks(out)
     passed, explanation, error, stopped = judge(
-        run, base, apply_rc, apply_err, report, reached, checks, check_err)
+        run, base, apply_rc, apply_err, report, reached, checks, check_err, back)
     if run.control and report is None:
         explanation = "the direct update {0} -> {1} failed".format(run.source, run.target)
 
@@ -866,10 +909,13 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
             extra["route"] = route
         if run.cross:
             extra["major_upgrades"] = major_upgrades(report)
+        if run.rollback:
+            extra["forward"] = {"target": run.target, "apply_exit": apply_rc}
+            extra["rollback"] = back
     record = build_record(
         transition=run.transition, mode=mode,
         images=[{"reference": i, "digest": local_digest(i, contents)} for i in images],
-        pg_version=pg_version or start_pg, source=run.source, target=run.target,
+        pg_version=pg_version or start_pg, source=run.source, target=run.end,
         reached=reached, passed=passed, log=log.path.relative_to(REPO).as_posix(),
         explanation=explanation, error=error, upgrader=revision,
         stage=stopped, started_at=started, finished_at=_now(),
@@ -907,13 +953,15 @@ def refused_record(run: Run, base: str, plan_err: str, plan_log: Log,
             "detail": "plan refused", "record": str(path), "log": str(plan_log.path)}
 
 
-def recorded(run: Run, base: str, root: Path = EVIDENCE) -> bool:
-    """A valid record from a clean tree already exists for this row and mode."""
+def recorded(run: Run, base: str, root: Path = EVIDENCE, git=None) -> bool:
+    """A valid record already exists for this row and mode that still
+    speaks for this checkout: clean, and no change to the code that decides
+    a run since its commit (:func:`evidence.staleness`)."""
     try:
         doc = load_record(record_path(root, run.transition, run.key(base)))
     except EvidenceError:
         return False
-    return doc["upgrader"].get("dirty") is False
+    return staleness(doc["upgrader"], REPO, git=git) is None
 
 
 def routes_for(entries: Sequence[MatrixEntry], root: Path = REPO) -> Tuple[Dict[int, Dict[str, Any]], List[str]]:
@@ -976,13 +1024,17 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--replicas", type=int, default=2)
     ap.add_argument("--list", action="store_true", help="show the resolved rows and stop")
     ap.add_argument("--resume", action="store_true",
-                    help="skip rows and modes that already have a record from a clean tree")
+                    help="skip rows and modes whose record still speaks for this checkout: "
+                         "clean, and no change since to the code that decides a run")
     ap.add_argument("--history", metavar="RELEASE",
                     help="create the database at this release, then update it to the source")
     ap.add_argument("--to-pg", action="append", default=[], dest="to_pgs",
                     help="run the rows that change to this PostgreSQL major; repeatable")
     ap.add_argument("--link", action="store_true",
                     help="on a major change, pg_upgrade --link instead of copying")
+    ap.add_argument("--rollback", action="store_true",
+                    help="on a copy-mode major change, then tsupgrade rollback; evidence for "
+                         "rollback, judged against the source, never a row's verdict")
     ap.add_argument("--control", choices=CONTROLS,
                     help="negative control: one ALTER EXTENSION instead of plan/apply "
                          "(needs --history)")
@@ -997,6 +1049,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     resolved = [resolve(e, contents) for e in rows]
     if args.link:
         resolved = [with_link(r) if isinstance(r, Run) else r for r in resolved]
+    if args.rollback:
+        resolved = [with_rollback(r) if isinstance(r, Run) else r for r in resolved]
     if args.history:
         resolved = [with_history(r, args.history, contents) if isinstance(r, Run) else r
                     for r in resolved]
@@ -1012,7 +1066,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             else " then " + run.target_image.split(":")[-1],
             "  (created at {0})".format(run.history) if run.history else "",
             "  CONTROL {0}".format(run.control) if run.control else "",
-            "  --link" if run.link else ""))
+            "  --link" if run.link else "  then rollback" if run.rollback else ""))
     for skip in skipped:
         e = skip.entry
         print("{0:<18} skipped: {1}".format(

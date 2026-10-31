@@ -273,12 +273,15 @@ def test_resume_skips_only_clean_valid_records(tmp_path):
             pg_version="15.18", source=RUN.source, target=RUN.target, reached=RUN.target,
             passed=True, log="verify/out/x.log", upgrader={"commit": "abc", "dirty": dirty})
 
-    assert not harness.recorded(RUN, "empty", tmp_path)
+    unchanged = lambda *args: ""  # noqa: E731 - git log: nothing since
+    assert not harness.recorded(RUN, "empty", tmp_path, git=unchanged)
     write_record(record_path(tmp_path, RUN.transition, "empty"), record(True))
-    assert not harness.recorded(RUN, "empty", tmp_path)
+    assert not harness.recorded(RUN, "empty", tmp_path, git=unchanged)
     write_record(record_path(tmp_path, RUN.transition, "empty"), record(False))
-    assert harness.recorded(RUN, "empty", tmp_path)
-    assert not harness.recorded(RUN, "seeded", tmp_path)
+    assert harness.recorded(RUN, "empty", tmp_path, git=unchanged)
+    assert not harness.recorded(RUN, "seeded", tmp_path, git=unchanged)
+    # A clean record from before a change to apply.py does not count.
+    assert not harness.recorded(RUN, "empty", tmp_path, git=lambda *args: "abc1234")
 
 
 # --- history and controls ---------------------------------------------------
@@ -341,8 +344,8 @@ def test_resume_finds_history_and_control_records_by_their_key(tmp_path):
         passed=False, explanation="the direct update failed", error="ERROR: x",
         log="verify/out/x.log", upgrader={"commit": "abc", "dirty": False})
     write_record(record_path(tmp_path, run.transition, "direct-history-empty"), doc)
-    assert harness.recorded(run, "empty", tmp_path)
-    assert not harness.recorded(harness.with_history(LATE, "2.13.1", PG15), "empty", tmp_path)
+    assert harness.recorded(run, "empty", tmp_path, git=lambda *a: "")
+    assert not harness.recorded(harness.with_history(LATE, "2.13.1", PG15), "empty", tmp_path, git=lambda *a: "")
 
 
 # --- major changes ----------------------------------------------------------
@@ -448,3 +451,29 @@ def test_routes_are_written_only_where_every_record_agrees(tmp_path):
     assert routes == {0: route}
     assert any("different routes" in p for p in problems)
     assert any("not every record" in p and "seeded" in p for p in problems)
+
+
+# --- forward, then rollback (R21's evidence) ---------------------------------
+
+CROSS = harness.resolve(_row("12", "2.11", "2.15", target_pg="13"), XPG)
+
+
+def test_rollback_runs_are_copy_mode_major_changes_that_end_at_the_source():
+    run = harness.with_rollback(CROSS)
+    assert run.rollback and run.key("empty") == "rollback-empty"
+    assert run.end == run.source and CROSS.end == CROSS.target
+    assert "major change" in harness.with_rollback(RUN).reason
+    assert "copy" in harness.with_rollback(harness.with_link(CROSS)).reason
+
+
+def test_a_rollback_run_is_judged_on_the_rollback_and_the_source():
+    run = harness.with_rollback(CROSS)
+    report = {"result": "pass"}
+    ok = harness.judge(run, "empty", 0, "", report, run.source, None, back={"result": "pass"})
+    assert ok[0] is True
+    failed = harness.judge(run, "empty", 0, "", report, run.target, None,
+                           back={"result": "fail", "failure": {"summary": "swap failed",
+                                                               "error": ["ERROR: x"]}})
+    assert failed[0] is False and failed[3] == "rollback" and "swap failed" in failed[1]
+    still_new = harness.judge(run, "empty", 0, "", report, run.target, None, back={"result": "pass"})
+    assert still_new[0] is False and "not {0}".format(run.source) in still_new[1]

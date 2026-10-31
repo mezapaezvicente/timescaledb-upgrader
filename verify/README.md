@@ -24,7 +24,8 @@ python verify/harness.py                        # all 98 same-PG rows
 
 Options: `--mode empty|seeded|both`, `--cluster` (default `tsdb-verify`),
 `--replicas` (default 2, so rollouts and session cycling cover a replica),
-`--resume` (skip rows and modes that already have a record from a clean tree),
+`--resume` (skip rows and modes whose record still speaks for this checkout:
+clean, and no change since to the code that decides a run),
 `--history`, `--control` (below).
 
 **Major changes.** `--to-pg 16` runs the rows that change to pg16 instead of
@@ -108,9 +109,10 @@ until it is run again.
 **Fresh evidence.** A verdict has to come from the code that ships. Before a
 release is tagged, every row is run again so all records name one commit;
 `tests/test_shipped_data.py` then fails for any cited record from a dirty
-tree, or one whose commit has been followed by a change to `plan.py`,
-`apply.py`, `majors.py`, `drift.py`, `gates.py`, `preflight.py` or
-`tools/tsupgrade/scripts/`. The check is skipped until the first `v*` tag.
+tree, or one whose commit has been followed by a change to the code that
+decides a run (`evidence.VERDICT_CODE`: `plan`, `apply`, `steps`, `majors`,
+`drift`, `gates`, `preflight` and `tools/tsupgrade/scripts/`). The check is
+skipped until the first `v*` tag. `--resume` uses the same rule.
 
 **What is not a row result.** If staging or seeding fails, that is the harness
 or the environment, not the transition. It writes no record; it prints
@@ -129,6 +131,11 @@ Records carry the fields `evidence.py` requires, plus:
 | `plan`, `apply_exit`, `replicas`, `started_at`, `finished_at` | as named |
 
 | `route` | the route the plan took, as the matrix row cites it: the start image, then each update and `pg_upgrade`, every image pinned by digest |
+
+A record's `log` and `plan.path` point into `verify/out/`, which is
+gitignored: they exist on the machine that ran the row, not in a clone. The
+record carries what the verdict rests on (results, checks, versions, images,
+route, failure lines verbatim); the log is for whoever is debugging a run.
 
 `images[].digest` is the local repository digest of the image that was loaded
 into kind (the one to pin). `pods[].image_id` is what the node reports running:

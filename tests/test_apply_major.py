@@ -43,18 +43,23 @@ class MajorKube(FakeKube):
         self.upgrade_pod = "tsdb-pg-upgrade-12-13" if leftover else None
         self.leftover = leftover
         self.fail_pvc = fail_pvc
+        self.dcs_extra = []
         self.spec_seen = None
 
     def json(self, args, namespaced=True):
         if args[:2] == ["get", "statefulset"]:
             return {"spec": {
                 "replicas": self.replicas,
+                "updateStrategy": {"type": "OnDelete"},
                 "template": {"spec": {
                     "securityContext": {"runAsUser": 1000, "fsGroup": 1000},
                     "containers": [{"name": "timescaledb", "image": self.template,
                                     "volumeMounts": [{"name": "pgdata",
                                                       "mountPath": "/home/postgres/pgdata"}]}]}},
                 "volumeClaimTemplates": [{"metadata": {"name": "pgdata"}}]}}
+        if args[:2] == ["get", "endpoints,configmaps"]:
+            names = [("Endpoints", "tsdb"), ("Endpoints", "tsdb-config")] + self.dcs_extra
+            return {"items": [{"kind": k, "metadata": {"name": n}} for k, n in names]}
         return super().json(args, namespaced)
 
     def _upgrade_status(self):
@@ -109,12 +114,14 @@ class MajorKube(FakeKube):
                 return 1, "", "persistentvolumeclaims is forbidden"
             self.writes.append("delete pvc " + args[2])
             return 0, "", ""
-        if args[:2] == ["delete", "endpoints,configmaps"]:
-            self.writes.append("delete dcs " + args[args.index("-l") + 1])
-            return 0, "endpoints \"tsdb\" deleted", ""
+        if args[0] == "delete" and any(a.startswith(("endpoints/", "configmap/")) for a in args):
+            self.writes.append("delete dcs " + " ".join(a for a in args[1:] if "/" in a))
+            return 0, "", ""
         return super().run(args, namespaced)
 
     def exec(self, pod, container, argv):
+        if argv[:2] == ["patronictl", "list"]:
+            return 0, json.dumps([{"Cluster": "tsdb", "Member": p["name"]} for p in self.pods]), ""
         if argv[0] == "patronictl":
             self.writes.append("switchover to " + argv[argv.index("--candidate") + 1])
             for p in self.pods:
@@ -124,6 +131,9 @@ class MajorKube(FakeKube):
             self.writes.append("vacuumdb on " + pod)
             return 0, "", "vacuumdb: processing database \"verify\": Generating minimal optimizer statistics (1 target)"
         sql = argv[-1]
+        if "WHERE datname = 'template0'" in sql:
+            self.locale_sql = sql
+            return 0, "UTF8|en_US.UTF-8|en_US.UTF-8|c|", ""
         if sql == "SELECT system_identifier FROM pg_control_system()":
             return 0, self.sysid, ""
         if sql.startswith("SELECT current_setting('server_version_num')"):
@@ -175,7 +185,7 @@ def test_major_upgrade_writes_in_the_one_safe_order():
         "run tsdb-pg-upgrade-12-13 on " + BOTH,
         "delete pod tsdb-pg-upgrade-12-13",
         "delete pvc pgdata-tsdb-1",
-        "delete dcs application=patroni,cluster-name=tsdb",
+        "delete dcs endpoints/tsdb endpoints/tsdb-config",
         "set image " + NEW,
         "scale 2",
         "vacuumdb on tsdb-0",
@@ -195,7 +205,9 @@ def test_the_upgrade_pod_runs_on_ordinal_0s_disk_as_the_statefulsets_user():
     env = {e["name"]: e["value"] for e in spec["containers"][0]["env"]}
     assert env == {"FROM": "12", "TO": "13", "PG_BIN_OLD": "/usr/lib/postgresql/12/bin",
                    "PG_BIN_NEW": "/usr/lib/postgresql/13/bin",
-                   "DATA": "/home/postgres/pgdata/data", "LINK": "--link"}
+                   "DATA": "/home/postgres/pgdata/data", "LINK": "--link",
+                   "ENCODING": "UTF8", "LC_COLLATE": "en_US.UTF-8", "LC_CTYPE": "en_US.UTF-8",
+                   "LOCALE_PROVIDER": "libc", "PROVIDER_LOCALE": ""}
 
 
 @pytest.mark.parametrize("link,said", [(False, "Copying"), (True, "Linking")])
@@ -308,6 +320,8 @@ def test_a_failure_after_pg_upgrade_says_the_data_is_upgraded_and_how_to_finish(
     assert "upgraded to PostgreSQL 13" in error and "do not start it on PostgreSQL 12" in error
     assert "/home/postgres/pgdata/data.pg12" in error
     assert "set image statefulset/tsdb timescaledb=" + NEW in error
+    assert ("delete endpoints/tsdb endpoints/tsdb-config endpoints/tsdb-failover "
+            "--ignore-not-found") in error
     assert "data untouched" not in error
 
 
@@ -373,7 +387,7 @@ def _fake_cluster(tmp_path):
                                            newline="\n")
     (old_bin / "postgres").write_text("#!/bin/bash\n", newline="\n")
     (new_bin / "initdb").write_text(
-        "#!/bin/bash\n[ \"$1\" = --help ] && exit 0\n"
+        "#!/bin/bash\n[ \"$1\" = --help ] && exit 0\necho \"$@\" > \"$(dirname \"$0\")/initdb.args\"\n"
         "while [ $# -gt 0 ]; do [ \"$1\" = -D ] && mkdir -p \"$2\"; shift; done\n", newline="\n")
     (new_bin / "pg_upgrade").write_text(FAKE_PG_UPGRADE, newline="\n")
     data = tmp_path / "pgdata" / "data"
@@ -382,10 +396,12 @@ def _fake_cluster(tmp_path):
     return old_bin, new_bin, data
 
 
-def _script(tmp_path, fake, link="--link"):
+def _script(tmp_path, fake, link="--link", locale_provider="libc"):
     old_bin, new_bin, data = _fake_cluster(tmp_path)
     env = {"PATH": "/usr/bin:/bin", "FROM": "12", "TO": "13", "PG_BIN_OLD": old_bin.as_posix(),
-           "PG_BIN_NEW": new_bin.as_posix(), "DATA": data.as_posix(), "LINK": link, "FAKE": fake}
+           "PG_BIN_NEW": new_bin.as_posix(), "DATA": data.as_posix(), "LINK": link, "FAKE": fake,
+           "ENCODING": "UTF8", "LC_COLLATE": "C.UTF-8", "LC_CTYPE": "C.UTF-8",
+           "LOCALE_PROVIDER": locale_provider, "PROVIDER_LOCALE": "und-x-icu"}
     done = subprocess.run([BASH, "-c", _PG_UPGRADE_SCRIPT], env=env, capture_output=True, text=True)
     return done.returncode, done.stdout, data
 
@@ -431,3 +447,175 @@ def test_the_preflight_before_a_pg_upgrade_checks_its_disk_in_the_planned_mode()
 def test_the_script_lists_the_old_directories_left_on_the_disk(tmp_path):
     rc, out, data = _script(tmp_path, "ok", link="")
     assert "to remove once the result is accepted: {0}.pg12".format(data.as_posix()) in out
+
+
+def test_the_upgrade_pod_is_scheduled_like_the_database_pods():
+    """R6: on tainted database nodes, behind a node selector or a private
+    registry, a pod without these would sit Pending."""
+    kube = MajorKube()
+    template = {
+        "tolerations": [{"key": "db", "operator": "Exists", "effect": "NoSchedule"}],
+        "nodeSelector": {"pool": "db"},
+        "affinity": {"nodeAffinity": {"requiredDuringSchedulingIgnoredDuringExecution": {}}},
+        "imagePullSecrets": [{"name": "registry"}],
+        "serviceAccountName": "tsdb-patroni",
+    }
+    resources = {"requests": {"memory": "2Gi"}, "limits": {"memory": "4Gi"}}
+    original = kube.json
+
+    def json_(args, namespaced=True):
+        doc = original(args, namespaced)
+        if args[:2] == ["get", "statefulset"]:
+            doc["spec"]["template"]["spec"].update(template)
+            doc["spec"]["template"]["spec"]["containers"][0]["resources"] = resources
+        return doc
+    kube.json = json_
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+    spec = kube.spec_seen["spec"]
+    for key, value in template.items():
+        assert spec[key] == value, key
+    assert spec["containers"][0]["resources"] == resources
+    assert spec["securityContext"]["runAsUser"] == 1000
+
+
+def test_a_finished_pg_upgrade_reports_what_it_means_for_backups():
+    report = _apply(_plan(), MajorKube())
+    assert any(l.startswith("backups: ") and "stanza-upgrade" in l
+               for l in report["steps"][0]["output"])
+
+
+# --- initdb takes the old cluster's encoding and locale (R8) -----------------
+
+def test_initdb_gets_template0s_encoding_and_locale_read_before_anything_stops():
+    kube = MajorKube()
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+    assert "datname = 'template0'" in kube.locale_sql
+    assert "datlocprovider" not in kube.locale_sql  # PostgreSQL 12 has no provider column
+    assert any("lc_collate=en_US.UTF-8" in l for l in report["steps"][0]["output"])
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash")
+@pytest.mark.parametrize("provider,expect", [
+    ("libc", "-E UTF8 --lc-collate=C.UTF-8 --lc-ctype=C.UTF-8 -D"),
+    ("icu", "--locale-provider=icu --icu-locale=und-x-icu -D"),
+])
+def test_the_script_passes_the_old_locale_to_initdb(tmp_path, provider, expect):
+    rc, out, data = _script(tmp_path, "ok", link="", locale_provider=provider)
+    assert rc == 0, out
+    assert expect in (tmp_path / "new" / "initdb.args").read_text()
+
+
+# --- Patroni's DCS state, by name (R7) ---------------------------------------
+
+def test_patronis_state_is_deleted_by_name_for_its_scope_failover_included():
+    """A switchover leaves <scope>-failover behind (measured); it goes too."""
+    kube = MajorKube()
+    kube.dcs_extra = [("Endpoints", "tsdb-failover")]
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+    assert "delete dcs endpoints/tsdb endpoints/tsdb-config endpoints/tsdb-failover" in kube.writes
+    assert any("scope tsdb" in l for l in report["steps"][0]["output"])
+
+
+def test_a_selector_that_also_matches_other_objects_is_refused_before_anything_stops():
+    kube = MajorKube()
+    kube.dcs_extra = [("ConfigMap", "tsdb-chart-settings")]
+    report = _apply(_plan(), kube)
+    assert report["result"] == "fail"
+    assert kube.writes == []
+    assert "configmap/tsdb-chart-settings" in report["failure"]["summary"]
+    assert "will not guess" in report["failure"]["summary"]
+
+
+def test_the_scope_falls_back_to_patronis_rest_api():
+    kube = MajorKube()
+    exec_ = kube.exec
+
+    def older_patronictl(pod, container, argv):
+        if argv[:2] == ["patronictl", "list"]:
+            return 2, "", "no such option: -f"
+        if argv[0] == "curl":
+            return 0, json.dumps({"patroni": {"version": "2.0.2", "scope": "tsdb"}}), ""
+        return exec_(pod, container, argv)
+    kube.exec = older_patronictl
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+
+
+def test_a_finished_major_upgrade_reports_what_a_rollback_needs():
+    """R14: structured facts in the report, not text to parse back."""
+    report = _apply(_plan(), MajorKube())
+    detail = report["steps"][0]["detail"]
+    assert detail == {
+        "from_pg": 12, "to_pg": 13, "link": False, "old_image": OLD, "run_image": NEW,
+        "data": "/home/postgres/pgdata/data", "kept": "/home/postgres/pgdata/data.pg12",
+        "replicas": 2, "claim": "pgdata", "scope": "tsdb",
+        "system_identifier_before": "7000000000000000001",
+    }
+    assert "detail" not in report["steps"][1]
+
+
+# --- each stage's failure, and one instance (R16) ----------------------------
+
+def test_a_failed_switchover_stops_nothing():
+    kube = MajorKube(primary=1)
+    exec_ = kube.exec
+
+    def refusing(pod, container, argv):
+        if argv[:2] == ["patronictl", "switchover"]:
+            return 1, "", "Error: candidate tsdb-0 is lagging"
+        return exec_(pod, container, argv)
+    kube.exec = refusing
+    report = _apply(_plan(), kube)
+    assert report["result"] == "fail"
+    assert kube.writes == []
+    assert "switchover to tsdb-0 failed" in report["failure"]["summary"]
+    assert "lagging" in "\n".join(report["failure"]["error"])
+
+
+def test_a_stop_that_never_finishes_says_how_to_start_again():
+    kube = MajorKube()
+    run = kube.run
+
+    def stuck(args, namespaced=True):
+        if args[0] == "scale" and args[-1] == "--replicas=0":
+            kube.writes.append("scale 0")
+            return 0, "", ""  # the pods never go away
+        return run(args, namespaced)
+    kube.run = stuck
+    report = _apply(_plan(), kube)
+    assert report["result"] == "fail"
+    assert "every instance to stop" in report["failure"]["summary"]
+    assert kube.writes == ["scale 0"]
+    assert any("--replicas=2" in l for l in report["failure"]["error"])
+
+
+def test_a_cluster_that_does_not_come_back_says_it_was_started_on_the_new_major():
+    kube = MajorKube()
+    run = kube.run
+
+    def never_ready(args, namespaced=True):
+        if args[0] == "scale" and args[-1] != "--replicas=0":
+            kube.writes.append("scale " + args[-1].split("=")[1])
+            kube.pods = []  # nothing starts
+            return 0, "", ""
+        return run(args, namespaced)
+    kube.run = never_ready
+    report = _apply(_plan(), kube)
+    assert report["result"] == "fail"
+    assert "instance(s) ready on" in report["failure"]["summary"]
+    error = "\n".join(report["failure"]["error"])
+    assert "started on PostgreSQL 13" in error and "get pods" in error
+    assert "data untouched" not in error
+
+
+def test_one_instance_has_no_replica_disk_to_delete():
+    kube = MajorKube()
+    kube.replicas = 1
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+    assert not any(w.startswith("delete pvc") for w in kube.writes)
+    assert "scale 1" in kube.writes
+    assert report["steps"][0]["detail"]["replicas"] == 1

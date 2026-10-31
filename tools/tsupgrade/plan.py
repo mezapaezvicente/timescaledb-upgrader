@@ -86,6 +86,7 @@ __all__ = [
     "build_plan",
     "pinned",
     "render_runbook",
+    "render_script",
     "route_images",
     "route_of",
 ]
@@ -307,6 +308,44 @@ def _check_route(
     doc["route_verified"] = True
 
 
+def _verified_in_place(entry: MatrixEntry) -> bool:
+    return entry.is_known and entry.verdict == "in_place"
+
+
+def _plan_command(entry: MatrixEntry, from_pg: str, from_ts: str) -> str:
+    """The `plan` invocation for a verified row, as far as its route says."""
+    steps = (entry.route or {}).get("steps") or []
+    target = next((s["image"] for s in reversed(steps) if s.get("action") == "update"), None)
+    return "tsupgrade plan --from-pg {0} --from-ts {1} --target-image {2}".format(
+        from_pg, from_ts, target or "<an image of pg{0} shipping ts{1}>".format(
+            entry.target_pg, entry.target_ts))
+
+
+def _two_plans(matrix: Matrix, source_pg: str, source_ts: str, target_pg: str, target_ts: str) -> str:
+    """When two verified rows cover the transition between them, how to run
+    it as two plans. Not composed into one: neither row's records ran the
+    whole, and each plan stays the route its own records ran."""
+    for first in matrix.from_source(source_pg, source_ts):
+        if not _verified_in_place(first):
+            continue
+        for second in matrix.from_source(first.target_pg, first.target_ts):
+            try:
+                hit = matrix.lookup(first.target_pg, first.target_ts, target_pg, target_ts)
+            except MatrixError:
+                hit = None
+            if hit is second and _verified_in_place(second):
+                steps = (first.route or {}).get("steps") or []
+                middle = next((s["to"] for s in reversed(steps) if s.get("action") == "update"),
+                              "<the release plan 1 reaches>")
+                return ("; two verified rows cover it as two plans, each run and checked on its "
+                        "own: (1) {0} -> {1}: `{2}`, then (2) {1} -> {3}: `{4}`".format(
+                            first.transition.split(" -> ")[0], second.transition.split(" -> ")[0],
+                            _plan_command(first, source_pg, source_ts),
+                            second.transition.split(" -> ")[1],
+                            _plan_command(second, "<the pg minor plan 1 leaves>", middle)))
+    return ""
+
+
 def _check_matrix(
     out: _Collector,
     matrix: Optional[Matrix],
@@ -328,7 +367,8 @@ def _check_matrix(
     if entry is None:
         out.unestablished(
             "the matrix has no entry for {0}; that is not the same as "
-            "unsupported, but it is not permission either".format(label)
+            "unsupported, but it is not permission either{1}".format(
+                label, _two_plans(matrix, source_pg, source_ts, target_pg, target_ts))
         )
         return None, None
 
@@ -442,6 +482,9 @@ def build_plan(
     else:
         hops, problem = plan_chain(source_ts, target_profile, candidates, major)
     if problem is not None:
+        if not verification_run and (entry is None or entry.route is None):
+            problem += (" (outside a verification run the images come from a verified row's "
+                        "route, and there is none for this transition)")
         out.block(problem)
     elif not cross and hops and len(tgt_ts) >= 3 and hops[-1].image == target_image:
         # plan_chain lands the last hop on the image's ceiling; a tag that pins
@@ -500,7 +543,8 @@ def build_plan(
                         "image": hop.run_image,
                         "target_pg": _tag_versions(hop.run_image).get("pg") or str(hop.to_pg),
                         "target_ts": hop.ts,
-                        "pg_upgrade": {"from_pg": hop.from_pg, "to_pg": hop.to_pg, "link": link},
+                        "pg_upgrade": {"from_pg": hop.from_pg, "to_pg": hop.to_pg, "link": link,
+                                       "image": hop.image},
                     },
                     {
                         "hop": i,
@@ -653,6 +697,9 @@ def render_runbook(plan: Dict[str, Any]) -> str:
                          "the result is accepted".format(step["from_pg"]))
             lines.append("         - replicas are re-created, and Patroni's stored state reset "
                          "(pg_upgrade gives the cluster a new system identifier)")
+            lines.append("         - backups: take a full one before; after, the old ones and "
+                         "the WAL archive do not match the new system identifier "
+                         "(pgBackRest: stanza-upgrade, then a full backup)")
             lines.append("         - restart every instance on {0}".format(
                 pinned(step["run_image"], step.get("run_digest"))))
             lines.append("         - do not run the update_extensions.sql pg_upgrade may write: "
@@ -660,4 +707,114 @@ def render_runbook(plan: Dict[str, Any]) -> str:
                          "image's default release, past any stop this plan makes")
         elif action == "analyze":
             lines.append("{0}. vacuumdb --all --analyze-in-stages: {1}".format(prefix, step["why"]))
+    return "\n".join(lines)
+
+
+def _shell_quote(text: str) -> str:
+    return "'" + str(text).replace("'", "'\\''") + "'"
+
+
+_SCRIPT_HEAD = """#!/usr/bin/env bash
+# TimescaleDB upgrade, as planned by `tsupgrade plan --format script`.
+#
+# The plan's version stepping, for a person to run step by step under any
+# deployment (an operator, a chart, Spilo, plain Kubernetes): the stops for
+# known TimescaleDB bugs, the images that ship each release, the release
+# pg_upgrade needs on both majors. What only the deployment can do (roll out
+# an image, run pg_upgrade) is described and paused on; what SQL can do is
+# done here, against the primary, with psql -X.
+#
+# Connection: the usual libpq variables (PGHOST, PGPORT, PGUSER, PGPASSWORD)
+# pointing at the primary. DATABASES: every database with timescaledb, space
+# separated; each must be at the source version.
+set -euo pipefail
+: "${DATABASES:?set DATABASES to every database with timescaledb installed}"
+
+say() { printf '\\n== %s\\n' "$*"; }
+pause() { printf '%s\\n' "$@"; read -r -p "Done? Press Enter to go on, Ctrl-C to stop. " _; }
+sql() { psql -X -v ON_ERROR_STOP=1 -qAt -d "$1" -c "$2"; }
+check_version() {
+  local db v
+  for db in $DATABASES; do
+    v=$(sql "$db" "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'")
+    [ "$v" = "$1" ] || { echo "$db reports timescaledb ${v:-nothing}, expected $1; stopping"; exit 1; }
+  done
+  echo "every database reports $1 (on the primary; check the replicas as well)"
+}
+"""
+
+
+def render_script(plan: Dict[str, Any]) -> str:
+    """The plan as a commented shell script: the same steps as the runbook,
+    with the SQL ones done and the deployment's ones paused on."""
+    src, tgt = plan["source"], plan["target"]
+    m = plan.get("matrix") or {}
+    lines = [_SCRIPT_HEAD.rstrip("\n"), ""]
+    if plan["mode"] == VERIFICATION:
+        lines += ["# !!! VERIFICATION RUN: built WITHOUT an established verdict. Only for a",
+                  "# !!! disposable database whose result you intend to record.",
+                  'echo "VERIFICATION RUN: not for production" >&2', ""]
+    lines += [
+        "# source : pg{0} / ts{1}".format(src["pg"], src["ts"]),
+        "# target : pg{0} / ts{1} ({2})".format(tgt["pg"], tgt["ts"], tgt["image"]),
+        "# matrix : {0}".format(
+            "{0}, verified for this route".format(m.get("verdict")) if m.get("route_verified")
+            else "{0}, not verified for this route".format(m.get("verdict") or "no entry")),
+    ]
+    lines += ["# warning: {0}".format(w) for w in plan["warnings"]]
+    lines += ["", "check_version {0}".format(_shell_quote(src["ts"]))]
+    for step in plan["steps"]:
+        hop, action = step["hop"], step["action"]
+        lines.append("")
+        if action == "preflight":
+            lines += ["say {0}".format(_shell_quote("hop {0}: preflight against {1}".format(hop, step["image"]))),
+                      "# Optional, Patroni clusters only:",
+                      "#   tsupgrade preflight --target-image {0} --target-ts {1}".format(
+                          step["image"], step["target_ts"])]
+        elif action == "ensure_image":
+            image = pinned(step["image"], step.get("digest"))
+            lines += ["say {0}".format(_shell_quote("hop {0}: every instance on {1}".format(hop, image))),
+                      "pause {0} {1}".format(
+                          _shell_quote("Roll every instance onto " + image + ", replicas first and the "
+                                       "primary last, the way your deployment does it."),
+                          _shell_quote("Skip this if they already run it."))]
+        elif action == "update_extension":
+            lines += ["say {0}".format(_shell_quote("hop {0}: timescaledb {1} -> {2}".format(
+                hop, step["from"], step["to"])))]
+            if step.get("why"):
+                lines.append("# stops here: {0}".format(step["why"]))
+            lines += ["# one fresh session per database, the ALTER its first statement",
+                      "for db in $DATABASES; do sql \"$db\" {0}; done".format(_shell_quote(step["sql"]))]
+        elif action == "cycle_sessions":
+            lines += ["say {0}".format(_shell_quote("hop {0}: cycle client sessions".format(hop))),
+                      "# sessions, on replicas too, keep the old library loaded until they reconnect",
+                      "sql postgres \"SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity "
+                      "WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()\"",
+                      "pause 'Do the same on every replica (or restart their clients).'"]
+        elif action == "verify_version":
+            lines.append("check_version {0}".format(_shell_quote(step["expect"])))
+        elif action == "major_upgrade":
+            both = pinned(step["image"], step.get("digest"))
+            run = pinned(step["run_image"], step.get("run_digest"))
+            lines += [
+                "say {0}".format(_shell_quote("hop {0}: PostgreSQL {1} -> {2} at TimescaleDB {3}".format(
+                    hop, step["from_pg"], step["to_pg"], step["ts"]))),
+                "# pg_upgrade{0}, in {1}, which carries both majors' binaries and".format(
+                    " --link" if step["link"] else "", both),
+                "# TimescaleDB {0} for both. initdb the new cluster with the old one's".format(step["ts"]),
+                "# encoding, locale and data checksums, and shared_preload_libraries =",
+                "# 'timescaledb'. Do NOT run the update_extensions.sql pg_upgrade writes: it",
+                "# updates timescaledb straight to the image's default release, past the",
+                "# stops in this script. Then run PostgreSQL {0} on {1};".format(step["to_pg"], run),
+                "# the system identifier changes, so replicas are re-created from the new",
+                "# primary and backups and the WAL archive start over (pgBackRest:",
+                "# stanza-upgrade, then a full backup).",
+                "pause {0}".format(_shell_quote(
+                    "Upgrade PostgreSQL {0} -> {1} as above, then point the PG* variables at the "
+                    "new primary.".format(step["from_pg"], step["to_pg"]))),
+            ]
+        elif action == "analyze":
+            lines += ["say 'statistics: pg_upgrade carries none over before PostgreSQL 18'",
+                      "vacuumdb --all --analyze-in-stages"]
+    lines += ["", "say 'done: timescaledb {0} on PostgreSQL {1}'".format(tgt["ts"], tgt["pg"]), ""]
     return "\n".join(lines)

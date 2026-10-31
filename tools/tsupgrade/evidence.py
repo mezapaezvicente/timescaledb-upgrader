@@ -17,7 +17,11 @@ a harness can add what turns out to matter without a schema change:
                     older release and updated to the source before the run
                     (``history`` then names that release); ``link-empty`` or
                     ``link-seeded`` when a PostgreSQL major change ran
-                    ``pg_upgrade --link`` instead of copying
+                    ``pg_upgrade --link`` instead of copying; ``rollback-empty``
+                    or ``rollback-seeded`` when a copy-mode major change was
+                    then undone with ``tsupgrade rollback``: evidence for the
+                    rollback, never a row's verdict. ``versions.target`` is
+                    then the source, where the run must end
 ``images``          every image the run used, in order, each ``{reference,
                     digest}`` -- a two-image row lists both
 ``pg_version``      the exact server version the extension ran on
@@ -61,7 +65,7 @@ import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Callable, Dict, List, Optional, Sequence
 
 from .matrix import route_problems
 from .versions import InvalidVersion, parse_version
@@ -78,11 +82,22 @@ __all__ = [
     "write_record",
     "load_record",
     "record_path",
+    "staleness",
     "upgrader_revision",
+    "VERDICT_CODE",
 ]
 
+# What decides how a verification run goes. A record made before a change to
+# any of these ran code that no longer ships.
+VERDICT_CODE = (
+    "tools/tsupgrade/plan.py", "tools/tsupgrade/apply.py", "tools/tsupgrade/majors.py",
+    "tools/tsupgrade/drift.py", "tools/tsupgrade/gates.py", "tools/tsupgrade/preflight.py",
+    "tools/tsupgrade/steps.py", "tools/tsupgrade/scripts",
+)
+
 EVIDENCE_FORMAT = 1
-MODES = ("empty", "seeded", "history-empty", "history-seeded", "link-empty", "link-seeded")
+MODES = ("empty", "seeded", "history-empty", "history-seeded", "link-empty", "link-seeded",
+         "rollback-empty", "rollback-seeded")
 CONTROLS = ("direct",)
 RESULTS = ("pass", "fail")
 
@@ -123,6 +138,35 @@ def upgrader_revision(repo: Optional[Path] = None) -> Dict[str, Any]:
     commit = git("rev-parse", "HEAD")
     status = git("status", "--porcelain", "--", ".", ":(exclude)verify/evidence")
     return {"commit": commit, "dirty": bool(status) if status is not None else None}
+
+
+def _git(root: Path, *args: str) -> Optional[str]:
+    try:
+        done = subprocess.run(["git", "-C", str(root)] + list(args),
+                              capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def staleness(upgrader: Any, repo: Optional[Path] = None,
+              git: Optional[Callable[..., Optional[str]]] = None) -> Optional[str]:
+    """Why a record no longer speaks for the code in this checkout, or None.
+
+    It does when it ran from a dirty tree, from a commit this history does
+    not have, or from one followed by a change to :data:`VERDICT_CODE`.
+    """
+    root = repo or Path(__file__).resolve().parents[2]
+    git = git or (lambda *args: _git(root, *args))
+    commit = (upgrader or {}).get("commit") if isinstance(upgrader, dict) else None
+    if not isinstance(upgrader, dict) or upgrader.get("dirty") is not False or not commit:
+        return "not from a clean tree"
+    changed = git("log", "--format=%h", commit + "..HEAD", "--", *VERDICT_CODE)
+    if changed is None:
+        return "commit {0} is not in this history".format(commit[:8])
+    if changed:
+        return "ran {0}; changed since by {1}".format(commit[:8], " ".join(changed.split()))
+    return None
 
 
 def build_record(

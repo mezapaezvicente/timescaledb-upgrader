@@ -10,6 +10,8 @@ Generated from `data/upgrade-matrix.json` at 2026-10-30T03:50:24Z.
 
 A verdict is established only by running that migration with the upgrader itself (`verify/harness.py`), once on an empty database and once on a seeded one. **Evidence** links both records and **PG** is the exact PostgreSQL minor they ran on: a row keyed by a PostgreSQL major is proven only at that minor. A row that changes PostgreSQL major ran both ways again with `pg_upgrade --link` (`link-` records), since `apply` offers it. `no image` rows are verified against the container registry: no such tag is published. **References** are upstream issues, pull requests and release notes that explain a verdict or a caveat; they are never its proof.
 
+A verdict covers TimescaleDB and the route its records ran: the test databases hold `plpgsql` and `timescaledb` and nothing else. Other extensions (PostGIS, `timescaledb_toolkit`, `pg_stat_statements`, ...) are checked by preflight against the measured contents of each image, not by these verdicts.
+
 | Source PG | Source TS | Target PG | Target TS | Verdict | PG | Evidence | Reason | References |
 |---|---|---|---|---|---|---|---|---|
 | `11` | `1.7` | `11` | `2.1` | in place | 11.11 | [empty: pass](../verify/evidence/pg11/1.7-to-2.1.empty.json) · [seeded: pass](../verify/evidence/pg11/1.7-to-2.1.seeded.json) | — | — |

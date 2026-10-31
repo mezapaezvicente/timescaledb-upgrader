@@ -22,10 +22,13 @@ from tsupgrade import cli
 from tsupgrade.contents import (
     ContentsError,
     ImageContents,
+    extensions_from_listing,
+    libraries_from_listing,
     load_contents,
     measure_image,
     merge_measurements,
     parse_measurement,
+    parse_system,
 )
 from tsupgrade.drift import (
     INDETERMINATE,
@@ -256,12 +259,27 @@ postgres (PostgreSQL) 13.22
 def test_parse_measurement_needs_both_script_and_object():
     result = parse_measurement(PROBE_OUTPUT)
     assert list(result) == ["12"]  # 13 ships nothing installable
-    assert result["12"] == {
+    major = dict(result["12"])
+    major.pop("extensions"), major.pop("libraries")
+    assert major == {
         "server_version": "12.22",
         "default_version": "2.11.2",
         # 2.0.1 has a .so but no install script; update scripts don't count.
         "installable": ["1.7.5", "2.1.0", "2.11.2"],
     }
+
+
+def test_the_listings_also_say_what_other_extensions_and_libraries_a_major_ships():
+    """R9: what pg_upgrade --check would look for, known before the outage."""
+    share = ["postgis.control", "postgis--3.4.2.sql", "postgis--3.4.1--3.4.2.sql",
+             "postgis-3.control", "postgis-3--3.4.2.sql", "plpgsql.control", "plpgsql--1.0.sql",
+             "pg_stat_statements.control", "pg_stat_statements--1.4.sql",
+             "pg_stat_statements--1.4--1.5.sql", "orphan--1.0.sql", "README"]
+    assert extensions_from_listing(share) == {
+        "pg_stat_statements": ["1.4"], "plpgsql": ["1.0"], "postgis": ["3.4.2"],
+        "postgis-3": ["3.4.2"]}
+    assert libraries_from_listing(["postgis-3.so", "plpgsql.so", "bitcode", "x.so.1"]) == [
+        "plpgsql", "postgis-3"]
 
 
 def test_measure_image_records_the_digest():
@@ -297,3 +315,9 @@ def test_load_contents_rejects_a_malformed_file(tmp_path):
     path.write_text("[]")
     with pytest.raises(ContentsError):
         load_contents(path)
+
+
+def test_the_probe_also_says_which_os_and_glibc_an_image_has():
+    out = "## os Debian GNU/Linux 10 (buster)\n## glibc 2.28\n== 12\n-- sharedir\n"
+    assert parse_system(out) == {"os": "Debian GNU/Linux 10 (buster)", "glibc": "2.28"}
+    assert parse_system("== 12\n") == {}

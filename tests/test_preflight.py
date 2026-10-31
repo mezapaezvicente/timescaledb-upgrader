@@ -7,6 +7,8 @@ the matrix verdict -- which is where a wrong answer would actually hurt.
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from tsupgrade.preflight import (
@@ -20,6 +22,9 @@ from tsupgrade.preflight import (
     _parse_df,
     check_matrix,
     check_pg_minor_floor,
+    check_archiving,
+    check_collation,
+    check_extensions,
     check_pg_upgrade_headroom,
     render_report,
     worst_status,
@@ -333,3 +338,156 @@ def test_pg_upgrade_headroom_without_ordinal_0_is_unknown():
     result = check_pg_upgrade_headroom(DiskKube(1, 1), PreflightOptions("x", pg_upgrade_link=False),
                                        INSTANCES[:1])
     assert result.status == UNKNOWN
+
+
+class ArchiveKube:
+    def __init__(self, answer, rc=0):
+        self.answer, self.rc = answer, rc
+
+    def psql(self, pod, container, database, user, sql):
+        assert pod == "tsdb-0" and "archive_mode" in sql
+        return self.rc, self.answer, "" if self.rc == 0 else "permission denied"
+
+
+@pytest.mark.parametrize("answer,rc,status", [
+    ("off|", 0, PASS),
+    ("on|pgbackrest --stanza=tsdb archive-push %p", 0, UNKNOWN),
+    ("", 1, UNKNOWN),
+])
+def test_archiving_before_a_pg_upgrade_is_flagged_never_failed(answer, rc, status):
+    """R11: the archive and backups stop matching; the tool cannot see the
+    backup setup, so it says so rather than failing."""
+    result = check_archiving(ArchiveKube(answer, rc), PreflightOptions("x"), INSTANCES)
+    assert result.status == status
+    if rc == 0:
+        assert any("stanza-upgrade" in d for d in result.details)
+
+
+# --------------------------------------------------------------------------
+# Other extensions (R9): what pg_upgrade --check would find, found first
+# --------------------------------------------------------------------------
+
+RUN13 = "timescale/timescaledb-ha:pg13.22-ts2.15.3"
+UP13 = "timescale/timescaledb-ha:pg13.12-ts2.11.2-all"
+
+
+def _contents_file(tmp_path, run_libs, up_libs, run_ext=None):
+    doc = {"repository": "timescale/timescaledb-ha", "images": {
+        "pg13.22-ts2.15.3": {"pg": {"13": {"installable": ["2.11.2"], "libraries": run_libs,
+                                           "extensions": run_ext or {"plpgsql": ["1.0"],
+                                                                     "timescaledb": ["2.11.2"],
+                                                                     "postgis": ["3.4.2"]}}}},
+        "pg13.12-ts2.11.2-all": {"pg": {"13": {"installable": ["2.11.2"], "libraries": up_libs,
+                                               "extensions": {"plpgsql": ["1.0"],
+                                                              "timescaledb": ["2.11.2"],
+                                                              "postgis": ["3.4.2"]}}}},
+    }}
+    path = tmp_path / "contents.json"
+    path.write_text(json.dumps(doc))
+    return str(path)
+
+
+class ExtKube:
+    def psql(self, pod, container, database, user, sql):
+        assert pod == "tsdb-0"
+        # What pg_upgrade --check would look at: user C functions only.
+        assert "oid >= 16384" in sql and "prolang = 13" in sql
+        return 0, "\n".join(["ext|plpgsql|1.0", "ext|postgis|3.4.2", "lib|$libdir/postgis-3"]), ""
+
+
+EXT_INSTANCES = [Instance("tsdb-0", role="primary", extensions={"app": "2.11.2"})]
+ALL_LIBS = ["plpgsql", "postgis-3"]
+
+
+def _ext_opts(path, **kw):
+    return PreflightOptions(RUN13, contents_path=path, pg_upgrade_image=UP13, pg_upgrade_to=13, **kw)
+
+
+def test_every_library_and_extension_in_use_shipped_passes(tmp_path):
+    result = check_extensions(ExtKube(), _ext_opts(_contents_file(tmp_path, ALL_LIBS, ALL_LIBS)),
+                              EXT_INSTANCES, "13.22")
+    assert result.status == PASS, result.details
+
+
+def test_a_library_the_pg_upgrade_image_lacks_fails_before_anything_stops(tmp_path):
+    path = _contents_file(tmp_path, ALL_LIBS, ["plpgsql"])
+    result = check_extensions(ExtKube(), _ext_opts(path), EXT_INSTANCES, "13.22")
+    assert result.status == FAIL
+    assert any("runs pg_upgrade" in d and "$libdir/postgis-3" in d for d in result.details)
+
+
+def test_an_extension_version_without_an_install_script_is_unknown(tmp_path):
+    path = _contents_file(tmp_path, ALL_LIBS, ALL_LIBS,
+                          run_ext={"plpgsql": ["1.0"], "timescaledb": ["2.11.2"], "postgis": ["3.5.0"]})
+    result = check_extensions(ExtKube(), _ext_opts(path), EXT_INSTANCES, "13.22")
+    assert result.status == UNKNOWN
+    assert any("postgis 3.4.2: no install script" in d for d in result.details)
+
+
+def test_an_image_measured_before_extensions_were_recorded_is_unknown(tmp_path):
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({"repository": "timescale/timescaledb-ha", "images": {}}))
+    result = check_extensions(ExtKube(), PreflightOptions(RUN13, contents_path=str(path)),
+                              EXT_INSTANCES, "13.22")
+    assert result.status == UNKNOWN
+
+
+# --------------------------------------------------------------------------
+# Collation across a glibc change (R8)
+# --------------------------------------------------------------------------
+
+OLD_IMG = "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2"
+NEW_IMG = "timescale/timescaledb-ha:pg12.22-ts2.11.2"
+
+
+class CollationKube:
+    def __init__(self, databases, running=OLD_IMG + "@sha256:" + "0" * 64):
+        self.databases, self.running = databases, running
+
+    def json(self, args, namespaced=True):
+        return {"items": [{"spec": {"containers": [{"name": "timescaledb", "image": self.running}]}}]}
+
+    def psql(self, pod, container, database, user, sql):
+        assert "datlocprovider" not in sql  # a PostgreSQL 12 primary
+        return 0, "\n".join(self.databases), ""
+
+
+def _glibc_contents(tmp_path, before="2.28", after="2.35"):
+    path = tmp_path / "glibc.json"
+    path.write_text(json.dumps({"repository": "timescale/timescaledb-ha", "images": {
+        "pg12.6-ts2.1.1-p2": {"glibc": before, "pg": {}},
+        "pg12.22-ts2.11.2": {"glibc": after, "pg": {}}}}))
+    return str(path)
+
+
+PG12_PRIMARY = [Instance("tsdb-0", role="primary", server_version="12.22")]
+
+
+def test_a_glibc_change_under_a_libc_collation_warns_and_names_the_check(tmp_path):
+    kube = CollationKube(["app|en_US.UTF-8|c", "postgres|C.UTF-8|c"])
+    result = check_collation(kube, PreflightOptions(NEW_IMG, contents_path=_glibc_contents(tmp_path)),
+                             PG12_PRIMARY)
+    assert result.status == UNKNOWN
+    assert "2.28 -> 2.35" in result.summary
+    assert any("app (en_US.UTF-8)" in d for d in result.details)
+    assert not any("postgres (" in d for d in result.details)
+    assert any("bt_index_check" in d and "REINDEX" in d for d in result.details)
+
+
+@pytest.mark.parametrize("databases,after", [
+    (["app|en_US.UTF-8|c"], "2.28"),               # same glibc
+    (["app|C.UTF-8|c", "x|POSIX|c", "y|C|c"], "2.35"),  # code-point order
+])
+def test_no_glibc_change_or_no_libc_collation_passes(tmp_path, databases, after):
+    result = check_collation(CollationKube(databases),
+                             PreflightOptions(NEW_IMG, contents_path=_glibc_contents(tmp_path, after=after)),
+                             PG12_PRIMARY)
+    assert result.status == PASS, result.details
+
+
+def test_an_image_without_a_measured_glibc_is_unknown(tmp_path):
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({"repository": "timescale/timescaledb-ha", "images": {}}))
+    result = check_collation(CollationKube(["app|en_US.UTF-8|c"]),
+                             PreflightOptions(NEW_IMG, contents_path=str(path)), PG12_PRIMARY)
+    assert result.status == UNKNOWN and "not measured" in result.summary
