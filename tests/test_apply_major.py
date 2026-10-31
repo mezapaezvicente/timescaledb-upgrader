@@ -11,6 +11,8 @@ has succeeded, and the replicas' disks go before anything starts again.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
 
 import pytest
 
@@ -89,6 +91,8 @@ class MajorKube(FakeKube):
             self.writes.append("run {0} on {1}".format(args[1], args[args.index("--image") + 1]))
             return 0, "", ""
         if args[0] == "logs":
+            if getattr(self, "failed_log", None):
+                return 0, self.failed_log, ""
             if self.leftover:
                 return 0, "upgraded to PostgreSQL 13 (an earlier run)", ""
             if self.upgrade_phase != "Succeeded":
@@ -313,3 +317,98 @@ def test_every_failure_after_the_scale_to_0_says_how_to_start_again():
     for kube in (MajorKube(upgrade_phase="Failed"), MajorKube(phases=["Pending"])):
         report = _apply(_plan(), kube)
         assert any("scale statefulset/tsdb --replicas=2" in l for l in report["failure"]["error"])
+
+
+# --- a failed --link: what the old cluster needs before it starts (R4) -------
+
+def test_a_failed_link_after_linking_began_says_to_rename_pg_control_back():
+    """pg_upgrade's docs: once linking starts it appends .old to the old
+    cluster's global/pg_control; while the new cluster has never started,
+    removing the suffix makes the old one usable again."""
+    kube = MajorKube(upgrade_phase="Failed")
+    kube.failed_log = ("pg_upgrade  failed:\nold cluster disabled: "
+                       "/home/postgres/pgdata/data/global/pg_control.old")
+    report = _apply(_plan(link=True), kube)
+    error = "\n".join(report["failure"]["error"])
+    assert "will not start" in error
+    assert ("mv /home/postgres/pgdata/data/global/pg_control.old "
+            "/home/postgres/pgdata/data/global/pg_control") in error
+    assert "never started" in error
+    assert "data untouched" not in error
+    assert "scale statefulset/tsdb --replicas=2" in error
+
+
+def test_a_failed_link_before_linking_began_leaves_the_old_cluster_as_it_was():
+    report = _apply(_plan(link=True), MajorKube(upgrade_phase="Failed"))
+    error = "\n".join(report["failure"]["error"])
+    assert "data untouched" in error and "pg_control" not in error
+
+
+def test_after_a_successful_link_the_report_says_when_the_old_directory_is_reusable():
+    kube = MajorKube(fail_pvc=True)
+    report = _apply(_plan(link=True), kube)
+    error = "\n".join(report["failure"]["error"])
+    assert "reusable only while the new cluster has never started" in error
+
+
+# --- the script itself, on fake binaries -------------------------------------
+
+BASH = shutil.which("bash")
+FAKE_PG_UPGRADE = r"""#!/bin/bash
+# Fake pg_upgrade: $FAKE decides how it fails. -d is the old data directory.
+while [ $# -gt 0 ]; do case "$1" in -d) old="$2"; shift;; -D) new="$2"; shift;; --check) check=1;; esac; shift; done
+if [ -n "${check:-}" ]; then [ "$FAKE" = check ] && { echo "check failed"; exit 1; }; exit 0; fi
+case "$FAKE" in
+  link) mv "$old/global/pg_control" "$old/global/pg_control.old"; echo "Linking user relation files"; exit 1;;
+  ok) mkdir -p "$new/base/1"; touch "$new/base/1/1234"; echo "Copying user relation files ok"; exit 0;;
+esac
+"""
+
+
+def _fake_cluster(tmp_path):
+    old_bin, new_bin = tmp_path / "old", tmp_path / "new"
+    for d in (old_bin, new_bin):
+        d.mkdir()
+    (old_bin / "pg_controldata").write_text("#!/bin/bash\necho 'Data page checksum version: 1'\n",
+                                           newline="\n")
+    (old_bin / "postgres").write_text("#!/bin/bash\n", newline="\n")
+    (new_bin / "initdb").write_text(
+        "#!/bin/bash\n[ \"$1\" = --help ] && exit 0\n"
+        "while [ $# -gt 0 ]; do [ \"$1\" = -D ] && mkdir -p \"$2\"; shift; done\n", newline="\n")
+    (new_bin / "pg_upgrade").write_text(FAKE_PG_UPGRADE, newline="\n")
+    data = tmp_path / "pgdata" / "data"
+    (data / "global").mkdir(parents=True)
+    (data / "global" / "pg_control").write_text("x")
+    return old_bin, new_bin, data
+
+
+def _script(tmp_path, fake, link="--link"):
+    old_bin, new_bin, data = _fake_cluster(tmp_path)
+    env = {"PATH": "/usr/bin:/bin", "FROM": "12", "TO": "13", "PG_BIN_OLD": old_bin.as_posix(),
+           "PG_BIN_NEW": new_bin.as_posix(), "DATA": data.as_posix(), "LINK": link, "FAKE": fake}
+    done = subprocess.run([BASH, "-c", _PG_UPGRADE_SCRIPT], env=env, capture_output=True, text=True)
+    return done.returncode, done.stdout, data
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash")
+def test_the_script_reports_a_disabled_old_cluster_when_link_fails_mid_way(tmp_path):
+    rc, out, data = _script(tmp_path, "link")
+    assert rc == 1
+    assert "old cluster disabled: {0}/global/pg_control.old".format(data.as_posix()) in out
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash")
+def test_the_script_reports_nothing_changed_when_the_check_fails(tmp_path):
+    rc, out, data = _script(tmp_path, "check")
+    assert rc == 1
+    assert "old cluster disabled" not in out and "moved" not in out
+    assert (data / "global" / "pg_control").exists()
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash")
+def test_the_script_swaps_the_directories_on_success(tmp_path):
+    rc, out, data = _script(tmp_path, "ok", link="")
+    assert rc == 0, out
+    assert (data / "base" / "1" / "1234").exists()
+    assert (data.parent / "data.pg12" / "global" / "pg_control").exists()
+    assert "upgraded to PostgreSQL 13" in out

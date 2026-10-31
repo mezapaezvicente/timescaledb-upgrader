@@ -581,6 +581,15 @@ set -euo pipefail
 old_bin="$PG_BIN_OLD"; new_bin="$PG_BIN_NEW"; data="$DATA"
 new="$data.new"; keep="$data.pg$FROM"
 cd "$(dirname "$data")"
+# On failure, what was changed: apply reads these lines to say how to go back.
+trap 'rc=$?
+if [ "$rc" -ne 0 ]; then
+  for d in "$data" "$keep"; do
+    [ -e "$d/global/pg_control.old" ] && echo "old cluster disabled: $d/global/pg_control.old"
+  done
+  [ -d "$keep" ] && [ ! -d "$data" ] && echo "old data directory moved: $keep"
+fi
+exit "$rc"' EXIT
 for b in "$old_bin" "$new_bin"; do
   [ -x "$b/pg_upgrade" ] || [ -x "$b/postgres" ] || { echo "this image has no $b"; exit 2; }
 done
@@ -663,6 +672,30 @@ def _finish_by_hand(opts: ApplyOptions, claim: str, replicas: int, run_image: st
                  "{0}={1}".format(opts.container, run_image)),
         _kubectl(opts, "scale", "statefulset/" + opts.statefulset, "--replicas={0}".format(replicas)),
     ]
+
+
+def _after_failed_upgrade(lines: Sequence[str], opts: ApplyOptions, old: int, replicas: int,
+                          claim: str) -> List[str]:
+    """What a failed pg_upgrade left, from the script's exit lines; empty when
+    the old cluster is as it was (a copy, or --link before linking began)."""
+    disabled = [l.split(": ", 1)[1] for l in lines if l.startswith("old cluster disabled: ")]
+    moved = [l.split(": ", 1)[1] for l in lines if l.startswith("old data directory moved: ")]
+    if not disabled and not moved:
+        return []
+    disk = "{0}-{1}-0".format(claim, opts.statefulset)
+    notes = ["the cluster is stopped, and PostgreSQL {0} will not start on ordinal 0's data "
+             "as it is now:".format(old)]
+    if moved:
+        notes.append("    the old data directory was moved to {0}; move it back to {1}".format(
+            moved[0], opts.data_dir))
+    for path in disabled:
+        notes.append("    pg_upgrade --link had started linking and renamed global/pg_control "
+                     "to {0}. The new cluster was never started, so the old one is unmodified "
+                     "otherwise: rename it back (mv {0} {1})".format(path, path[:-len(".old")]))
+    notes.append("do that in a pod that mounts {0} (the upgrade pod's image will do), then: "
+                 "{1}".format(disk, _kubectl(opts, "scale", "statefulset/" + opts.statefulset,
+                                             "--replicas={0}".format(replicas))))
+    return notes
 
 
 def _await_pg_upgrade(cluster: _Cluster, pod: str, waiting: List[str]) -> str:
@@ -807,6 +840,7 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
     _, log, _ = kube.run(["logs", pod])
     lines = [l for l in log.splitlines() if l.strip()]
     if phase != "Succeeded":
+        state[:] = _after_failed_upgrade(lines, opts, old, replicas, claim) or state
         raise _StepFailed("pg_upgrade {0} -> {1} failed in {2}".format(old, new, image),
                           lines[-40:])
     # pg_upgrade's own word on copy or link sits mid-log, above the tail.
@@ -814,8 +848,11 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
     kube.run(["delete", "pod", pod, "--wait=false"])
     state[:] = ["ordinal 0's data directory is upgraded to PostgreSQL {0} and the cluster is "
                 "stopped; do not start it on PostgreSQL {1}'s image. The old directory is "
-                "{2}.pg{1}. To finish by hand:".format(new, old, opts.data_dir)] + [
-                    "    " + l for l in finish]
+                "{2}.pg{1}{3}. To finish by hand:".format(
+                    new, old, opts.data_dir,
+                    "; with --link it is reusable only while the new cluster has never started, "
+                    "after renaming its global/pg_control.old back to global/pg_control"
+                    if step["link"] else "")] + ["    " + l for l in finish]
 
     # 4. The replicas' copies and Patroni's stored state belong to the old cluster.
     for i in range(1, replicas):

@@ -407,7 +407,11 @@ it runs (`--pg-upgrade-timeout` sets a limit; a pod that never starts fails
 after `--rollout-timeout`). When it stops waiting, the pod keeps running and
 the report says how to watch it and the commands that finish the upgrade. An
 upgrade pod already there is refused, never deleted. Every failure after the
-cluster is stopped says what state it left and how to go on. By default `pg_upgrade`
+cluster is stopped says what state it left and how to go on. After a failed
+`--link`, that includes whether linking had begun: if it had, `pg_upgrade`
+renamed the old cluster's `global/pg_control` to `pg_control.old`, and the
+report says to rename it back before starting the old major (the
+documented recovery; the new cluster is never started by then). By default `pg_upgrade`
 copies, and the old data directory stays beside the new one to go back to;
 `plan --link` hard-links instead, which is fast and needs no space but leaves
 the old directory unusable. A failure before anything is deleted leaves the
