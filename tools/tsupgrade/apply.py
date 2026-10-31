@@ -628,8 +628,15 @@ if [ "$sums" = 0 ]; then
 else
   opt=--data-checksums
 fi
-echo "old cluster: PostgreSQL $FROM, data checksums ${sums:-unknown}; initdb $opt"
-"$new_bin/initdb" $opt -U postgres -E UTF8 -D "$new" >/dev/null
+# The old cluster's encoding, locale and provider (from its template0), or
+# pg_upgrade --check refuses the new cluster (13-15) during the outage.
+args=(-U postgres -E "$ENCODING" --lc-collate="$LC_COLLATE" --lc-ctype="$LC_CTYPE")
+case "$LOCALE_PROVIDER" in
+  icu) args+=(--locale-provider=icu --icu-locale="$PROVIDER_LOCALE") ;;
+  builtin) args+=(--locale-provider=builtin --builtin-locale="$PROVIDER_LOCALE") ;;
+esac
+echo "old cluster: PostgreSQL $FROM, data checksums ${sums:-unknown}; initdb $opt ${args[*]}"
+"$new_bin/initdb" $opt "${args[@]}" -D "$new" >/dev/null
 echo "shared_preload_libraries = 'timescaledb'" >> "$new/postgresql.conf"
 report() { echo "pg_upgrade $1 failed:"; tail -n 40 "$new"/pg_upgrade_output.d/*/*.txt "$new"/pg_upgrade_output.d/*/log/* 2>/dev/null || true; }
 "$new_bin/pg_upgrade" -b "$old_bin" -B "$new_bin" -d "$data" -D "$new" -U postgres $LINK --check   || { report --check; exit 1; }
@@ -700,6 +707,27 @@ def _finish_by_hand(opts: ApplyOptions, claim: str, replicas: int, run_image: st
                  "{0}={1}".format(opts.container, run_image)),
         _kubectl(opts, "scale", "statefulset/" + opts.statefulset, "--replicas={0}".format(replicas)),
     ]
+
+
+_PROVIDERS = {"c": "libc", "i": "icu", "b": "builtin"}
+
+
+def _old_locale(cluster: _Cluster, primary: str, old: int) -> Dict[str, str]:
+    """The old cluster's template0 encoding, locale and provider, as the
+    pg_upgrade script's initdb takes them. template0 is what pg_upgrade
+    compares (13-15) or copies (16+)."""
+    provider = ("datlocprovider" if old >= 15 else "'c'")
+    provider_locale = ("coalesce(datlocale, '')" if old >= 17
+                       else "coalesce(daticulocale, '')" if old >= 15 else "''")
+    rc, out, err = cluster.psql(primary, cluster.opts.admin_db, (
+        "SELECT pg_encoding_to_char(encoding), datcollate, datctype, {0}, {1} "
+        "FROM pg_database WHERE datname = 'template0'").format(provider, provider_locale))
+    parts = out.strip().split("|")
+    if rc != 0 or len(parts) != 5 or not all(parts[:3]):
+        raise _StepFailed("cannot read template0's encoding and locale", [err or out])
+    encoding, collate, ctype, kind, provider_value = parts
+    return {"ENCODING": encoding, "LC_COLLATE": collate, "LC_CTYPE": ctype,
+            "LOCALE_PROVIDER": _PROVIDERS.get(kind, kind), "PROVIDER_LOCALE": provider_value}
 
 
 def _after_failed_upgrade(lines: Sequence[str], opts: ApplyOptions, old: int, replicas: int,
@@ -815,6 +843,9 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
     primary = cluster.primary()
     if primary is None:
         raise _StepFailed("no ready primary")
+    locale = _old_locale(cluster, primary, old)
+    output.append("old cluster's template0: {0}".format(
+        ", ".join("{0}={1}".format(k.lower(), v) for k, v in locale.items() if v)))
     rc, out, _ = cluster.psql(primary, opts.admin_db,
                               "SELECT system_identifier FROM pg_control_system()")
     output.append("before: primary {0}, system identifier {1}".format(primary, out.strip()))
@@ -860,7 +891,7 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
                     {"name": "PG_BIN_NEW", "value": opts.pg_bin.format(new)},
                     {"name": "DATA", "value": opts.data_dir},
                     {"name": "LINK", "value": "--link" if step["link"] else ""},
-                ],
+                ] + [{"name": k, "value": v} for k, v in locale.items()],
                 "volumeMounts": [{"name": claim, "mountPath": mount}],
             })],
             "volumes": [{"name": claim, "persistentVolumeClaim": {

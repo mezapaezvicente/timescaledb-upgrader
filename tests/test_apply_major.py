@@ -125,6 +125,9 @@ class MajorKube(FakeKube):
             self.writes.append("vacuumdb on " + pod)
             return 0, "", "vacuumdb: processing database \"verify\": Generating minimal optimizer statistics (1 target)"
         sql = argv[-1]
+        if "WHERE datname = 'template0'" in sql:
+            self.locale_sql = sql
+            return 0, "UTF8|en_US.UTF-8|en_US.UTF-8|c|", ""
         if sql == "SELECT system_identifier FROM pg_control_system()":
             return 0, self.sysid, ""
         if sql.startswith("SELECT current_setting('server_version_num')"):
@@ -196,7 +199,9 @@ def test_the_upgrade_pod_runs_on_ordinal_0s_disk_as_the_statefulsets_user():
     env = {e["name"]: e["value"] for e in spec["containers"][0]["env"]}
     assert env == {"FROM": "12", "TO": "13", "PG_BIN_OLD": "/usr/lib/postgresql/12/bin",
                    "PG_BIN_NEW": "/usr/lib/postgresql/13/bin",
-                   "DATA": "/home/postgres/pgdata/data", "LINK": "--link"}
+                   "DATA": "/home/postgres/pgdata/data", "LINK": "--link",
+                   "ENCODING": "UTF8", "LC_COLLATE": "en_US.UTF-8", "LC_CTYPE": "en_US.UTF-8",
+                   "LOCALE_PROVIDER": "libc", "PROVIDER_LOCALE": ""}
 
 
 @pytest.mark.parametrize("link,said", [(False, "Copying"), (True, "Linking")])
@@ -374,7 +379,7 @@ def _fake_cluster(tmp_path):
                                            newline="\n")
     (old_bin / "postgres").write_text("#!/bin/bash\n", newline="\n")
     (new_bin / "initdb").write_text(
-        "#!/bin/bash\n[ \"$1\" = --help ] && exit 0\n"
+        "#!/bin/bash\n[ \"$1\" = --help ] && exit 0\necho \"$@\" > \"$(dirname \"$0\")/initdb.args\"\n"
         "while [ $# -gt 0 ]; do [ \"$1\" = -D ] && mkdir -p \"$2\"; shift; done\n", newline="\n")
     (new_bin / "pg_upgrade").write_text(FAKE_PG_UPGRADE, newline="\n")
     data = tmp_path / "pgdata" / "data"
@@ -383,10 +388,12 @@ def _fake_cluster(tmp_path):
     return old_bin, new_bin, data
 
 
-def _script(tmp_path, fake, link="--link"):
+def _script(tmp_path, fake, link="--link", locale_provider="libc"):
     old_bin, new_bin, data = _fake_cluster(tmp_path)
     env = {"PATH": "/usr/bin:/bin", "FROM": "12", "TO": "13", "PG_BIN_OLD": old_bin.as_posix(),
-           "PG_BIN_NEW": new_bin.as_posix(), "DATA": data.as_posix(), "LINK": link, "FAKE": fake}
+           "PG_BIN_NEW": new_bin.as_posix(), "DATA": data.as_posix(), "LINK": link, "FAKE": fake,
+           "ENCODING": "UTF8", "LC_COLLATE": "C.UTF-8", "LC_CTYPE": "C.UTF-8",
+           "LOCALE_PROVIDER": locale_provider, "PROVIDER_LOCALE": "und-x-icu"}
     done = subprocess.run([BASH, "-c", _PG_UPGRADE_SCRIPT], env=env, capture_output=True, text=True)
     return done.returncode, done.stdout, data
 
@@ -468,3 +475,25 @@ def test_a_finished_pg_upgrade_reports_what_it_means_for_backups():
     report = _apply(_plan(), MajorKube())
     assert any(l.startswith("backups: ") and "stanza-upgrade" in l
                for l in report["steps"][0]["output"])
+
+
+# --- initdb takes the old cluster's encoding and locale (R8) -----------------
+
+def test_initdb_gets_template0s_encoding_and_locale_read_before_anything_stops():
+    kube = MajorKube()
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+    assert "datname = 'template0'" in kube.locale_sql
+    assert "datlocprovider" not in kube.locale_sql  # PostgreSQL 12 has no provider column
+    assert any("lc_collate=en_US.UTF-8" in l for l in report["steps"][0]["output"])
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash")
+@pytest.mark.parametrize("provider,expect", [
+    ("libc", "-E UTF8 --lc-collate=C.UTF-8 --lc-ctype=C.UTF-8 -D"),
+    ("icu", "--locale-provider=icu --icu-locale=und-x-icu -D"),
+])
+def test_the_script_passes_the_old_locale_to_initdb(tmp_path, provider, expect):
+    rc, out, data = _script(tmp_path, "ok", link="", locale_provider=provider)
+    assert rc == 0, out
+    assert expect in (tmp_path / "new" / "initdb.args").read_text()
