@@ -62,7 +62,7 @@ from .images import (
     parse_release_tag,
 )
 from .matrix import MatrixError, default_matrix_path, load_matrix
-from .plan import PlanRefused, build_plan, render_runbook
+from .plan import PlanRefused, build_plan, render_runbook, route_images
 from .preflight import (
     FAIL,
     UNKNOWN,
@@ -471,10 +471,38 @@ def _measured_majors(references: Sequence[str], contents: ImageContents) -> Dict
     return found
 
 
+def _route_images(args: argparse.Namespace, matrix) -> List[str]:
+    """The images of the verified route for this transition, if it has one."""
+    tag: Dict[str, str] = {}
+    try:
+        _, _, name = parse_image_reference(args.target_image)
+        tag = parse_release_tag(name) or {}
+    except RegistryError:
+        pass
+    target_pg, target_ts = args.target_pg or tag.get("pg"), args.target_ts or tag.get("ts")
+    if matrix is None or not target_pg or not target_ts:
+        return []
+    try:
+        entry = matrix.lookup(args.from_pg, args.from_ts, target_pg, target_ts)
+    except MatrixError:
+        return []
+    if entry is None or not entry.is_known:
+        return []
+    return [ref for ref in route_images(entry.route) if ref != args.target_image]
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     """Build a plan from a stated source and a target image. Offline apart
     from the registry label lookups; it never touches a cluster.
+
+    A verified row is planned over the images of its recorded route, and
+    nothing else; ``--via`` offers images for a verification run only.
     """
+    if args.via and not args.verification_run:
+        print("error: --via offers images for a --verification-run; a verified "
+              "row is planned over the images of the route its records ran",
+              file=sys.stderr)
+        return EXIT_ERROR
     try:
         catalog = load_catalog(args.catalog)
     except RegistryError:
@@ -486,13 +514,22 @@ def cmd_plan(args: argparse.Namespace) -> int:
         print("error: cannot parse --from-pg {0!r}".format(args.from_pg), file=sys.stderr)
         return EXIT_ERROR
 
+    try:
+        matrix = load_matrix(args.matrix)
+    except MatrixError as exc:
+        if not args.verification_run:
+            raise
+        print("warning: no matrix: {0}".format(exc), file=sys.stderr)
+        matrix = None
+    via = list(args.via) if args.verification_run else _route_images(args, matrix)
+
     contents = _load_contents(args.contents)
     target_major = _target_major(args)
     images = None
     if target_major is not None and target_major != major and contents is not None:
         # A major change plans over measured contents only, every major of
         # every image offered: the labels describe one major per image.
-        images = _measured_majors([args.target_image] + list(args.via), contents)
+        images = _measured_majors([args.target_image] + via, contents)
     try:
         target = _profile(
             args.target_image, target_major or major, catalog, args.registry_timeout, contents
@@ -501,21 +538,19 @@ def cmd_plan(args: argparse.Namespace) -> int:
         print("error: {0}".format(exc), file=sys.stderr)
         return EXIT_ERROR
     candidates = []
-    for ref in args.via:
+    for ref in via:
         try:
             candidates.append(
                 _profile(ref, major, catalog, args.registry_timeout, contents)
             )
         except RegistryError as exc:
             print("warning: {0}".format(exc), file=sys.stderr)
-
-    try:
-        matrix = load_matrix(args.matrix)
-    except MatrixError as exc:
-        if not args.verification_run:
-            raise
-        print("warning: no matrix: {0}".format(exc), file=sys.stderr)
-        matrix = None
+    digests = {}
+    if contents is not None:
+        for ref in [args.target_image] + via:
+            digest = (contents.entry(ref) or {}).get("digest")
+            if digest:
+                digests[ref] = digest
 
     if args.verification_run:
         print(
@@ -536,6 +571,7 @@ def cmd_plan(args: argparse.Namespace) -> int:
             verification_run=args.verification_run,
             images=images,
             link=args.link,
+            digests=digests,
         )
     except PlanRefused as exc:
         print("refused: no plan produced", file=sys.stderr)
@@ -778,7 +814,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         default=[],
         metavar="IMAGE",
-        help="a candidate bridging image; repeat to offer several",
+        help="with --verification-run: a candidate image to plan over; repeat to "
+        "offer several (a verified row uses the images of its recorded route)",
     )
     plan.add_argument(
         "--verification-run",

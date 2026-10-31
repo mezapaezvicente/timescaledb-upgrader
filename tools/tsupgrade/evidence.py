@@ -40,6 +40,12 @@ a harness can add what turns out to matter without a schema change:
                     A ``link-`` record must show ``link`` and a count above 0;
                     any other must show ``copy`` and 0
 
+``route``           optional; when present, the route the run's plan took, in
+                    the shape a matrix row cites it
+                    (:func:`matrix.route_problems`): the start image, then
+                    every update and ``pg_upgrade``, each image pinned by
+                    digest. A row's ``route`` is copied from its records
+
 Optional and unchecked beyond being present: ``checks`` (the fixture's check
 lines on a seeded run), ``started_at``/``finished_at``, ``plan``, ``notes``.
 
@@ -57,6 +63,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
 
+from .matrix import route_problems
 from .versions import InvalidVersion, parse_version
 
 __all__ = [
@@ -232,6 +239,9 @@ def validate_record(doc: Any) -> List[str]:
     if (result == "pass" and isinstance(transition, dict) and "control" not in doc
             and transition.get("source_pg") != transition.get("target_pg")):
         problems.extend(_major_upgrade_problems(doc))
+
+    if "route" in doc:
+        problems.extend(route_problems(doc["route"]))
 
     if not doc.get("log"):
         problems.append("log must point at the full log")

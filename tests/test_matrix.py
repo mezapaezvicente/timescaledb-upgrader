@@ -10,6 +10,8 @@ The behaviour these pin down is what keeps the toolkit honest:
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from tsupgrade.matrix import (
@@ -380,3 +382,52 @@ def test_from_source_ignores_unparseable_entries_rather_than_raising():
     matrix = Matrix([good])
     assert matrix.from_source("16", "2.28") == [good]
     assert matrix.from_source("16", "2.27") == []
+
+
+# --- routes ------------------------------------------------------------------
+
+_D = "sha256:" + "0" * 64
+_ROUTE = {"start": {"image": "x:pg16.15-ts2.13.0", "digest": _D},
+          "steps": [{"action": "update", "image": "x:pg16.15-ts2.30.1", "digest": _D, "to": "2.30.1"}]}
+
+
+def _row(**kw):
+    row = {"source_pg": "16", "source_ts": "2.13", "target_pg": "16", "target_ts": "2.30",
+           "verdict": "in_place", "verified": True,
+           "evidence": {"empty": "e.json", "seeded": "s.json"}, "route": _ROUTE}
+    row.update(kw)
+    return row
+
+
+def test_a_verified_in_place_row_may_carry_its_route_and_round_trips(write_matrix):
+    entry = load_matrix(write_matrix({"entries": [_row()]})).entries[0]
+    assert entry.route == _ROUTE
+    assert entry.to_dict()["route"] == _ROUTE
+
+
+def test_a_row_without_a_route_writes_none_back():
+    assert "route" not in MatrixEntry("16", "2.28", "17", "2.30").to_dict()
+
+
+@pytest.mark.parametrize("change", [
+    {"verified": False, "evidence": None, "verdict": None},
+    {"verdict": "unsupported"},
+])
+def test_only_a_verified_in_place_row_carries_a_route(write_matrix, change):
+    with pytest.raises(MatrixError, match="only a verified in_place"):
+        load_matrix(write_matrix({"entries": [_row(**change)]}))
+
+
+@pytest.mark.parametrize("route,problem", [
+    ({"steps": _ROUTE["steps"]}, "route.start"),
+    (dict(_ROUTE, steps=[]), "at least one step"),
+    (dict(_ROUTE, steps=[dict(_ROUTE["steps"][0], digest="latest")]), "pinned image"),
+    (dict(_ROUTE, steps=[dict(_ROUTE["steps"][0], to="2.30")]), "exact 'to'"),
+    (dict(_ROUTE, steps=[{"action": "major_upgrade", "image": "a", "digest": _D, "from_pg": 13,
+                          "to_pg": 12, "ts": "2.11.2", "run_image": "b", "run_digest": _D}]),
+     "from_pg below to_pg"),
+    (dict(_ROUTE, steps=[{"action": "dump"}]), "update or major_upgrade"),
+])
+def test_a_malformed_route_is_refused(write_matrix, route, problem):
+    with pytest.raises(MatrixError, match=re.escape(problem)):
+        load_matrix(write_matrix({"entries": [_row(route=route)]}))

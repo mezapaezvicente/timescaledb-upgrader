@@ -15,6 +15,7 @@ import json
 import pytest
 
 from tsupgrade.apply import _PG_UPGRADE_SCRIPT, ApplyOptions, apply_plan, check_plan
+from tsupgrade.plan import PLAN_FORMAT
 from test_apply import FakeKube, _all_pass
 
 REPO = "timescale/timescaledb-ha:"
@@ -103,7 +104,7 @@ class MajorKube(FakeKube):
 
 def _plan(link=False):
     return {
-        "plan_format": 1, "mode": "verification",
+        "plan_format": PLAN_FORMAT, "mode": "verification",
         "source": {"pg": "12.22", "ts": "2.11.2"},
         "target": {"image": NEW, "pg": "13.22", "ts": "2.11.2"},
         "steps": [

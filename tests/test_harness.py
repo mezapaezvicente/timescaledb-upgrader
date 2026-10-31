@@ -391,3 +391,60 @@ def test_images_used_includes_the_pg_upgrade_and_restart_images():
         {"action": "ensure_image", "image": REPO + ":pg13.22-ts2.15.3"}]}
     assert harness.images_used(run, plan) == [
         REPO + ":pg12.22-ts2.11.2", REPO + ":pg13.12-ts2.11.2-all", REPO + ":pg13.22-ts2.15.3"]
+
+
+def test_containerd_spells_out_docker_hubs_registry_and_library():
+    assert harness.containerd_name("timescale/timescaledb-ha:pg16") == "docker.io/timescale/timescaledb-ha:pg16"
+    assert harness.containerd_name("postgres:16") == "docker.io/library/postgres:16"
+    assert harness.containerd_name("ghcr.io/x/y:1") == "ghcr.io/x/y:1"
+
+
+def test_a_record_names_the_route_its_plan_took_pinned():
+    digest = "sha256:" + "0" * 64
+
+    class Contents:
+        def entry(self, ref):
+            return {"digest": digest}
+    plan = {"steps": [
+        {"action": "preflight", "image": RUN.target_image},
+        {"action": "ensure_image", "image": RUN.target_image, "digest": digest},
+        {"action": "update_extension", "from": RUN.source, "to": RUN.target}]}
+    assert harness.record_route(RUN, plan, Contents()) == {
+        "start": {"image": RUN.start_image, "digest": digest},
+        "steps": [{"action": "update", "image": RUN.target_image, "digest": digest, "to": RUN.target}]}
+    # Unpinned somewhere: no route, rather than one plan would never reproduce.
+    plan["steps"][1]["digest"] = None
+    assert harness.record_route(RUN, plan, Contents()) is None
+    assert harness.record_route(RUN, None, Contents()) is None
+
+
+def _record_doc():
+    from tsupgrade.evidence import build_record
+    return build_record(
+        transition=RUN.transition, mode="empty",
+        images=[{"reference": RUN.target_image, "digest": "sha256:bb"}],
+        pg_version="15.18", source=RUN.source, target=RUN.target, reached=RUN.target,
+        passed=True, log="verify/out/x.log", upgrader={"commit": "abc", "dirty": False})
+
+
+def test_routes_are_written_only_where_every_record_agrees(tmp_path):
+    import json
+    digest = "sha256:" + "0" * 64
+    route = {"start": {"image": "x:a", "digest": digest},
+             "steps": [{"action": "update", "image": "x:a", "digest": digest, "to": "2.30.1"}]}
+    other = dict(route, start={"image": "x:b", "digest": digest})
+
+    def entry(name, routes):
+        evidence = {}
+        for key, r in zip(("empty", "seeded"), routes):
+            path = tmp_path / "{0}.{1}.json".format(name, key)
+            path.write_text(json.dumps(dict(_record_doc(), route=r) if r else _record_doc()))
+            evidence[key] = path.name
+        return MatrixEntry("16", name, "16", "2.30", verdict="in_place", verified=True,
+                           evidence=evidence)
+    rows = [entry("2.13", [route, route]), entry("2.14", [route, other]), entry("2.15", [route, None]),
+            MatrixEntry("16", "2.16", "16", "2.30")]
+    routes, problems = harness.routes_for(rows, root=tmp_path)
+    assert routes == {0: route}
+    assert any("different routes" in p for p in problems)
+    assert any("not every record" in p and "seeded" in p for p in problems)

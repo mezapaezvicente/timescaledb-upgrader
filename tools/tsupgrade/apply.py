@@ -26,7 +26,13 @@ Before the first step it refuses outright, having written nothing, when:
   valid for the state it was made from;
 * an ``update_extension`` step carries SQL other than the one statement its own
   ``to`` field implies. The plan is a file and files get edited; ``apply``
-  executes upgrades, not whatever SQL a document contains.
+  executes upgrades, not whatever SQL a document contains;
+* a digest in the plan is not a ``sha256:`` digest.
+
+Images run by digest. A step's ``digest`` (and a major upgrade's
+``run_digest``) turns its image into ``image@sha256:...`` for every rollout,
+the ``pg_upgrade`` pod and the restart, so what runs is what the plan names
+even if the tag has since been pushed again. A step without one runs by tag.
 
 Preflight stays read-only and its module is untouched. The writes live here:
 ``kubectl set image``, ``kubectl delete pod`` (the StatefulSet is ``OnDelete``,
@@ -68,7 +74,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from .plan import PLAN_FORMAT, VERIFICATION
+from .plan import PLAN_FORMAT, VERIFICATION, pinned
 from .preflight import (
     FAIL,
     Instance,
@@ -98,6 +104,7 @@ FAILED = "failed"
 _UPDATE_SQL = "ALTER EXTENSION timescaledb UPDATE TO '{0}';"
 _EXACT_VERSION = re.compile(r"^[0-9]+(\.[0-9]+)*$")
 _RELEASE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class ApplyRefused(Exception):
@@ -199,6 +206,10 @@ def check_plan(plan: Any, opts: ApplyOptions) -> List[str]:
             reasons.append("steps[{0}] is not an object".format(i))
             continue
         action = step.get("action")
+        for key in ("digest", "run_digest"):
+            if step.get(key) is not None and not _DIGEST.match(str(step[key])):
+                reasons.append("steps[{0}]: {1} is not a sha256 digest: {2!r}".format(
+                    i, key, step[key]))
         if action not in _ACTIONS:
             reasons.append("steps[{0}]: unknown action {1!r}".format(i, action))
         elif action == "update_extension":
@@ -406,7 +417,7 @@ def _step_preflight(
 
 
 def _step_ensure_image(step: Dict[str, Any], cluster: _Cluster) -> Tuple[str, List[str]]:
-    image = step["image"]
+    image = pinned(step["image"], step.get("digest"))
     opts = cluster.opts
     sts = cluster.kube.json(["get", "statefulset", opts.statefulset])
     containers = sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers") or []
@@ -602,7 +613,9 @@ def _step_major_upgrade(step: Dict[str, Any], cluster: _Cluster) -> Tuple[str, L
 
 
 def _major_upgrade(step, cluster, kube, opts, output):
-    old, new, image, run_image = step["from_pg"], step["to_pg"], step["image"], step["run_image"]
+    old, new = step["from_pg"], step["to_pg"]
+    image = pinned(step["image"], step.get("digest"))
+    run_image = pinned(step["run_image"], step.get("run_digest"))
     sts = kube.json(["get", "statefulset", opts.statefulset])
     replicas = int(sts.get("spec", {}).get("replicas") or 1)
     template = sts.get("spec", {}).get("template", {}).get("spec", {})

@@ -13,6 +13,14 @@ carries the registry listing in ``references`` instead. ``references``
 otherwise holds upstream issues, pull requests and release notes that explain
 a verdict; they are never its proof.
 
+A verified ``in_place`` row also carries the ``route`` its records ran: the
+image the source was staged on, then every update and ``pg_upgrade`` in
+order, each image pinned by digest. ``plan`` builds such a row from exactly
+those images and calls it verified only when it reproduces that route; the
+verdict is about the route, not just the endpoints. A row verified before
+routes were recorded has none, and ``plan`` treats it as unestablished
+until it is run again.
+
 An entry whose verdict has not been established has ``verdict: null`` and
 ``verified: false``. That is a deliberate, load-bearing state: callers are
 expected to surface it as *unknown* and refuse to proceed, rather than
@@ -22,6 +30,7 @@ treating a missing verdict as permission.
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -30,6 +39,7 @@ from .versions import InvalidVersion, pg_matches, ts_matches
 
 __all__ = [
     "VERDICTS",
+    "route_problems",
     "EVIDENCE_MODES",
     "OPTIONAL_EVIDENCE",
     "CROSS_PG_EVIDENCE",
@@ -60,6 +70,49 @@ CROSS_PG_EVIDENCE = ("link-empty", "link-seeded")
 
 _REQUIRED_FIELDS = ("source_pg", "source_ts", "target_pg", "target_ts")
 
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_RELEASE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+
+
+def _pinned(item: Any, image: str = "image", digest: str = "digest") -> bool:
+    return (isinstance(item, dict) and isinstance(item.get(image), str) and bool(item[image])
+            and isinstance(item.get(digest), str) and bool(_DIGEST.match(item[digest])))
+
+
+def route_problems(route: Any) -> List[str]:
+    """Every problem with a route's shape, or an empty list.
+
+    ``{"start": {image, digest}, "steps": [...]}``, where a step is
+    ``{"action": "update", image, digest, to}`` or ``{"action":
+    "major_upgrade", image, digest, from_pg, to_pg, ts, run_image,
+    run_digest}``. Steps carry no from-versions: a route is what a database
+    goes through from its source series, not from one patch release.
+    """
+    if not isinstance(route, dict):
+        return ["route must be an object"]
+    problems: List[str] = []
+    if not _pinned(route.get("start")):
+        problems.append("route.start needs an image and a sha256 digest")
+    steps = route.get("steps")
+    if not isinstance(steps, list) or not steps:
+        return problems + ["route.steps must list at least one step"]
+    for i, step in enumerate(steps):
+        where = "route.steps[{0}]".format(i)
+        action = step.get("action") if isinstance(step, dict) else None
+        if action == "update":
+            if not _pinned(step) or not _RELEASE.match(str(step.get("to") or "")):
+                problems.append("{0}: an update needs a pinned image and an exact 'to'".format(where))
+        elif action == "major_upgrade":
+            if not (_pinned(step) and _pinned(step, "run_image", "run_digest")
+                    and isinstance(step.get("from_pg"), int) and isinstance(step.get("to_pg"), int)
+                    and step["from_pg"] < step["to_pg"]
+                    and _RELEASE.match(str(step.get("ts") or ""))):
+                problems.append("{0}: a major_upgrade needs pinned image and run_image, "
+                                "from_pg below to_pg and an exact ts".format(where))
+        else:
+            problems.append("{0}: action must be update or major_upgrade".format(where))
+    return problems
+
 
 class MatrixError(Exception):
     """Raised when the matrix file is missing, malformed or self-inconsistent."""
@@ -80,6 +133,8 @@ class MatrixEntry:
     # {"empty": path, "seeded": path}, repo-relative, or None.
     evidence: Optional[Dict[str, str]] = field(default=None, hash=False, compare=True)
     references: Sequence[str] = field(default_factory=tuple)
+    # The route the evidence ran (see route_problems), on verified in_place rows.
+    route: Optional[Dict[str, Any]] = field(default=None, hash=False, compare=True)
 
     @property
     def is_known(self) -> bool:
@@ -95,7 +150,7 @@ class MatrixEntry:
         )
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        doc = {
             "source_pg": self.source_pg,
             "source_ts": self.source_ts,
             "target_pg": self.target_pg,
@@ -107,6 +162,9 @@ class MatrixEntry:
             "evidence": dict(self.evidence) if self.evidence else None,
             "references": list(self.references),
         }
+        if self.route is not None:
+            doc["route"] = json.loads(json.dumps(self.route))
+        return doc
 
 
 def _entry_from_dict(raw: Any, index: int) -> MatrixEntry:
@@ -197,6 +255,14 @@ def _entry_from_dict(raw: Any, index: int) -> MatrixEntry:
             "{0}: an unverified entry must not carry evidence".format(where)
         )
 
+    route = raw.get("route")
+    if route is not None:
+        if not verified or verdict != "in_place":
+            raise MatrixError("{0}: only a verified in_place entry carries a route".format(where))
+        problems = route_problems(route)
+        if problems:
+            raise MatrixError("{0}: {1}".format(where, "; ".join(problems)))
+
     entry = MatrixEntry(
         source_pg=str(raw["source_pg"]),
         source_ts=str(raw["source_ts"]),
@@ -208,6 +274,7 @@ def _entry_from_dict(raw: Any, index: int) -> MatrixEntry:
         verified=verified,
         evidence=dict(evidence) if evidence is not None else None,
         references=tuple(references),
+        route=route,
     )
 
     # Fail at load time, not at lookup time, on unparseable versions.

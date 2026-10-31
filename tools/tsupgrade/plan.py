@@ -42,6 +42,18 @@ cluster intact to go back to; ``link=True`` hard-links them instead, which
 is fast and needs no space but makes the old cluster unusable once the new
 one has started.
 
+The verified route, pinned
+--------------------------
+A verified row is verified for the route its records ran, not for its
+endpoints: other images can take a database between the same two versions by
+another way. So normal mode builds a row from exactly the images in the row's
+``route`` and calls the result verified only when it is that route again,
+digests included. The one difference allowed is a leading update inside the
+row's source series (2.11.0 -> 2.11.2 before a route recorded from 2.11.2),
+which the plan reports. Every image in a plan is pinned by digest when its
+digest was measured (``digest``, ``run_digest``), and ``apply`` rolls out the
+``image@sha256:...`` form, so a re-pushed tag cannot change what runs.
+
 Known-bad updates
 -----------------
 A hop whose single ``ALTER EXTENSION`` would hit a known TimescaleDB bug
@@ -59,7 +71,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from .drift import BridgeHop, ImageProfile, plan_chain
 from .images import RegistryError, parse_image_reference, parse_release_tag
 from .majors import MajorHop, Profiles, find_route, tag_major
-from .matrix import Matrix, MatrixError
+from .matrix import Matrix, MatrixEntry, MatrixError
 from .support import pg_minor_refusal, pg_minor_rules_for, update_hazard
 from .versions import InvalidVersion, parse_version
 
@@ -72,10 +84,15 @@ __all__ = [
     "Refusal",
     "PlanRefused",
     "build_plan",
+    "pinned",
     "render_runbook",
+    "route_images",
+    "route_of",
 ]
 
-PLAN_FORMAT = 1
+# 2: steps carry digests (``digest``, ``run_digest``); the matrix block says
+# whether the route is the verified one.
+PLAN_FORMAT = 2
 
 NORMAL = "normal"
 VERIFICATION = "verification"
@@ -203,6 +220,93 @@ def _avoid_hazards(
     return done, why
 
 
+def pinned(image: str, digest: Optional[str]) -> str:
+    """The reference that runs: ``image@digest`` when the digest is known."""
+    return "{0}@{1}".format(image, digest) if digest else image
+
+
+def route_of(steps: Sequence[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """The route a plan's steps run: each update with the image it runs on and
+    each ``pg_upgrade`` with its two images, in order, without from-versions."""
+    route: List[Dict[str, Any]] = []
+    image: Dict[str, Any] = {}
+    for step in steps:
+        action = step.get("action")
+        if action == "ensure_image":
+            image = {"image": step.get("image"), "digest": step.get("digest")}
+        elif action == "update_extension":
+            route.append(dict({"action": "update"}, **image, to=step.get("to")))
+        elif action == "major_upgrade":
+            route.append({key: step.get(key) for key in (
+                "action", "image", "digest", "from_pg", "to_pg", "ts", "run_image", "run_digest")})
+    return route
+
+
+def route_images(route: Optional[Dict[str, Any]]) -> List[str]:
+    """Every image a recorded route names, the start image first, once each."""
+    found: List[str] = []
+    if not route:
+        return found
+    for ref in [(route.get("start") or {}).get("image")] + [
+        ref for step in route.get("steps") or [] for ref in (step.get("image"), step.get("run_image"))
+    ]:
+        if ref and ref not in found:
+            found.append(ref)
+    return found
+
+
+def _catch_up(route: Sequence[Dict[str, Any]], series: tuple) -> int:
+    """How many leading updates stay inside the source series."""
+    n = 0
+    while (n < len(route) and route[n].get("action") == "update"
+           and (_parts(route[n].get("to")) or ())[:2] == series):
+        n += 1
+    return n
+
+
+def _describe(step: Dict[str, Any]) -> str:
+    if step.get("action") == "update":
+        return "update to {0} on {1}".format(step.get("to"), pinned(step["image"], step.get("digest")))
+    return "pg_upgrade {0} -> {1} at {2} in {3}, then run {4}".format(
+        step.get("from_pg"), step.get("to_pg"), step.get("ts"),
+        pinned(step["image"], step.get("digest")), pinned(step["run_image"], step.get("run_digest")))
+
+
+def _check_route(
+    out: _Collector,
+    entry: MatrixEntry,
+    route: List[Dict[str, Any]],
+    doc: Dict[str, Any],
+) -> None:
+    """Is the planned route the one the row's records ran?"""
+    doc["route_verified"] = False
+    if entry.route is None:
+        out.unestablished(
+            "{0} was verified before routes were recorded, so which route it "
+            "verified is unknown; it needs to be run again".format(entry.transition))
+        return
+    series = (_parts(entry.source_ts) or ())[:2]
+    recorded = list(entry.route.get("steps") or [])
+    planned, verified = route[_catch_up(route, series):], recorded[_catch_up(recorded, series):]
+    if planned != verified:
+        i = 0
+        while i < min(len(planned), len(verified)) and planned[i] == verified[i]:
+            i += 1
+        mine = planned[i] if i < len(planned) else None
+        theirs = verified[i] if i < len(verified) else None
+        out.unestablished(
+            "{0}: this plan's route is not the verified one; at step {1} it would "
+            "{2}, where the verified route would {3}".format(
+                entry.transition, i + 1, _describe(mine) if mine else "stop",
+                _describe(theirs) if theirs else "stop"))
+        return
+    for step in route[: len(route) - len(planned)]:
+        out.warnings.append(
+            "before the verified route: {0}, a patch update inside the source "
+            "series {1}".format(_describe(step), entry.source_ts))
+    doc["route_verified"] = True
+
+
 def _check_matrix(
     out: _Collector,
     matrix: Optional[Matrix],
@@ -210,23 +314,23 @@ def _check_matrix(
     source_ts: str,
     target_pg: str,
     target_ts: str,
-) -> Optional[Dict[str, Any]]:
+) -> Tuple[Optional[Dict[str, Any]], Optional[MatrixEntry]]:
     label = "pg{0}/ts{1} -> pg{2}/ts{3}".format(source_pg, source_ts, target_pg, target_ts)
     if matrix is None:
         out.unestablished("no matrix loaded; {0} has no established verdict".format(label))
-        return None
+        return None, None
     try:
         entry = matrix.lookup(source_pg, source_ts, target_pg, target_ts)
     except MatrixError as exc:
         out.block("matrix lookup failed for {0}: {1}".format(label, exc))
-        return None
+        return None, None
 
     if entry is None:
         out.unestablished(
             "the matrix has no entry for {0}; that is not the same as "
             "unsupported, but it is not permission either".format(label)
         )
-        return None
+        return None, None
 
     doc = {
         "transition": entry.transition,
@@ -253,7 +357,7 @@ def _check_matrix(
             out.warnings.append("verification run: " + message)
         else:
             out.block(message + "; plan only produces in-place upgrades")
-    return doc
+    return doc, entry
 
 
 def build_plan(
@@ -267,6 +371,7 @@ def build_plan(
     verification_run: bool = False,
     images: Optional[Profiles] = None,
     link: bool = False,
+    digests: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """Build the plan document, or raise :class:`PlanRefused` with every reason.
 
@@ -275,7 +380,8 @@ def build_plan(
     needed, depends on the patch release. ``target_pg`` and ``target_ts``
     default to what the target image's tag pins. ``images`` (measured
     contents per image and major) and ``link`` matter only when the target
-    is on a newer PostgreSQL major.
+    is on a newer PostgreSQL major. ``digests`` (reference -> ``sha256:...``)
+    pins each image; an image without one is left unpinned, with a warning.
     """
     out = _Collector(verification_run)
     target_image = target_profile.reference
@@ -323,7 +429,12 @@ def build_plan(
     if out.refusals:
         raise PlanRefused(out.refusals)
 
-    matrix_doc = _check_matrix(out, matrix, source_pg, source_ts, target_pg, target_ts)
+    matrix_doc, entry = _check_matrix(out, matrix, source_pg, source_ts, target_pg, target_ts)
+    if (not verification_run and entry is not None and entry.is_known
+            and entry.verdict == "in_place" and entry.route is None):
+        # Normal mode plans over the route's images, and there are none.
+        _check_route(out, entry, [], matrix_doc)
+        raise PlanRefused(out.refusals)
 
     if cross:
         route, problem = find_route(major, source_ts, tgt_pg[0], target_ts, target_image, images)
@@ -368,6 +479,12 @@ def build_plan(
             for note in candidate.notes:
                 out.warnings.append("{0}: {1}".format(candidate.reference, note))
 
+    digests = digests or {}
+    for ref in dict.fromkeys(r for h in hops for r in (
+            (h.image, h.run_image) if isinstance(h, MajorHop) else (h.image,))):
+        if not digests.get(ref):
+            out.warnings.append("{0}: no measured digest, so it runs by tag, unpinned".format(ref))
+
     if out.refusals:
         raise PlanRefused(out.refusals)
 
@@ -380,10 +497,12 @@ def build_plan(
                         "hop": i,
                         "action": "major_upgrade",
                         "image": hop.image,
+                        "digest": digests.get(hop.image),
                         "from_pg": hop.from_pg,
                         "to_pg": hop.to_pg,
                         "ts": hop.ts,
                         "run_image": hop.run_image,
+                        "run_digest": digests.get(hop.run_image),
                         "link": link,
                     },
                     {"hop": i, "action": "verify_version", "expect": hop.ts},
@@ -410,7 +529,8 @@ def build_plan(
                     "target_pg": hop_pg,
                     "target_ts": hop.to_version,
                 },
-                {"hop": i, "action": "ensure_image", "image": hop.image},
+                {"hop": i, "action": "ensure_image", "image": hop.image,
+                 "digest": digests.get(hop.image)},
                 update,
                 {
                     "hop": i,
@@ -425,6 +545,11 @@ def build_plan(
     if any(isinstance(h, MajorHop) for h in hops):
         steps.append({"hop": len(hops), "action": "analyze",
                       "why": "pg_upgrade carries no planner statistics over before PostgreSQL 18"})
+
+    if entry is not None and entry.is_known and entry.verdict == "in_place":
+        _check_route(out, entry, route_of(steps), matrix_doc)
+        if out.refusals:
+            raise PlanRefused(out.refusals)
 
     return {
         "plan_format": PLAN_FORMAT,
@@ -461,7 +586,10 @@ def render_runbook(plan: Dict[str, Any]) -> str:
     else:
         lines.append(
             "matrix  : {0} ({1})".format(
-                m["verdict"] or "unknown", "verified" if m["verified"] else "not verified"
+                m["verdict"] or "unknown",
+                "verified; this is the route its records ran" if m.get("route_verified")
+                else "verified, but not for this route" if m["verified"]
+                else "not verified",
             )
         )
         for ref in m.get("references") or []:
@@ -484,7 +612,7 @@ def render_runbook(plan: Dict[str, Any]) -> str:
                 prefix, step["image"], step["target_ts"]))
         elif action == "ensure_image":
             lines.append("{0}. make sure every instance runs {1} (roll it out if not)".format(
-                prefix, step["image"]))
+                prefix, pinned(step["image"], step.get("digest"))))
         elif action == "update_extension":
             lines.append("{0}. update the extension {1} -> {2}:".format(
                 prefix, step["from"], step["to"]))
@@ -502,14 +630,16 @@ def render_runbook(plan: Dict[str, Any]) -> str:
             lines.append("{0}. upgrade PostgreSQL {1} -> {2} with pg_upgrade ({3}) in {4}, "
                          "at TimescaleDB {5}:".format(
                              prefix, step["from_pg"], step["to_pg"],
-                             "--link" if step["link"] else "copy", step["image"], step["ts"]))
+                             "--link" if step["link"] else "copy",
+                             pinned(step["image"], step.get("digest")), step["ts"]))
             lines.append("         - stop the cluster; the leader's data directory is upgraded")
             lines.append("         - {0}".format(
                 "the old data directory is unusable afterwards (hard links)" if step["link"]
                 else "the old data directory is kept, to go back to"))
             lines.append("         - replicas are re-created, and Patroni's stored state reset "
                          "(pg_upgrade gives the cluster a new system identifier)")
-            lines.append("         - restart every instance on {0}".format(step["run_image"]))
+            lines.append("         - restart every instance on {0}".format(
+                pinned(step["run_image"], step.get("run_digest"))))
             lines.append("         - do not run the update_extensions.sql pg_upgrade may write: "
                          "its bare ALTER EXTENSION timescaledb UPDATE goes straight to the "
                          "image's default release, past any stop this plan makes")

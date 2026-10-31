@@ -349,9 +349,19 @@ command that writes. They are separate so a plan can be read, diffed and
 approved before anything touches a cluster.
 
 ```bash
-bash scripts/tsupgrade.sh plan --from-pg 15.13 --from-ts 2.12.2   --target-image timescale/timescaledb-ha:pg15.18-ts2.28.3   --via timescale/timescaledb-ha:pg15.13-ts2.20.3 --output plan.json
+bash scripts/tsupgrade.sh plan --from-pg 15.13 --from-ts 2.12.2   --target-image timescale/timescaledb-ha:pg15.18-ts2.28.3 --output plan.json
 bash scripts/tsupgrade.sh apply plan.json --report report.json
 ```
+
+**A verified row is verified for its route.** Its records ran one route
+(which image each update and each `pg_upgrade` runs in), and the matrix row
+names it, every image pinned by digest. `plan` builds the row from exactly
+those images and calls the result verified only when it is that route again;
+anything else is unestablished. A cluster on an older patch of the source
+series first updates to the release the route was recorded from, and the
+plan says so. Every image in a plan carries its digest, and `apply` rolls
+out `image@sha256:...`, so a tag pushed again later cannot change what runs.
+`--via` offers other images, for `--verification-run` only.
 
 A plan is a list of hops: one image the cluster must run, then one `ALTER
 EXTENSION timescaledb UPDATE TO '<v>'`. Each hop runs preflight against its
@@ -374,9 +384,9 @@ cover them all.
 ### Changing the PostgreSQL major
 
 A target on a newer major is planned as a route of `pg_upgrade` hops between
-same-major segments, from the measured contents of the images offered with
-`--via` (an `-all` tag carries several majors' binaries, but not every major:
-none pairs pg12 with anything past pg13). Each `pg_upgrade` runs inside an
+same-major segments, from the measured contents of the route's images (an
+`-all` tag carries several majors' binaries, but not every major: none pairs
+pg12 with anything past pg13). Each `pg_upgrade` runs inside an
 image carrying both majors, at a TimescaleDB release both sides ship, so the
 old major is updated to that release first. The route takes the fewest
 `pg_upgrade` runs, and the same-major segments keep their stops: pg12 2.11 to
@@ -384,10 +394,7 @@ pg16 runs 12 → 13, 13 → 15 and 15 → 16, and stops at 2.27.2 on pg15 on the
 
 ```bash
 bash scripts/tsupgrade.sh plan --from-pg 12.22 --from-ts 2.11.2 \
-  --target-image timescale/timescaledb-ha:pg16.15-ts2.30.1 \
-  --via timescale/timescaledb-ha:pg13.12-ts2.11.2-all --via timescale/timescaledb-ha:pg13.22-ts2.15.3 \
-  --via timescale/timescaledb-ha:pg15.13-ts2.19.3-all --via timescale/timescaledb-ha:pg15.18-ts2.28.3 \
-  --via timescale/timescaledb-ha:pg16.15-ts2.30.1-all --output plan.json
+  --target-image timescale/timescaledb-ha:pg16.15-ts2.30.1 --output plan.json
 ```
 
 Under Patroni, `apply` moves the leader to ordinal 0, scales the StatefulSet

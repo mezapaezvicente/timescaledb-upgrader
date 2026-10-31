@@ -36,6 +36,16 @@ major and planned with every measured image carrying a major in between;
 --link`` instead of copying; its records are ``link-empty`` and
 ``link-seeded``, and a verified major change needs them as well.
 
+Images run by digest, as ``plan`` pins them: the cluster is staged on
+``image@sha256:...`` and every record names the route it ran (``route``:
+the start image, then each update and ``pg_upgrade``, pinned), which is what
+the matrix row cites and what ``plan`` reproduces for a verified row.
+``--write-routes`` copies each verified row's route from its records into
+the matrix, and refuses when the records disagree. In kind, a side-loaded
+image is known by its tag only, so after loading the harness also names it
+by its registry digest, once Docker confirms that the local image is the one
+pulled from that digest.
+
 Failures are recorded and the run goes on. A failure to stage or seed is the
 harness's or the environment's, not the row's, so it gets no record -- it is
 reported and logged only.
@@ -71,7 +81,8 @@ from tsupgrade.contents import ImageContents, load_contents  # noqa: E402
 from tsupgrade.evidence import (  # noqa: E402
     EvidenceError, build_record, evidence_key, load_record, record_path, upgrader_revision,
     write_record)
-from tsupgrade.matrix import MatrixEntry, load_matrix  # noqa: E402
+from tsupgrade.matrix import MatrixEntry, default_matrix_path, load_matrix, route_problems  # noqa: E402
+from tsupgrade.plan import pinned, route_of  # noqa: E402
 from tsupgrade.preflight import patroni_role  # noqa: E402
 from tsupgrade.versions import InvalidVersion, parse_version  # noqa: E402
 
@@ -488,8 +499,33 @@ def tsupgrade(args: Sequence[str], log: Log, timeout: float = 3600) -> Tuple[int
     return _run([sys.executable, "-m", "tsupgrade"] + list(args), env=env, log=log, timeout=timeout)
 
 
-def local_digest(reference: str, contents: ImageContents) -> Optional[str]:
-    """The repository digest of the local image -- what was loaded into kind."""
+def pin(reference: str, contents: ImageContents) -> str:
+    """The reference with its measured digest, as plan pins it."""
+    return pinned(reference, (contents.entry(reference) or {}).get("digest"))
+
+
+def containerd_name(reference: str) -> str:
+    """How containerd names an image: registry and ``library/`` spelled out."""
+    head, slash, tail = reference.partition("/")
+    if slash and ("." in head or ":" in head or head == "localhost"):
+        return reference
+    return "docker.io/" + (reference if slash else "library/" + reference)
+
+
+def record_route(run: Run, plan: Optional[Dict[str, Any]],
+                 contents: ImageContents) -> Optional[Dict[str, Any]]:
+    """The route a run's plan took, as a matrix row cites it; None when it
+    cannot be pinned all the way (an image without a measured digest)."""
+    if not plan:
+        return None
+    route = {"start": {"image": run.start_image,
+                       "digest": (contents.entry(run.start_image) or {}).get("digest")},
+             "steps": route_of(plan.get("steps") or [])}
+    return None if route_problems(route) else route
+
+
+def docker_digest(reference: str) -> Optional[str]:
+    """The registry digest Docker pulled the local image from, if it says."""
     rc, out, _ = _run(["docker", "image", "inspect", "--format",
                        "{{json .RepoDigests}}", reference])
     if rc == 0:
@@ -497,8 +533,12 @@ def local_digest(reference: str, contents: ImageContents) -> Optional[str]:
         for item in json.loads(out.strip() or "[]") or []:
             if item.startswith(repo + "@"):
                 return item.split("@", 1)[1]
-    entry = contents.entry(reference) or {}
-    return entry.get("digest")
+    return None
+
+
+def local_digest(reference: str, contents: ImageContents) -> Optional[str]:
+    """The repository digest of the local image -- what was loaded into kind."""
+    return docker_digest(reference) or (contents.entry(reference) or {}).get("digest")
 
 
 class Cluster:
@@ -561,8 +601,29 @@ class Cluster:
         return rc == 0
 
     def load(self, image: str, log: Log) -> None:
+        """Side-load ``image`` (``tag`` or ``tag@digest``) into the node."""
         if self.loaded(image):
             return
+        tag, _, digest = image.partition("@")
+        if not self.loaded(tag):
+            self._load(tag, log)
+        if digest:
+            self._alias(tag, digest, log)
+
+    def _alias(self, tag: str, digest: str, log: Log) -> None:
+        """Name the loaded tag by its registry digest, so a pinned reference
+        resolves on the node without a pull. Only for the image Docker
+        pulled from that digest."""
+        if docker_digest(tag) != digest:
+            raise HarnessError("the local {0} is not {1}; pull it again".format(tag, digest))
+        repo = containerd_name(tag).rsplit(":", 1)[0]
+        rc, _, err = _run(["docker", "exec", self.name + "-control-plane", "ctr",
+                           "--namespace=k8s.io", "images", "tag", "--force",
+                           containerd_name(tag), "{0}@{1}".format(repo, digest)], log=log)
+        if rc != 0 or not self.loaded("{0}@{1}".format(tag, digest)):
+            raise HarnessError("cannot name {0} by {1} in kind: {2}".format(tag, digest, err))
+
+    def _load(self, image: str, log: Log) -> None:
         log.section("load " + image)
         if _run(["docker", "image", "inspect", image])[0] != 0:
             if _run(["docker", "pull", image], timeout=3600, log=log)[0] != 0:
@@ -754,9 +815,9 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         "  CONTROL " + run.control if run.control else ""))
     images = images_used(run, plan)
     try:
-        cluster.ensure(run.start_image, log)
+        cluster.ensure(pin(run.start_image, contents), log)
         for image in images:
-            cluster.load(image, log)
+            cluster.load(pin(image, contents), log)
         baseline = stage(cluster, run, base, log)
     except HarnessError as exc:
         log.write("HARNESS ERROR: {0}".format(exc))
@@ -800,6 +861,9 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         extra["control"] = run.control
     else:
         extra["plan"] = {"hops": plan.get("hops"), "path": plan_path.relative_to(REPO).as_posix()}
+        route = record_route(run, plan, contents)
+        if route is not None:
+            extra["route"] = route
         if run.cross:
             extra["major_upgrades"] = major_upgrades(report)
     record = build_record(
@@ -852,6 +916,51 @@ def recorded(run: Run, base: str, root: Path = EVIDENCE) -> bool:
     return doc["upgrader"].get("dirty") is False
 
 
+def routes_for(entries: Sequence[MatrixEntry], root: Path = REPO) -> Tuple[Dict[int, Dict[str, Any]], List[str]]:
+    """{entry index: route} for every verified in_place row whose cited
+    records (empty, seeded and, on a major change, the link runs) all carry
+    the same route; and a line for each row they do not settle."""
+    routes: Dict[int, Dict[str, Any]] = {}
+    problems: List[str] = []
+    for i, entry in enumerate(entries):
+        if not (entry.is_known and entry.verdict == "in_place" and entry.evidence):
+            continue
+        keys = [k for k in ("empty", "seeded", "link-empty", "link-seeded") if k in entry.evidence]
+        try:
+            found = [load_record(root / entry.evidence[k]).get("route") for k in keys]
+        except EvidenceError as exc:
+            problems.append("{0}: {1}".format(entry.transition, exc))
+            continue
+        if any(r is None for r in found):
+            problems.append("{0}: not every record names its route ({1})".format(
+                entry.transition, ", ".join(k for k, r in zip(keys, found) if r is None)))
+        elif any(r != found[0] for r in found[1:]):
+            problems.append("{0}: its records ran different routes".format(entry.transition))
+        else:
+            routes[i] = found[0]
+    return routes, problems
+
+
+def write_routes(path: Optional[Path] = None) -> int:
+    """Copy each verified row's route from its records into the matrix."""
+    path = path or default_matrix_path()
+    doc = json.loads(path.read_text(encoding="utf-8"))
+    routes, problems = routes_for(load_matrix(path).entries)
+    changed = 0
+    for i, row in enumerate(doc["entries"]):
+        if i in routes and row.get("route") != routes[i]:
+            row["route"] = routes[i]
+            changed += 1
+    with open(path, "w", encoding="utf-8", newline="\n") as handle:
+        handle.write(json.dumps(doc, indent=2, ensure_ascii=False) + "\n")
+    load_matrix(path)
+    for line in problems:
+        print("no route: " + line)
+    print("{0} row(s) updated; {1} verified row(s) carry a route; {2} without".format(
+        changed, len(routes), len(problems)))
+    return 0
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -877,8 +986,12 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--control", choices=CONTROLS,
                     help="negative control: one ALTER EXTENSION instead of plan/apply "
                          "(needs --history)")
+    ap.add_argument("--write-routes", action="store_true", dest="write_routes",
+                    help="copy each verified row's route from its records into the matrix, and stop")
     args = ap.parse_args(argv)
 
+    if args.write_routes:
+        return write_routes()
     contents = load_contents()
     rows = select_rows(load_matrix().entries, args.pg, args.sources, args.to_pgs)
     resolved = [resolve(e, contents) for e in rows]

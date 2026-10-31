@@ -34,16 +34,31 @@ PG15_20 = ImageProfile(REPO + "pg15.13-ts2.20.3", (15,), "2.9.0", "2.20.3", "2.2
 PG15_28 = ImageProfile(REPO + "pg15.18-ts2.28.3", (15,), "2.13.0", "2.28.3", "2.28.3")
 
 
-def _entry(src_pg, src_ts, tgt_pg, tgt_ts, verdict=None, verified=False):
+def _digest(profile):
+    return "sha256:" + format(abs(hash(profile.reference)), "x").rjust(64, "0")[:64]
+
+
+DIGESTS = {p.reference: _digest(p) for p in (PG16, PG15_20, PG15_28)}
+
+
+def _update(profile, to):
+    return {"action": "update", "image": profile.reference, "digest": DIGESTS[profile.reference],
+            "to": to}
+
+
+def _entry(src_pg, src_ts, tgt_pg, tgt_ts, verdict=None, verified=False, route=None):
     return MatrixEntry(
         src_pg, src_ts, tgt_pg, tgt_ts,
         verdict=verdict,
         verified=verified,
         evidence={"empty": "e.json", "seeded": "s.json"} if verified else None,
+        route=route,
     )
 
 
-KNOWN = Matrix([_entry("16", "2.13", "16", "2.30", "in_place", True)])
+PG16_ROUTE = {"start": {"image": PG16.reference, "digest": DIGESTS[PG16.reference]},
+              "steps": [_update(PG16, "2.30.1")]}
+KNOWN = Matrix([_entry("16", "2.13", "16", "2.30", "in_place", True, PG16_ROUTE)])
 UNKNOWN_ROW = Matrix([_entry("16", "2.13", "16", "2.30")])
 EMPTY = Matrix([])
 
@@ -59,7 +74,7 @@ def _refusal(**kwargs):
 # --------------------------------------------------------------------------
 
 def test_established_in_place_row_is_planned_as_one_hop():
-    plan = build_plan("16", "2.13.0", PG16, matrix=KNOWN)
+    plan = build_plan("16", "2.13.0", PG16, matrix=KNOWN, digests=DIGESTS)
     assert plan["mode"] == NORMAL
     assert plan["hops"] == 1
     assert [s["action"] for s in plan["steps"]] == [
@@ -72,7 +87,7 @@ def test_established_in_place_row_is_planned_as_one_hop():
 
 def test_plan_is_plain_json():
     """apply reads it back from disk, so it must round-trip."""
-    plan = build_plan("16", "2.13.0", PG16, matrix=KNOWN)
+    plan = build_plan("16", "2.13.0", PG16, matrix=KNOWN, digests=DIGESTS)
     assert json.loads(json.dumps(plan)) == plan
 
 
@@ -161,11 +176,77 @@ def test_verification_run_does_not_lift_a_refused_pg_minor():
 
 
 def test_runbook_is_loud_in_verification_mode_only():
-    normal = render_runbook(build_plan("16", "2.13.0", PG16, matrix=KNOWN))
+    normal = render_runbook(build_plan("16", "2.13.0", PG16, matrix=KNOWN, digests=DIGESTS))
     verifying = render_runbook(build_plan("16", "2.13.0", PG16, matrix=EMPTY, verification_run=True))
     assert "VERIFICATION RUN" not in normal
     assert verifying.startswith("!")
     assert "VERIFICATION RUN" in verifying
+
+
+# --------------------------------------------------------------------------
+# The verified route, pinned (R1)
+# --------------------------------------------------------------------------
+
+# The pg15 bridge row as verified: 2.20.3 on the 2.20 image, then the 2.27.2
+# stop and 2.28.3 on the 2.28 image.
+BRIDGE_ROUTE = {
+    "start": {"image": PG15_20.reference, "digest": DIGESTS[PG15_20.reference]},
+    "steps": [_update(PG15_20, "2.20.3"), _update(PG15_28, "2.27.2"), _update(PG15_28, "2.28.3")],
+}
+BRIDGE = Matrix([_entry("15", "2.9", "15", "2.28", "in_place", True, BRIDGE_ROUTE)])
+PG15_19 = ImageProfile(REPO + "pg15.13-ts2.19.3", (15,), "2.9.0", "2.19.3", "2.19.3")
+
+
+def test_the_verified_route_is_planned_pinned_and_says_so():
+    plan = build_plan("15", "2.9.0", PG15_28, [PG15_20], matrix=BRIDGE, digests=DIGESTS)
+    assert plan["matrix"]["route_verified"] is True
+    rollouts = [s for s in plan["steps"] if s["action"] == "ensure_image"]
+    assert [s["digest"] for s in rollouts] == [DIGESTS[PG15_20.reference]] + [DIGESTS[PG15_28.reference]] * 2
+    runbook = render_runbook(plan)
+    assert "this is the route its records ran" in runbook
+    assert "{0}@{1}".format(PG15_20.reference, DIGESTS[PG15_20.reference]) in runbook
+
+
+def test_a_route_through_other_images_is_not_reported_as_verified():
+    """The review's reproduction, same-major: the endpoints match the row,
+    the images in between do not."""
+    digests = dict(DIGESTS, **{PG15_19.reference: _digest(PG15_19)})
+    refused = _refusal(source_pg="15", source_ts="2.9.0", target_profile=PG15_28,
+                       candidates=[PG15_19], matrix=BRIDGE, digests=digests)
+    assert refused.only_unestablished
+    assert "not the verified one" in str(refused) and "pg15.13-ts2.19.3" in str(refused)
+
+
+def test_verification_run_off_the_verified_route_warns_and_says_unverified():
+    digests = dict(DIGESTS, **{PG15_19.reference: _digest(PG15_19)})
+    plan = build_plan("15", "2.9.0", PG15_28, [PG15_19], matrix=BRIDGE, digests=digests,
+                      verification_run=True)
+    assert plan["matrix"]["route_verified"] is False
+    assert any("not the verified one" in w for w in plan["warnings"])
+    assert "verified, but not for this route" in render_runbook(plan)
+
+
+def test_a_different_digest_is_a_different_route():
+    """A re-pushed tag: same name, other content, not what was verified."""
+    repushed = dict(DIGESTS, **{PG15_28.reference: "sha256:" + "f" * 64})
+    refused = _refusal(source_pg="15", source_ts="2.9.0", target_profile=PG15_28,
+                       candidates=[PG15_20], matrix=BRIDGE, digests=repushed)
+    assert refused.only_unestablished
+    assert "sha256:" + "f" * 64 in str(refused)
+
+
+def test_a_verified_row_without_a_recorded_route_is_unestablished():
+    matrix = Matrix([_entry("16", "2.13", "16", "2.30", "in_place", True)])
+    refused = _refusal(source_pg="16", source_ts="2.13.0", target_profile=PG16,
+                       matrix=matrix, digests=DIGESTS)
+    assert refused.only_unestablished
+    assert "before routes were recorded" in str(refused)
+
+
+def test_an_image_without_a_measured_digest_runs_unpinned_with_a_warning():
+    plan = build_plan("16", "2.13.0", PG16, matrix=EMPTY, verification_run=True)
+    assert [s.get("digest") for s in plan["steps"] if s["action"] == "ensure_image"] == [None]
+    assert any("no measured digest" in w for w in plan["warnings"])
 
 
 # --------------------------------------------------------------------------
@@ -299,6 +380,31 @@ def test_cli_exit_code_distinguishes_unestablished_from_blocked(offline_profiles
     assert cli.main(base + ["--from-ts", "2.13.0"]) == cli.EXIT_UNKNOWN
     assert "--verification-run" in capsys.readouterr().err
     assert cli.main(base + ["--from-ts", "2.13"]) == cli.EXIT_CHECK_FAILED
+
+
+def test_cli_refuses_via_outside_a_verification_run(offline_profiles, tmp_path, capsys):
+    code = cli.main(["plan", "--from-pg", "15", "--from-ts", "2.9.0",
+                     "--target-image", PG15_28.reference, "--via", PG15_20.reference,
+                     "--matrix", _matrix_file(tmp_path, BRIDGE.entries)])
+    assert code == cli.EXIT_ERROR
+    assert "--verification-run" in capsys.readouterr().err
+
+
+def test_cli_plans_a_verified_row_over_its_recorded_route(offline_profiles, tmp_path, monkeypatch, capsys):
+    """No --via: the images come from the row's route, the digests from the
+    measured contents."""
+    class Contents:
+        def entry(self, ref):
+            return {"digest": DIGESTS[ref]} if ref in DIGESTS else None
+    monkeypatch.setattr(cli, "_load_contents", lambda path: Contents())
+    code = cli.main(["plan", "--from-pg", "15", "--from-ts", "2.9.0", "--json",
+                     "--target-image", PG15_28.reference,
+                     "--matrix", _matrix_file(tmp_path, BRIDGE.entries)])
+    assert code == cli.EXIT_OK
+    plan = json.loads(capsys.readouterr().out)
+    assert plan["matrix"]["route_verified"] is True
+    assert plan["steps"][1] == {"hop": 1, "action": "ensure_image", "image": PG15_20.reference,
+                                "digest": DIGESTS[PG15_20.reference]}
 
 
 def test_cli_verification_run_writes_the_plan_and_announces_itself(offline_profiles, tmp_path, capsys):

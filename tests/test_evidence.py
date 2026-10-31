@@ -213,3 +213,13 @@ def test_records_themselves_do_not_make_the_tree_dirty(tmp_path):
 
     (tmp_path / "a.txt").write_text("changed")
     assert upgrader_revision(tmp_path)["dirty"] is True
+
+
+def test_a_route_when_present_must_be_pinned():
+    doc = _record()
+    doc["route"] = {"start": {"image": "x:pg16.15-ts2.13.0", "digest": "sha256:" + "0" * 64},
+                    "steps": [{"action": "update", "image": "x:pg16.15-ts2.30.1",
+                               "digest": None, "to": "2.30.1"}]}
+    assert any("pinned image" in p for p in validate_record(doc))
+    doc["route"]["steps"][0]["digest"] = "sha256:" + "1" * 64
+    assert validate_record(doc) == []

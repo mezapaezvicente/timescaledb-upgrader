@@ -92,6 +92,19 @@ objects (a non-finalized aggregate from a pre-2.7 seed, say) would otherwise
 block an unrelated row. The harness never touches `tsdb-upgrader`, the
 long-lived `make up` cluster; it deletes namespaces.
 
+**Pinned images.** Plans pin every image by digest and `apply` rolls out
+`image@sha256:...`. In kind a side-loaded image is known only by its tag, so
+after loading one the harness also names it by its registry digest (`ctr
+images tag`), once `docker image inspect` confirms the local image was pulled
+from that digest. The cluster is staged on the pinned reference too, so the
+first rollout of a single-image row is still a no-op.
+
+**Routes into the matrix.** `python verify/harness.py --write-routes` copies
+each verified row's route from its cited records (empty, seeded, and the
+link runs) into `data/upgrade-matrix.json`. A row whose records name no
+route, or different ones, keeps none, and `plan` treats it as unestablished
+until it is run again.
+
 **What is not a row result.** If staging or seeding fails, that is the harness
 or the environment, not the transition. It writes no record; it prints
 `ERROR`, logs it, and moves on. `verify/out/runs.jsonl` has one line per row
@@ -107,6 +120,8 @@ Records carry the fields `evidence.py` requires, plus:
 | `checks` | the fixture checks, seeded runs only |
 | `baseline` | the seed's own summary line |
 | `plan`, `apply_exit`, `replicas`, `started_at`, `finished_at` | as named |
+
+| `route` | the route the plan took, as the matrix row cites it: the start image, then each update and `pg_upgrade`, every image pinned by digest |
 
 `images[].digest` is the local repository digest of the image that was loaded
 into kind (the one to pin). `pods[].image_id` is what the node reports running:

@@ -13,8 +13,8 @@ import pytest
 
 from tsupgrade.drift import ImageProfile
 from tsupgrade.majors import MajorHop, find_route, tag_major
-from tsupgrade.matrix import Matrix
-from tsupgrade.plan import PlanRefused, build_plan, render_runbook
+from tsupgrade.matrix import Matrix, MatrixEntry
+from tsupgrade.plan import PlanRefused, build_plan, render_runbook, route_of
 
 R = "timescale/timescaledb-ha:"
 
@@ -177,6 +177,49 @@ def test_the_runbook_warns_off_pg_upgrades_own_extension_script():
     """pg_upgrade suggests ALTER EXTENSION timescaledb UPDATE, which would go
     13 -> 15 straight from 2.15.3 to 2.28.3, past the 2.27.2 stop (#10272)."""
     assert "do not run the update_extensions.sql" in render_runbook(_plan("pg16.15-ts2.30.1"))
+
+
+DIGESTS = {ref: "sha256:" + str(i).rjust(64, "0") for i, ref in enumerate(sorted(IMAGES))}
+
+
+def _verified(route_steps, start="pg12.22-ts2.11.2"):
+    route = {"start": {"image": R + start, "digest": DIGESTS[R + start]}, "steps": route_steps}
+    return Matrix([MatrixEntry("12", "2.11", "16", "2.30", verdict="in_place", verified=True,
+                               evidence={"empty": "e", "seeded": "s", "link-empty": "le",
+                                         "link-seeded": "ls"}, route=route)])
+
+
+def test_a_cross_pg_plan_pins_both_images_of_every_pg_upgrade():
+    plan = _plan("pg16.15-ts2.30.1", digests=DIGESTS)
+    for step in (s for s in plan["steps"] if s["action"] == "major_upgrade"):
+        assert step["digest"] == DIGESTS[step["image"]]
+        assert step["run_digest"] == DIGESTS[step["run_image"]]
+
+
+def test_the_reviews_reproduction_is_not_called_verified():
+    """12 -> 13 -> 15 -> 16 was verified; offering pg18.6-all as well must
+    not pass as that route if it changes which image runs a pg_upgrade."""
+    verified = route_of(_plan("pg16.15-ts2.30.1", digests=DIGESTS)["steps"])
+    images = {k: v for k, v in IMAGES.items() if k != R + "pg16.15-ts2.30.1-all"}
+    major = 16
+    with pytest.raises(PlanRefused, match="not the verified one"):
+        build_plan("12.22", "2.11.2", IMAGES[R + "pg16.15-ts2.30.1"][major],
+                   matrix=_verified(verified), images=images, digests=DIGESTS)
+
+
+def test_an_older_patch_of_the_source_series_catches_up_first_and_says_so():
+    """The route was recorded from 2.11.2; a cluster at 2.11.0 first updates
+    to 2.11.2 on the pg12 image, then runs the same route."""
+    verified = route_of(_plan("pg16.15-ts2.30.1", digests=DIGESTS)["steps"])
+    images = dict(IMAGES)
+    images[R + "pg12.22-ts2.11.2"] = {12: ImageProfile(
+        R + "pg12.22-ts2.11.2", (12,), "2.1.0", "2.11.2", "2.11.2", from_filesystem=True,
+        installable=_versions("2.1.0", "2.11.2", extra=("2.11.0",)))}
+    plan = build_plan("12.22", "2.11.0", IMAGES[R + "pg16.15-ts2.30.1"][16],
+                      matrix=_verified(verified), images=images, digests=DIGESTS)
+    assert plan["matrix"]["route_verified"] is True
+    assert route_of(plan["steps"])[0]["to"] == "2.11.2"
+    assert any("before the verified route" in w and "2.11.2" in w for w in plan["warnings"])
 
 
 def test_link_without_a_major_change_is_refused():

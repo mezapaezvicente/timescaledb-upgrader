@@ -22,7 +22,7 @@ from typing import Dict, List
 import pytest
 
 from tsupgrade import apply as apply_mod
-from tsupgrade.apply import ApplyOptions, ApplyRefused, apply_plan, render_report
+from tsupgrade.apply import ApplyOptions, ApplyRefused, apply_plan, check_plan, render_report
 from tsupgrade.drift import ImageProfile
 from tsupgrade.plan import build_plan
 from tsupgrade.preflight import FAIL, PASS, UNKNOWN, CheckResult
@@ -255,6 +255,26 @@ def test_old_patroni_master_label_is_the_primary():
     assert kube.writes[3:6] == ["set image " + PG15_18, "delete tsdb-1", "delete tsdb-0"]
     assert kube.writes[6] == "app@tsdb-0: ALTER EXTENSION timescaledb UPDATE TO '2.27.2';"
     assert report["final"]["instances"][0]["role"] == "primary"
+
+
+def test_a_pinned_step_rolls_out_the_digest_reference():
+    """What runs is what the plan names, even if the tag was pushed again."""
+    digest = "sha256:" + "a" * 64
+    plan = _plan()
+    for step in plan["steps"]:
+        if step["action"] == "ensure_image":
+            step["digest"] = digest
+    kube = FakeKube(PG15_13, "15.18", {"verify": "2.20.3"})
+    report = _run(plan, kube)
+    assert report["result"] == "pass", report.get("failure")
+    assert "set image {0}@{1}".format(PG15_18, digest) in kube.writes
+
+
+def test_a_malformed_digest_is_refused_before_anything_is_written():
+    plan = _plan()
+    next(s for s in plan["steps"] if s["action"] == "ensure_image")["digest"] = "latest"
+    assert any("not a sha256 digest" in r for r in check_plan(plan, ApplyOptions(
+        acknowledge_verification=True)))
 
 
 def test_a_failed_rollout_reports_what_it_had_already_done():

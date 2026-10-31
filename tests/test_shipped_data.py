@@ -206,3 +206,15 @@ def test_shipped_contents_are_sorted_and_unique():
             versions = found["installable"]
             keys = [parse_version(v) for v in versions]
             assert keys == sorted(set(keys)), (tag, major)
+
+
+def test_every_route_a_row_cites_is_the_one_its_records_ran():
+    """plan reproduces a row's route and calls that verified; the route has
+    to be the one every cited record actually took."""
+    for entry in load_matrix():
+        if entry.route is None:
+            continue
+        for key in ("empty", "seeded", "link-empty", "link-seeded"):
+            if key in entry.evidence:
+                record = load_record(REPO / entry.evidence[key])
+                assert record.get("route") == entry.route, (entry.transition, key)
