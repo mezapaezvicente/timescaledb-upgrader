@@ -218,9 +218,12 @@ registry answers it: such a row cites the registry listing in `references`.
 Otherwise `references` holds upstream issues and release notes that explain a
 verdict; they are never its proof.
 
-Today 110 of the 131 rows are verified: every same-PG row, and the seven rows
-that change major from pg11 2.1 and pg12 2.11. The other 21 cross-PG rows ship
-as `null` / `verified: false`.
+Today 127 of the 131 rows are verified: every same-PG row, and 24 of the 28
+rows that change major. The four left, pg11 2.1 to pg15-pg18, ship as `null` /
+`verified: false`: a seeded run reaches the 2.25 update with a continuous
+aggregate created at 2.1 (non-finalized), and the `gates` preflight refuses it
+there, as it should. The data is intact, but the route only completes with a
+`cagg_migrate()` stop below 2.25, which no run has exercised yet.
 
 ### Which images actually exist
 

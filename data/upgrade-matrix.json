@@ -80,11 +80,23 @@
       "source_ts": "2.1",
       "target_pg": "13",
       "target_ts": "2.15",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verdict": "in_place",
+      "reason": "PostgreSQL 11 -> 12 -> 13 with pg_upgrade under Patroni: 11 -> 12 at 2.1.1 in pg12.6-ts2.1.1-p2; 12 -> 13 at 2.11.2 in pg13.12-ts2.11.2-all. The fewest pg_upgrade runs the measured images allow: none carries pg11 with anything past 12. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 13.22; with --link the old data directory is unusable once the new cluster starts. A continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only; the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), as in the same-PG pg13 2.1 -> 2.15 rows. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
+      "steps": [
+        "pg_upgrade PostgreSQL 11 -> 12 at 2.1.1 with pg12.6-ts2.1.1-p2 (copy, or --link), then start PostgreSQL 12 on pg12.22-ts2.11.2 and re-clone the replicas",
+        "roll out pg12.22-ts2.11.2 and update to 2.11.2",
+        "pg_upgrade PostgreSQL 12 -> 13 at 2.11.2 with pg13.12-ts2.11.2-all (copy, or --link), then start PostgreSQL 13 on pg13.22-ts2.15.3 and re-clone the replicas",
+        "roll out pg13.22-ts2.15.3 and update to 2.15.3",
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg11/2.1-to-pg13-2.15.empty.json",
+        "seeded": "verify/evidence/pg11/2.1-to-pg13-2.15.seeded.json",
+        "link-empty": "verify/evidence/pg11/2.1-to-pg13-2.15.link-empty.json",
+        "link-seeded": "verify/evidence/pg11/2.1-to-pg13-2.15.link-seeded.json"
+      },
       "references": []
     },
     {
@@ -92,11 +104,25 @@
       "source_ts": "2.1",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verdict": "in_place",
+      "reason": "PostgreSQL 11 -> 12 -> 13 -> 14 with pg_upgrade under Patroni: 11 -> 12 at 2.1.1 in pg12.6-ts2.1.1-p2; 12 -> 13 at 2.11.2 in pg13.12-ts2.11.2-all; 13 -> 14 at 2.15.3 in pg14.19-ts2.19.3-all. The fewest pg_upgrade runs the measured images allow: none carries pg11 with anything past 12. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 14.19; with --link the old data directory is unusable once the new cluster starts. A continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only; the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), as in the same-PG pg13 2.1 -> 2.15 rows. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
+      "steps": [
+        "pg_upgrade PostgreSQL 11 -> 12 at 2.1.1 with pg12.6-ts2.1.1-p2 (copy, or --link), then start PostgreSQL 12 on pg12.22-ts2.11.2 and re-clone the replicas",
+        "roll out pg12.22-ts2.11.2 and update to 2.11.2",
+        "pg_upgrade PostgreSQL 12 -> 13 at 2.11.2 with pg13.12-ts2.11.2-all (copy, or --link), then start PostgreSQL 13 on pg13.22-ts2.15.3 and re-clone the replicas",
+        "roll out pg13.22-ts2.15.3 and update to 2.15.3",
+        "pg_upgrade PostgreSQL 13 -> 14 at 2.15.3 with pg14.19-ts2.19.3-all (copy, or --link), then start PostgreSQL 14 on pg14.19-ts2.19.3 and re-clone the replicas",
+        "roll out pg14.19-ts2.19.3 and update to 2.19.3",
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg11/2.1-to-pg14-2.19.empty.json",
+        "seeded": "verify/evidence/pg11/2.1-to-pg14-2.19.seeded.json",
+        "link-empty": "verify/evidence/pg11/2.1-to-pg14-2.19.link-empty.json",
+        "link-seeded": "verify/evidence/pg11/2.1-to-pg14-2.19.link-seeded.json"
+      },
       "references": []
     },
     {
@@ -785,11 +811,20 @@
       "source_ts": "2.15",
       "target_pg": "14",
       "target_ts": "2.19",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verdict": "in_place",
+      "reason": "PostgreSQL 13 -> 14 with pg_upgrade under Patroni: 13 -> 14 at 2.15.3 in pg14.19-ts2.19.3-all. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 14.19; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 13 -> 14 at 2.15.3 with pg14.19-ts2.19.3-all (copy, or --link), then start PostgreSQL 14 on pg14.19-ts2.19.3 and re-clone the replicas",
+        "roll out pg14.19-ts2.19.3 and update to 2.19.3",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.15-to-pg14-2.19.empty.json",
+        "seeded": "verify/evidence/pg13/2.15-to-pg14-2.19.seeded.json",
+        "link-empty": "verify/evidence/pg13/2.15-to-pg14-2.19.link-empty.json",
+        "link-seeded": "verify/evidence/pg13/2.15-to-pg14-2.19.link-seeded.json"
+      },
       "references": []
     },
     {
@@ -797,48 +832,114 @@
       "source_ts": "2.15",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "PostgreSQL 13 -> 15 with pg_upgrade under Patroni: 13 -> 15 at 2.15.3 in pg15.13-ts2.19.3-all. On pg15 the update stops at 2.27.2: a direct update from 2.15.3 to 2.28.3 hits #10272 when the database was once updated across 2.15, which a plan cannot see, so the stop is taken for every such edge, as in the A' rows. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 15.18; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 13 -> 15 at 2.15.3 with pg15.13-ts2.19.3-all (copy, or --link), then start PostgreSQL 15 on pg15.18-ts2.28.3 and re-clone the replicas",
+        "roll out pg15.18-ts2.28.3 and update to 2.27.2",
+        "roll out pg15.18-ts2.28.3 and update to 2.28.3",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.15-to-pg15-2.28.empty.json",
+        "seeded": "verify/evidence/pg13/2.15-to-pg15-2.28.seeded.json",
+        "link-empty": "verify/evidence/pg13/2.15-to-pg15-2.28.link-empty.json",
+        "link-seeded": "verify/evidence/pg13/2.15-to-pg15-2.28.link-seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "13",
       "source_ts": "2.15",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "PostgreSQL 13 -> 15 -> 16 with pg_upgrade under Patroni: 13 -> 15 at 2.15.3 in pg15.13-ts2.19.3-all; 15 -> 16 at 2.28.3 in pg16.15-ts2.30.1-all. The fewest pg_upgrade runs the measured images allow: none carries pg13 with anything past 15. On pg15 the update stops at 2.27.2: a direct update from 2.15.3 to 2.28.3 hits #10272 when the database was once updated across 2.15, which a plan cannot see, so the stop is taken for every such edge, as in the A' rows. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 16.15; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 13 -> 15 at 2.15.3 with pg15.13-ts2.19.3-all (copy, or --link), then start PostgreSQL 15 on pg15.18-ts2.28.3 and re-clone the replicas",
+        "roll out pg15.18-ts2.28.3 and update to 2.27.2",
+        "roll out pg15.18-ts2.28.3 and update to 2.28.3",
+        "pg_upgrade PostgreSQL 15 -> 16 at 2.28.3 with pg16.15-ts2.30.1-all (copy, or --link), then start PostgreSQL 16 on pg16.15-ts2.30.1 and re-clone the replicas",
+        "roll out pg16.15-ts2.30.1 and update to 2.30.1",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.15-to-pg16-2.30.empty.json",
+        "seeded": "verify/evidence/pg13/2.15-to-pg16-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg13/2.15-to-pg16-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg13/2.15-to-pg16-2.30.link-seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "13",
       "source_ts": "2.15",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "PostgreSQL 13 -> 15 -> 17 with pg_upgrade under Patroni: 13 -> 15 at 2.15.3 in pg15.13-ts2.19.3-all; 15 -> 17 at 2.28.3 in pg17.11-ts2.30.1-all. The fewest pg_upgrade runs the measured images allow: none carries pg13 with anything past 15. On pg15 the update stops at 2.27.2: a direct update from 2.15.3 to 2.28.3 hits #10272 when the database was once updated across 2.15, which a plan cannot see, so the stop is taken for every such edge, as in the A' rows. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 17.11; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 13 -> 15 at 2.15.3 with pg15.13-ts2.19.3-all (copy, or --link), then start PostgreSQL 15 on pg15.18-ts2.28.3 and re-clone the replicas",
+        "roll out pg15.18-ts2.28.3 and update to 2.27.2",
+        "roll out pg15.18-ts2.28.3 and update to 2.28.3",
+        "pg_upgrade PostgreSQL 15 -> 17 at 2.28.3 with pg17.11-ts2.30.1-all (copy, or --link), then start PostgreSQL 17 on pg17.11-ts2.30.1 and re-clone the replicas",
+        "roll out pg17.11-ts2.30.1 and update to 2.30.1",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.15-to-pg17-2.30.empty.json",
+        "seeded": "verify/evidence/pg13/2.15-to-pg17-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg13/2.15-to-pg17-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg13/2.15-to-pg17-2.30.link-seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "13",
       "source_ts": "2.15",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "PostgreSQL 13 -> 15 -> 18 with pg_upgrade under Patroni: 13 -> 15 at 2.15.3 in pg15.13-ts2.19.3-all; 15 -> 18 at 2.28.3 in pg18.6-ts2.30.1-all. The fewest pg_upgrade runs the measured images allow: none carries pg13 with anything past 15. On pg15 the update stops at 2.27.2: a direct update from 2.15.3 to 2.28.3 hits #10272 when the database was once updated across 2.15, which a plan cannot see, so the stop is taken for every such edge, as in the A' rows. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 18.6; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 13 -> 15 at 2.15.3 with pg15.13-ts2.19.3-all (copy, or --link), then start PostgreSQL 15 on pg15.18-ts2.28.3 and re-clone the replicas",
+        "roll out pg15.18-ts2.28.3 and update to 2.27.2",
+        "roll out pg15.18-ts2.28.3 and update to 2.28.3",
+        "pg_upgrade PostgreSQL 15 -> 18 at 2.28.3 with pg18.6-ts2.30.1-all (copy, or --link), then start PostgreSQL 18 on pg18.6-ts2.30.1 and re-clone the replicas",
+        "roll out pg18.6-ts2.30.1 and update to 2.30.1",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg13/2.15-to-pg18-2.30.empty.json",
+        "seeded": "verify/evidence/pg13/2.15-to-pg18-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg13/2.15-to-pg18-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg13/2.15-to-pg18-2.30.link-seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "14",
@@ -1083,48 +1184,114 @@
       "source_ts": "2.19",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "PostgreSQL 14 -> 15 with pg_upgrade under Patroni: 14 -> 15 at 2.19.3 in pg15.13-ts2.19.3-all. On pg15 the update stops at 2.27.2: a direct update from 2.19.3 to 2.28.3 hits #10272 when the database was once updated across 2.15, which a plan cannot see, so the stop is taken for every such edge, as in the A' rows. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 15.18; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 14 -> 15 at 2.19.3 with pg15.13-ts2.19.3-all (copy, or --link), then start PostgreSQL 15 on pg15.18-ts2.28.3 and re-clone the replicas",
+        "roll out pg15.18-ts2.28.3 and update to 2.27.2",
+        "roll out pg15.18-ts2.28.3 and update to 2.28.3",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.19-to-pg15-2.28.empty.json",
+        "seeded": "verify/evidence/pg14/2.19-to-pg15-2.28.seeded.json",
+        "link-empty": "verify/evidence/pg14/2.19-to-pg15-2.28.link-empty.json",
+        "link-seeded": "verify/evidence/pg14/2.19-to-pg15-2.28.link-seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "14",
       "source_ts": "2.19",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "PostgreSQL 14 -> 15 -> 16 with pg_upgrade under Patroni: 14 -> 15 at 2.19.3 in pg15.13-ts2.19.3-all; 15 -> 16 at 2.28.3 in pg16.15-ts2.30.1-all. The fewest pg_upgrade runs the measured images allow: none carries pg14 with anything past 15. On pg15 the update stops at 2.27.2: a direct update from 2.19.3 to 2.28.3 hits #10272 when the database was once updated across 2.15, which a plan cannot see, so the stop is taken for every such edge, as in the A' rows. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 16.15; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 14 -> 15 at 2.19.3 with pg15.13-ts2.19.3-all (copy, or --link), then start PostgreSQL 15 on pg15.18-ts2.28.3 and re-clone the replicas",
+        "roll out pg15.18-ts2.28.3 and update to 2.27.2",
+        "roll out pg15.18-ts2.28.3 and update to 2.28.3",
+        "pg_upgrade PostgreSQL 15 -> 16 at 2.28.3 with pg16.15-ts2.30.1-all (copy, or --link), then start PostgreSQL 16 on pg16.15-ts2.30.1 and re-clone the replicas",
+        "roll out pg16.15-ts2.30.1 and update to 2.30.1",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.19-to-pg16-2.30.empty.json",
+        "seeded": "verify/evidence/pg14/2.19-to-pg16-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg14/2.19-to-pg16-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg14/2.19-to-pg16-2.30.link-seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "14",
       "source_ts": "2.19",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "PostgreSQL 14 -> 15 -> 17 with pg_upgrade under Patroni: 14 -> 15 at 2.19.3 in pg15.13-ts2.19.3-all; 15 -> 17 at 2.28.3 in pg17.11-ts2.30.1-all. The fewest pg_upgrade runs the measured images allow: none carries pg14 with anything past 15. On pg15 the update stops at 2.27.2: a direct update from 2.19.3 to 2.28.3 hits #10272 when the database was once updated across 2.15, which a plan cannot see, so the stop is taken for every such edge, as in the A' rows. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 17.11; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 14 -> 15 at 2.19.3 with pg15.13-ts2.19.3-all (copy, or --link), then start PostgreSQL 15 on pg15.18-ts2.28.3 and re-clone the replicas",
+        "roll out pg15.18-ts2.28.3 and update to 2.27.2",
+        "roll out pg15.18-ts2.28.3 and update to 2.28.3",
+        "pg_upgrade PostgreSQL 15 -> 17 at 2.28.3 with pg17.11-ts2.30.1-all (copy, or --link), then start PostgreSQL 17 on pg17.11-ts2.30.1 and re-clone the replicas",
+        "roll out pg17.11-ts2.30.1 and update to 2.30.1",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.19-to-pg17-2.30.empty.json",
+        "seeded": "verify/evidence/pg14/2.19-to-pg17-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg14/2.19-to-pg17-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg14/2.19-to-pg17-2.30.link-seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "14",
       "source_ts": "2.19",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "PostgreSQL 14 -> 15 -> 18 with pg_upgrade under Patroni: 14 -> 15 at 2.19.3 in pg15.13-ts2.19.3-all; 15 -> 18 at 2.28.3 in pg18.6-ts2.30.1-all. The fewest pg_upgrade runs the measured images allow: none carries pg14 with anything past 15. On pg15 the update stops at 2.27.2: a direct update from 2.19.3 to 2.28.3 hits #10272 when the database was once updated across 2.15, which a plan cannot see, so the stop is taken for every such edge, as in the A' rows. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 18.6; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 14 -> 15 at 2.19.3 with pg15.13-ts2.19.3-all (copy, or --link), then start PostgreSQL 15 on pg15.18-ts2.28.3 and re-clone the replicas",
+        "roll out pg15.18-ts2.28.3 and update to 2.27.2",
+        "roll out pg15.18-ts2.28.3 and update to 2.28.3",
+        "pg_upgrade PostgreSQL 15 -> 18 at 2.28.3 with pg18.6-ts2.30.1-all (copy, or --link), then start PostgreSQL 18 on pg18.6-ts2.30.1 and re-clone the replicas",
+        "roll out pg18.6-ts2.30.1 and update to 2.30.1",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg14/2.19-to-pg18-2.30.empty.json",
+        "seeded": "verify/evidence/pg14/2.19-to-pg18-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg14/2.19-to-pg18-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg14/2.19-to-pg18-2.30.link-seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ]
     },
     {
       "source_pg": "15",
@@ -1572,11 +1739,20 @@
       "source_ts": "2.28",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verdict": "in_place",
+      "reason": "PostgreSQL 15 -> 16 with pg_upgrade under Patroni: 15 -> 16 at 2.28.3 in pg16.15-ts2.30.1-all. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 16.15; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 15 -> 16 at 2.28.3 with pg16.15-ts2.30.1-all (copy, or --link), then start PostgreSQL 16 on pg16.15-ts2.30.1 and re-clone the replicas",
+        "roll out pg16.15-ts2.30.1 and update to 2.30.1",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.28-to-pg16-2.30.empty.json",
+        "seeded": "verify/evidence/pg15/2.28-to-pg16-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg15/2.28-to-pg16-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg15/2.28-to-pg16-2.30.link-seeded.json"
+      },
       "references": []
     },
     {
@@ -1584,11 +1760,20 @@
       "source_ts": "2.28",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verdict": "in_place",
+      "reason": "PostgreSQL 15 -> 17 with pg_upgrade under Patroni: 15 -> 17 at 2.28.3 in pg17.11-ts2.30.1-all. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 17.11; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 15 -> 17 at 2.28.3 with pg17.11-ts2.30.1-all (copy, or --link), then start PostgreSQL 17 on pg17.11-ts2.30.1 and re-clone the replicas",
+        "roll out pg17.11-ts2.30.1 and update to 2.30.1",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.28-to-pg17-2.30.empty.json",
+        "seeded": "verify/evidence/pg15/2.28-to-pg17-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg15/2.28-to-pg17-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg15/2.28-to-pg17-2.30.link-seeded.json"
+      },
       "references": []
     },
     {
@@ -1596,11 +1781,20 @@
       "source_ts": "2.28",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verdict": "in_place",
+      "reason": "PostgreSQL 15 -> 18 with pg_upgrade under Patroni: 15 -> 18 at 2.28.3 in pg18.6-ts2.30.1-all. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 18.6; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 15 -> 18 at 2.28.3 with pg18.6-ts2.30.1-all (copy, or --link), then start PostgreSQL 18 on pg18.6-ts2.30.1 and re-clone the replicas",
+        "roll out pg18.6-ts2.30.1 and update to 2.30.1",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg15/2.28-to-pg18-2.30.empty.json",
+        "seeded": "verify/evidence/pg15/2.28-to-pg18-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg15/2.28-to-pg18-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg15/2.28-to-pg18-2.30.link-seeded.json"
+      },
       "references": []
     },
     {
@@ -1863,11 +2057,19 @@
       "source_ts": "2.30",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verdict": "in_place",
+      "reason": "PostgreSQL 16 -> 17 with pg_upgrade under Patroni: 16 -> 17 at 2.30.1 in pg17.11-ts2.30.1-all. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 17.11; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 16 -> 17 at 2.30.1 with pg17.11-ts2.30.1-all (copy, or --link), then start PostgreSQL 17 on pg17.11-ts2.30.1 and re-clone the replicas",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.30-to-pg17-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.30-to-pg17-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg16/2.30-to-pg17-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg16/2.30-to-pg17-2.30.link-seeded.json"
+      },
       "references": []
     },
     {
@@ -1875,11 +2077,19 @@
       "source_ts": "2.30",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verdict": "in_place",
+      "reason": "PostgreSQL 16 -> 18 with pg_upgrade under Patroni: 16 -> 18 at 2.30.1 in pg18.6-ts2.30.1-all. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 18.6; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 16 -> 18 at 2.30.1 with pg18.6-ts2.30.1-all (copy, or --link), then start PostgreSQL 18 on pg18.6-ts2.30.1 and re-clone the replicas",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg16/2.30-to-pg18-2.30.empty.json",
+        "seeded": "verify/evidence/pg16/2.30-to-pg18-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg16/2.30-to-pg18-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg16/2.30-to-pg18-2.30.link-seeded.json"
+      },
       "references": []
     },
     {
@@ -2082,11 +2292,19 @@
       "source_ts": "2.30",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
+      "verdict": "in_place",
+      "reason": "PostgreSQL 17 -> 18 with pg_upgrade under Patroni: 17 -> 18 at 2.30.1 in pg18.6-ts2.30.1-all. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 18.6; with --link the old data directory is unusable once the new cluster starts.",
+      "steps": [
+        "pg_upgrade PostgreSQL 17 -> 18 at 2.30.1 with pg18.6-ts2.30.1-all (copy, or --link), then start PostgreSQL 18 on pg18.6-ts2.30.1 and re-clone the replicas",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg17/2.30-to-pg18-2.30.empty.json",
+        "seeded": "verify/evidence/pg17/2.30-to-pg18-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg17/2.30-to-pg18-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg17/2.30-to-pg18-2.30.link-seeded.json"
+      },
       "references": []
     },
     {
