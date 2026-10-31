@@ -353,6 +353,14 @@ bash scripts/tsupgrade.sh plan --from-pg 15.13 --from-ts 2.12.2   --target-image
 bash scripts/tsupgrade.sh apply plan.json --report report.json
 ```
 
+**A source between rows takes two plans.** Rows start at a series the
+harness verified from, so a cluster on an older series than any row (pg14
+2.13 towards pg16, say) gets no plan of its own. When two verified rows
+cover the way, the refusal names both: first the same-major update to the
+series a row starts from, then the major change from there. Each plan is the
+route its own records ran; they are not joined into one, because no record
+ran the whole.
+
 **A verified row is verified for its route.** Its records ran one route
 (which image each update and each `pg_upgrade` runs in), and the matrix row
 names it, every image pinned by digest. `plan` builds the row from exactly

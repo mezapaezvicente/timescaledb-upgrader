@@ -419,3 +419,32 @@ def test_cli_verification_run_writes_the_plan_and_announces_itself(offline_profi
     captured = capsys.readouterr()
     assert "VERIFICATION RUN" in captured.err
     assert "VERIFICATION RUN" in captured.out
+
+
+# --------------------------------------------------------------------------
+# A source off the rows (R12): refused, but the two plans are named
+# --------------------------------------------------------------------------
+
+def test_an_off_row_source_is_refused_with_the_two_verified_plans_named():
+    """pg16 2.13 -> 2.30 has no row, but 2.13 -> 2.20 and 2.20 -> 2.30 do.
+    Two plans, each the route its own records ran; never one composed plan."""
+    first_route = {"start": {"image": PG16.reference, "digest": DIGESTS[PG16.reference]},
+                   "steps": [_update(PG16, "2.20.3")]}
+    matrix = Matrix([_entry("16", "2.13", "16", "2.20", "in_place", True, first_route),
+                     _entry("16", "2.20", "16", "2.30", "in_place", True, PG16_ROUTE)])
+    refused = _refusal(source_pg="16.15", source_ts="2.13.0", target_profile=PG16,
+                       matrix=matrix, digests=DIGESTS)
+    text = str(refused)
+    assert refused.only_unestablished
+    assert "two verified rows cover it as two plans" in text
+    assert "(1) pg16/ts2.13 -> pg16/ts2.20" in text and "(2) pg16/ts2.20 -> pg16/ts2.30" in text
+    assert "--from-pg 16.15 --from-ts 2.13.0 --target-image " + PG16.reference in text
+    assert "--from-ts 2.20.3 --target-image " + PG16.reference in text
+
+
+def test_no_two_plans_are_named_when_a_leg_is_not_verified():
+    matrix = Matrix([_entry("16", "2.13", "16", "2.20"),
+                     _entry("16", "2.20", "16", "2.30", "in_place", True, PG16_ROUTE)])
+    refused = _refusal(source_pg="16.15", source_ts="2.13.0", target_profile=PG16,
+                       matrix=matrix, digests=DIGESTS)
+    assert "two plans" not in str(refused)

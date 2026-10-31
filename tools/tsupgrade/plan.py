@@ -307,6 +307,44 @@ def _check_route(
     doc["route_verified"] = True
 
 
+def _verified_in_place(entry: MatrixEntry) -> bool:
+    return entry.is_known and entry.verdict == "in_place"
+
+
+def _plan_command(entry: MatrixEntry, from_pg: str, from_ts: str) -> str:
+    """The `plan` invocation for a verified row, as far as its route says."""
+    steps = (entry.route or {}).get("steps") or []
+    target = next((s["image"] for s in reversed(steps) if s.get("action") == "update"), None)
+    return "tsupgrade plan --from-pg {0} --from-ts {1} --target-image {2}".format(
+        from_pg, from_ts, target or "<an image of pg{0} shipping ts{1}>".format(
+            entry.target_pg, entry.target_ts))
+
+
+def _two_plans(matrix: Matrix, source_pg: str, source_ts: str, target_pg: str, target_ts: str) -> str:
+    """When two verified rows cover the transition between them, how to run
+    it as two plans. Not composed into one: neither row's records ran the
+    whole, and each plan stays the route its own records ran."""
+    for first in matrix.from_source(source_pg, source_ts):
+        if not _verified_in_place(first):
+            continue
+        for second in matrix.from_source(first.target_pg, first.target_ts):
+            try:
+                hit = matrix.lookup(first.target_pg, first.target_ts, target_pg, target_ts)
+            except MatrixError:
+                hit = None
+            if hit is second and _verified_in_place(second):
+                steps = (first.route or {}).get("steps") or []
+                middle = next((s["to"] for s in reversed(steps) if s.get("action") == "update"),
+                              "<the release plan 1 reaches>")
+                return ("; two verified rows cover it as two plans, each run and checked on its "
+                        "own: (1) {0} -> {1}: `{2}`, then (2) {1} -> {3}: `{4}`".format(
+                            first.transition.split(" -> ")[0], second.transition.split(" -> ")[0],
+                            _plan_command(first, source_pg, source_ts),
+                            second.transition.split(" -> ")[1],
+                            _plan_command(second, "<the pg minor plan 1 leaves>", middle)))
+    return ""
+
+
 def _check_matrix(
     out: _Collector,
     matrix: Optional[Matrix],
@@ -328,7 +366,8 @@ def _check_matrix(
     if entry is None:
         out.unestablished(
             "the matrix has no entry for {0}; that is not the same as "
-            "unsupported, but it is not permission either".format(label)
+            "unsupported, but it is not permission either{1}".format(
+                label, _two_plans(matrix, source_pg, source_ts, target_pg, target_ts))
         )
         return None, None
 
@@ -442,6 +481,9 @@ def build_plan(
     else:
         hops, problem = plan_chain(source_ts, target_profile, candidates, major)
     if problem is not None:
+        if not verification_run and (entry is None or entry.route is None):
+            problem += (" (outside a verification run the images come from a verified row's "
+                        "route, and there is none for this transition)")
         out.block(problem)
     elif not cross and hops and len(tgt_ts) >= 3 and hops[-1].image == target_image:
         # plan_chain lands the last hop on the image's ceiling; a tag that pins
