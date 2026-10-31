@@ -130,6 +130,11 @@ Records carry the fields `evidence.py` requires, plus:
 
 | `route` | the route the plan took, as the matrix row cites it: the start image, then each update and `pg_upgrade`, every image pinned by digest |
 
+A record's `log` and `plan.path` point into `verify/out/`, which is
+gitignored: they exist on the machine that ran the row, not in a clone. The
+record carries what the verdict rests on (results, checks, versions, images,
+route, failure lines verbatim); the log is for whoever is debugging a run.
+
 `images[].digest` is the local repository digest of the image that was loaded
 into kind (the one to pin). `pods[].image_id` is what the node reports running:
 for a side-loaded image that is kind's `import-<date>` name with the digest of

@@ -10,8 +10,11 @@ fork of them. Nothing here depends on those charts. The tooling talks to a live
 cluster and a live database, so it works the same whether your StatefulSet came
 from a chart, a fork, Kustomize, or hand-written YAML.
 
-> **Status:** Phases 1–3 are complete. The upgrade and rollback paths
-> themselves are not implemented yet — see [Roadmap](#roadmap).
+> **Status:** preflight, `plan` and `apply` are complete: extension updates,
+> image rollouts and PostgreSQL major upgrades with `pg_upgrade`, each plan
+> pinned to the route its matrix row was verified on. `rollback` undoes a
+> copy-mode major upgrade. Every same-PG row of the matrix and 7 of its 28
+> cross-PG rows are established by running them — see [Roadmap](#roadmap).
 
 ---
 
@@ -531,8 +534,12 @@ tests/             unit tests over the loader, lookup and shipped data
 - [x] **Phase 3** — read-only preflight checks against a live instance
 - [x] **Phase 4** — drift classifier, update-script gates, measured image contents
 - [x] **Phase 5** — `plan` and `apply` (extension updates and image rollouts)
-- [ ] Verification harness and a matrix established by running every row
-- [ ] Rollback execution
+- [x] Verification harness; every same-PG row and 7 of 28 cross-PG rows
+      established by running them with the upgrader (the rest in progress)
+- [x] PostgreSQL major upgrades (`pg_upgrade` under Patroni, copy or `--link`)
+- [x] Rollback of a copy-mode major upgrade (`tsupgrade rollback`)
+- [x] `plan --format script`, for deployments `apply` cannot drive
+- [ ] Rehearsal on a copy of your own data
 - [ ] Maintenance-window estimation
 
 ---
