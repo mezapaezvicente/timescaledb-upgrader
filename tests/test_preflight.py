@@ -20,6 +20,7 @@ from tsupgrade.preflight import (
     _parse_df,
     check_matrix,
     check_pg_minor_floor,
+    check_archiving,
     check_pg_upgrade_headroom,
     render_report,
     worst_status,
@@ -333,3 +334,26 @@ def test_pg_upgrade_headroom_without_ordinal_0_is_unknown():
     result = check_pg_upgrade_headroom(DiskKube(1, 1), PreflightOptions("x", pg_upgrade_link=False),
                                        INSTANCES[:1])
     assert result.status == UNKNOWN
+
+
+class ArchiveKube:
+    def __init__(self, answer, rc=0):
+        self.answer, self.rc = answer, rc
+
+    def psql(self, pod, container, database, user, sql):
+        assert pod == "tsdb-0" and "archive_mode" in sql
+        return self.rc, self.answer, "" if self.rc == 0 else "permission denied"
+
+
+@pytest.mark.parametrize("answer,rc,status", [
+    ("off|", 0, PASS),
+    ("on|pgbackrest --stanza=tsdb archive-push %p", 0, UNKNOWN),
+    ("", 1, UNKNOWN),
+])
+def test_archiving_before_a_pg_upgrade_is_flagged_never_failed(answer, rc, status):
+    """R11: the archive and backups stop matching; the tool cannot see the
+    backup setup, so it says so rather than failing."""
+    result = check_archiving(ArchiveKube(answer, rc), PreflightOptions("x"), INSTANCES)
+    assert result.status == status
+    if rc == 0:
+        assert any("stanza-upgrade" in d for d in result.details)

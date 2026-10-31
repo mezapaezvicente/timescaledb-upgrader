@@ -653,6 +653,9 @@ def render_runbook(plan: Dict[str, Any]) -> str:
                          "the result is accepted".format(step["from_pg"]))
             lines.append("         - replicas are re-created, and Patroni's stored state reset "
                          "(pg_upgrade gives the cluster a new system identifier)")
+            lines.append("         - backups: take a full one before; after, the old ones and "
+                         "the WAL archive do not match the new system identifier "
+                         "(pgBackRest: stanza-upgrade, then a full backup)")
             lines.append("         - restart every instance on {0}".format(
                 pinned(step["run_image"], step.get("run_digest"))))
             lines.append("         - do not run the update_extensions.sql pg_upgrade may write: "

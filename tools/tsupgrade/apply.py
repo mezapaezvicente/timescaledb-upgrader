@@ -89,6 +89,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .plan import PLAN_FORMAT, VERIFICATION, pinned
 from .preflight import (
+    BACKUPS_AT_A_MAJOR_UPGRADE,
     FAIL,
     Instance,
     Kube,
@@ -880,6 +881,7 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
                           lines[-40:])
     # pg_upgrade's own word on copy or link sits mid-log, above the tail.
     output.extend([l for l in lines[:-12] if "user relation files" in l] + lines[-12:])
+    output.append("backups: " + BACKUPS_AT_A_MAJOR_UPGRADE)
     kube.run(["delete", "pod", pod, "--wait=false"])
     state[:] = ["ordinal 0's data directory is upgraded to PostgreSQL {0} and the cluster is "
                 "stopped; do not start it on PostgreSQL {1}'s image. The old directory is "

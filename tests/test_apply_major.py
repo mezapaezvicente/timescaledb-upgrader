@@ -462,3 +462,9 @@ def test_the_upgrade_pod_is_scheduled_like_the_database_pods():
         assert spec[key] == value, key
     assert spec["containers"][0]["resources"] == resources
     assert spec["securityContext"]["runAsUser"] == 1000
+
+
+def test_a_finished_pg_upgrade_reports_what_it_means_for_backups():
+    report = _apply(_plan(), MajorKube())
+    assert any(l.startswith("backups: ") and "stanza-upgrade" in l
+               for l in report["steps"][0]["output"])

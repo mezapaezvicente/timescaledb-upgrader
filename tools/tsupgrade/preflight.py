@@ -758,6 +758,44 @@ def check_pg_upgrade_headroom(
                        "{0} needed, {1} free".format(_human(needed), _human(usage["free"])), details)
 
 
+# What a pg_upgrade does to backups; said by preflight, the runbook and apply.
+BACKUPS_AT_A_MAJOR_UPGRADE = (
+    "pg_upgrade gives the cluster a new system identifier, so backups and the WAL archive "
+    "made before it no longer match: take a full backup before; after, with pgBackRest, run "
+    "stanza-upgrade (--no-online while the database is down) and a new full backup. pgBackRest "
+    "checks the system identifier, so expect archiving to fail, and WAL to accumulate in "
+    "pg_wal, until stanza-upgrade has run. The data directory "
+    "keeps its path here, so pgBackRest's pg1-path does not change")
+
+
+def check_archiving(kube: Kube, opts: PreflightOptions, instances: Sequence[Instance]) -> CheckResult:
+    """Before a pg_upgrade: is WAL archived? If so, backups need attention.
+
+    Not a failure: whether and how the cluster is backed up is outside what
+    this tool can see. pgBackRest's own steps are in its user guide,
+    "Upgrading PostgreSQL" (checked for 2.54-2.59, the versions the images ship).
+    """
+    title = "Backups across pg_upgrade"
+    primary = next((i for i in instances if not i.error and i.role == "primary"), None)
+    if primary is None:
+        return CheckResult("archiving", title, UNKNOWN, "no reachable primary", [])
+    rc, out, err = kube.psql(primary.pod, opts.container, opts.admin_db, opts.psql_user,
+                             "SELECT current_setting('archive_mode') || '|' || "
+                             "current_setting('archive_command')")
+    if rc != 0:
+        return CheckResult("archiving", title, UNKNOWN, "cannot read archive_mode",
+                           [(err or out).strip()[:200]])
+    mode, _, command = out.strip().partition("|")
+    if mode == "off":
+        return CheckResult("archiving", title, PASS,
+                           "archive_mode is off; no WAL archive to break",
+                           [BACKUPS_AT_A_MAJOR_UPGRADE])
+    return CheckResult(
+        "archiving", title, UNKNOWN,
+        "archive_mode is {0}: the archive and backups will not match the upgraded cluster".format(mode),
+        ["archive_command: {0}".format(command or "(empty)"), BACKUPS_AT_A_MAJOR_UPGRADE])
+
+
 def check_permissions(
     kube: Kube, opts: PreflightOptions, instances: Sequence[Instance]
 ) -> CheckResult:
@@ -1336,6 +1374,7 @@ def run_preflight(opts: PreflightOptions) -> List[CheckResult]:
     results.append(check_disk_headroom(kube, opts, instances))
     if opts.pg_upgrade_link is not None:
         results.append(check_pg_upgrade_headroom(kube, opts, instances))
+        results.append(check_archiving(kube, opts, instances))
     results.append(check_permissions(kube, opts, instances))
     results.append(check_drift(kube, opts, instances))
     results.append(check_gates(kube, opts, instances, target_ts))

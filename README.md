@@ -400,6 +400,15 @@ bash scripts/tsupgrade.sh plan --from-pg 12.22 --from-ts 2.11.2 \
   --target-image timescale/timescaledb-ha:pg16.15-ts2.30.1 --output plan.json
 ```
 
+**Backups break at a major upgrade.** `pg_upgrade` gives the cluster a new
+system identifier, so backups and the WAL archive made before no longer match
+it. Take a full backup before. Afterwards, with pgBackRest, run
+`stanza-upgrade` (`--no-online` while the database is down) and take a new
+full backup (pgBackRest's "Upgrading PostgreSQL", for the 2.54–2.59 the images
+ship). The data directory keeps its path, so `pg1-path` does not change.
+Preflight flags `archive_mode = on` before every `pg_upgrade`, and the
+runbook and `apply`'s report say the same.
+
 Every `pg_upgrade` is preceded by a preflight against the image the cluster
 restarts on, which also checks ordinal 0's disk: a copy needs the data
 directory's size free again (WAL included), `--link` only a margin. Each hop
