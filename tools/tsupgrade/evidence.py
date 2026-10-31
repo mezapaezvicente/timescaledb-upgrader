@@ -88,11 +88,12 @@ __all__ = [
 ]
 
 # What decides how a verification run goes. A record made before a change to
-# any of these ran code that no longer ships.
+# any of these ran code that no longer ships. Of the scripts, only the one
+# apply runs: rollback_swap.sh runs only after a route has finished.
 VERDICT_CODE = (
     "tools/tsupgrade/plan.py", "tools/tsupgrade/apply.py", "tools/tsupgrade/majors.py",
     "tools/tsupgrade/drift.py", "tools/tsupgrade/gates.py", "tools/tsupgrade/preflight.py",
-    "tools/tsupgrade/steps.py", "tools/tsupgrade/scripts",
+    "tools/tsupgrade/steps.py", "tools/tsupgrade/scripts/pg_upgrade.sh",
 )
 
 EVIDENCE_FORMAT = 1

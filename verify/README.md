@@ -113,7 +113,8 @@ release is tagged, every row is run again so all records name one commit;
 `tests/test_shipped_data.py` then fails for any cited record from a dirty
 tree, or one whose commit has been followed by a change to the code that
 decides a run (`evidence.VERDICT_CODE`: `plan`, `apply`, `steps`, `majors`,
-`drift`, `gates`, `preflight` and `tools/tsupgrade/scripts/`). The check is
+`drift`, `gates`, `preflight` and the `pg_upgrade.sh` script `apply` runs;
+not `rollback`, which runs only after a route has finished). The check is
 skipped until the first `v*` tag. `--resume` uses the same rule.
 
 **What is not a row result.** If staging or seeding fails, that is the harness
