@@ -28,6 +28,7 @@ from tsupgrade.contents import (
     measure_image,
     merge_measurements,
     parse_measurement,
+    parse_system,
 )
 from tsupgrade.drift import (
     INDETERMINATE,
@@ -314,3 +315,9 @@ def test_load_contents_rejects_a_malformed_file(tmp_path):
     path.write_text("[]")
     with pytest.raises(ContentsError):
         load_contents(path)
+
+
+def test_the_probe_also_says_which_os_and_glibc_an_image_has():
+    out = "## os Debian GNU/Linux 10 (buster)\n## glibc 2.28\n== 12\n-- sharedir\n"
+    assert parse_system(out) == {"os": "Debian GNU/Linux 10 (buster)", "glibc": "2.28"}
+    assert parse_system("== 12\n") == {}

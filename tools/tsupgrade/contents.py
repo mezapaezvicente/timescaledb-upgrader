@@ -60,6 +60,7 @@ __all__ = [
     "measure_image",
     "merge_measurements",
     "parse_measurement",
+    "parse_system",
 ]
 
 CONTENTS_SCHEMA_VERSION = 1
@@ -68,12 +69,16 @@ _METHOD = (
     "docker run --rm --entrypoint sh <image>, then for each PostgreSQL major "
     "under /usr/lib/postgresql: ls of share/postgresql/<major>/extension and "
     "lib/postgresql/<major>/lib, `postgres --version`, and default_version "
-    "from timescaledb.control. Installable = install script AND shared object."
+    "from timescaledb.control. Installable = install script AND shared object. "
+    "Also the OS (/etc/os-release) and the glibc version (ldd --version): libc "
+    "collations sort by glibc's rules, so a glibc change can reorder text indexes."
 )
 
 # Run inside the image. Prints one block per PostgreSQL major. Only `ls`,
 # `sed` and `postgres --version` -- no server is started.
 _PROBE = r"""
+echo "## os $(sed -n 's/^PRETTY_NAME=//p' /etc/os-release | tr -d '"')"
+echo "## glibc $(ldd --version 2>&1 | head -n 1 | awk '{print $NF}')"
 for m in $(ls /usr/lib/postgresql); do
   echo "== $m"
   echo "-- server_version"; /usr/lib/postgresql/$m/bin/postgres --version
@@ -247,6 +252,16 @@ def parse_measurement(output: str) -> Dict[str, Dict[str, Any]]:
     return result
 
 
+def parse_system(output: str) -> Dict[str, str]:
+    """``{os, glibc}`` from the probe's ``## os`` and ``## glibc`` lines."""
+    found = {}
+    for line in output.splitlines():
+        key, _, value = line.strip()[3:].partition(" ") if line.startswith("## ") else ("", "", "")
+        if key in ("os", "glibc") and value.strip():
+            found[key] = value.strip()
+    return found
+
+
 Runner = Callable[[Sequence[str]], str]
 
 
@@ -273,16 +288,15 @@ def measure_image(reference: str, run: Runner = _docker) -> Dict[str, Any]:
         repo_digests = []
     digest = repo_digests[0].split("@", 1)[1] if repo_digests else None
 
-    per_major = parse_measurement(
-        run(["run", "--rm", "--entrypoint", "sh", reference, "-c", _PROBE])
-    )
+    output = run(["run", "--rm", "--entrypoint", "sh", reference, "-c", _PROBE])
+    per_major = parse_measurement(output)
     if not per_major:
         raise ContentsError("{0}: no installable TimescaleDB version found".format(reference))
-    return {
+    system = parse_system(output)
+    return dict({
         "digest": digest,
         "measured_at": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-        "pg": per_major,
-    }
+    }, **system, pg=per_major)
 
 
 def merge_measurements(

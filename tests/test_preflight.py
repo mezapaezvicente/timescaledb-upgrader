@@ -23,6 +23,7 @@ from tsupgrade.preflight import (
     check_matrix,
     check_pg_minor_floor,
     check_archiving,
+    check_collation,
     check_extensions,
     check_pg_upgrade_headroom,
     render_report,
@@ -429,3 +430,64 @@ def test_an_image_measured_before_extensions_were_recorded_is_unknown(tmp_path):
     result = check_extensions(ExtKube(), PreflightOptions(RUN13, contents_path=str(path)),
                               EXT_INSTANCES, "13.22")
     assert result.status == UNKNOWN
+
+
+# --------------------------------------------------------------------------
+# Collation across a glibc change (R8)
+# --------------------------------------------------------------------------
+
+OLD_IMG = "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2"
+NEW_IMG = "timescale/timescaledb-ha:pg12.22-ts2.11.2"
+
+
+class CollationKube:
+    def __init__(self, databases, running=OLD_IMG + "@sha256:" + "0" * 64):
+        self.databases, self.running = databases, running
+
+    def json(self, args, namespaced=True):
+        return {"items": [{"spec": {"containers": [{"name": "timescaledb", "image": self.running}]}}]}
+
+    def psql(self, pod, container, database, user, sql):
+        assert "datlocprovider" not in sql  # a PostgreSQL 12 primary
+        return 0, "\n".join(self.databases), ""
+
+
+def _glibc_contents(tmp_path, before="2.28", after="2.35"):
+    path = tmp_path / "glibc.json"
+    path.write_text(json.dumps({"repository": "timescale/timescaledb-ha", "images": {
+        "pg12.6-ts2.1.1-p2": {"glibc": before, "pg": {}},
+        "pg12.22-ts2.11.2": {"glibc": after, "pg": {}}}}))
+    return str(path)
+
+
+PG12_PRIMARY = [Instance("tsdb-0", role="primary", server_version="12.22")]
+
+
+def test_a_glibc_change_under_a_libc_collation_warns_and_names_the_check(tmp_path):
+    kube = CollationKube(["app|en_US.UTF-8|c", "postgres|C.UTF-8|c"])
+    result = check_collation(kube, PreflightOptions(NEW_IMG, contents_path=_glibc_contents(tmp_path)),
+                             PG12_PRIMARY)
+    assert result.status == UNKNOWN
+    assert "2.28 -> 2.35" in result.summary
+    assert any("app (en_US.UTF-8)" in d for d in result.details)
+    assert not any("postgres (" in d for d in result.details)
+    assert any("bt_index_check" in d and "REINDEX" in d for d in result.details)
+
+
+@pytest.mark.parametrize("databases,after", [
+    (["app|en_US.UTF-8|c"], "2.28"),               # same glibc
+    (["app|C.UTF-8|c", "x|POSIX|c", "y|C|c"], "2.35"),  # code-point order
+])
+def test_no_glibc_change_or_no_libc_collation_passes(tmp_path, databases, after):
+    result = check_collation(CollationKube(databases),
+                             PreflightOptions(NEW_IMG, contents_path=_glibc_contents(tmp_path, after=after)),
+                             PG12_PRIMARY)
+    assert result.status == PASS, result.details
+
+
+def test_an_image_without_a_measured_glibc_is_unknown(tmp_path):
+    path = tmp_path / "c.json"
+    path.write_text(json.dumps({"repository": "timescale/timescaledb-ha", "images": {}}))
+    result = check_collation(CollationKube(["app|en_US.UTF-8|c"]),
+                             PreflightOptions(NEW_IMG, contents_path=str(path)), PG12_PRIMARY)
+    assert result.status == UNKNOWN and "not measured" in result.summary

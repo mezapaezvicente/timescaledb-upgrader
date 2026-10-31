@@ -904,6 +904,81 @@ def check_extensions(
                        details)
 
 
+def _code_point_order(collate: str) -> bool:
+    """C, POSIX and C.<encoding> sort by byte value, whatever glibc says."""
+    return collate in ("C", "POSIX") or collate.startswith("C.")
+
+
+def _running_image(kube: Kube, opts: PreflightOptions) -> Optional[str]:
+    pods = kube.json(["get", "pods", "-l", opts.selector]).get("items", [])
+    for pod in pods:
+        for c in pod.get("spec", {}).get("containers") or []:
+            if c.get("name") == opts.container and c.get("image"):
+                return c["image"].split("@", 1)[0]
+    return None
+
+
+def check_collation(kube: Kube, opts: PreflightOptions, instances: Sequence[Instance]) -> CheckResult:
+    """Will the target image sort text the way the indexes were built?
+
+    A database whose collation comes from glibc (libc provider, not C or
+    POSIX) has its text indexes ordered by that glibc's rules; an image
+    with another glibc can order some strings differently, and those
+    indexes then return wrong answers until rebuilt. Measured: the Debian
+    10 tags carry glibc 2.28, the Ubuntu 22.04 ones 2.35. A warning, not a
+    refusal: what changes depends on the data. ICU collations depend on the
+    ICU version, which is not measured.
+    """
+    title = "Collation across the image change"
+    primary = next((i for i in instances if not i.error and i.role == "primary"), None)
+    if primary is None:
+        return CheckResult("collation", title, UNKNOWN, "no reachable primary", [])
+    try:
+        contents = load_contents(opts.contents_path)
+        current = _running_image(kube, opts)
+    except (ContentsError, PreflightError) as exc:
+        return CheckResult("collation", title, UNKNOWN, "cannot compare: {0}".format(exc), [])
+    before = (contents.entry(current) or {}).get("glibc") if current else None
+    after = (contents.entry(opts.target_image) or {}).get("glibc")
+    if not before or not after:
+        return CheckResult("collation", title, UNKNOWN, "glibc not measured for {0}".format(
+            " and ".join(r for r, g in ((current or "the running image", before),
+                                        (opts.target_image, after)) if not g)), [])
+    try:
+        major = parse_version(primary.server_version or "")[0]
+    except (InvalidVersion, IndexError):
+        major = 0
+    provider = "datlocprovider" if major >= 15 else "'c'"
+    rc, out, err = kube.psql(primary.pod, opts.container, opts.admin_db, opts.psql_user,
+                             "SELECT datname || '|' || datcollate || '|' || {0} FROM pg_database "
+                             "WHERE datallowconn".format(provider))
+    if rc != 0:
+        return CheckResult("collation", title, UNKNOWN, "cannot read the databases' collations",
+                           [(err or out).strip()[:200]])
+    affected, icu = [], []
+    for line in out.splitlines():
+        name, _, rest = line.strip().partition("|")
+        collate, _, kind = rest.partition("|")
+        if kind == "i":
+            icu.append(name)
+        elif kind == "c" and not _code_point_order(collate):
+            affected.append("{0} ({1})".format(name, collate))
+    details = ["glibc {0} on {1} -> {2} on {3}".format(before, current, after, opts.target_image)]
+    if icu:
+        details.append("ICU collations in {0}: the ICU version is not measured".format(", ".join(icu)))
+    if before == after or not affected:
+        return CheckResult("collation", title, UNKNOWN if icu else PASS,
+                           "same glibc" if before == after else "no database sorts by glibc's rules",
+                           details)
+    details.append("databases sorting by glibc's rules: {0}".format(", ".join(affected)))
+    details.append("after the upgrade, check their text indexes (amcheck: SELECT bt_index_check(oid) "
+                   "for each btree index on a text column) or REINDEX them; column-level "
+                   "collations are not inspected here")
+    return CheckResult("collation", title, UNKNOWN,
+                       "glibc changes {0} -> {1} under {2} database(s) with libc collations".format(
+                           before, after, len(affected)), details)
+
+
 def check_permissions(
     kube: Kube, opts: PreflightOptions, instances: Sequence[Instance]
 ) -> CheckResult:
@@ -1481,6 +1556,7 @@ def run_preflight(opts: PreflightOptions) -> List[CheckResult]:
     results.append(check_pg_minor_floor(instances, target_pg, target_ts))
     results.append(check_disk_headroom(kube, opts, instances))
     results.append(check_extensions(kube, opts, instances, target_pg))
+    results.append(check_collation(kube, opts, instances))
     if opts.pg_upgrade_link is not None:
         results.append(check_pg_upgrade_headroom(kube, opts, instances))
         results.append(check_archiving(kube, opts, instances))

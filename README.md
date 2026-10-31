@@ -408,6 +408,15 @@ measured (`make image-contents`); before a `pg_upgrade`, against the image it
 runs in as well. A missing library fails the preflight, before anything has
 stopped.
 
+**Encoding, locale and collation.** The `initdb` before `pg_upgrade` takes
+the old cluster's encoding, locale and locale provider from its `template0`,
+so `pg_upgrade --check` (13–15) does not refuse it mid-outage. Separately,
+the images do not share one glibc: the Debian 10 tags (`pg11.11-ts2.1.1-p0`,
+`pg12.6-*`) carry 2.28, the Ubuntu 22.04 ones 2.35. A database with a libc
+collation other than C/POSIX sorts its text indexes by glibc's rules, so
+preflight warns when a hop changes glibc under one, and names the check to
+run afterwards (`amcheck`'s `bt_index_check`, or `REINDEX`).
+
 **Backups break at a major upgrade.** `pg_upgrade` gives the cluster a new
 system identifier, so backups and the WAL archive made before no longer match
 it. Take a full backup before. Afterwards, with pgBackRest, run
