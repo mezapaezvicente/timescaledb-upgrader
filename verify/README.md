@@ -74,7 +74,9 @@ reach (the five `→ 2.30` rows below pg16) are listed as skipped.
 1. `tsupgrade plan --verification-run`, offline. If it refuses, the refusal
    is the row's record (`stage: plan`) and no cluster is touched.
 2. The cluster is brought onto the row's first image. If it runs anything
-   else, its namespace is deleted and recreated with `scripts/up.sh`. Every
+   else, or the previous run changed PostgreSQL major (which leaves
+   `pg_upgrade`'s old directory, or a rollback's set-aside one, on the
+   disk), its namespace is deleted and recreated with `scripts/up.sh`. Every
    image the plan names is side-loaded into the node first.
 3. Database `verify` is dropped, recreated, and the source release installed
    with `CREATE EXTENSION … VERSION` (in a separate session from the `DROP`).

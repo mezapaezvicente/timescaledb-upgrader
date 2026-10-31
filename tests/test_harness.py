@@ -263,6 +263,33 @@ def test_the_make_up_cluster_is_refused():
         harness.Cluster("tsdb-upgrader", 2, PG15)
 
 
+def test_a_run_after_a_major_change_gets_a_fresh_namespace(monkeypatch):
+    """A rollback ends healthy on the start image, but its disk holds the
+    set-aside directory; the next mode must not inherit it (measured: the
+    rollback-seeded run after rollback-empty found it and failed)."""
+    monkeypatch.setenv("HARNESS_BASH", "bash")
+    cluster = harness.Cluster("tsdb-verify", 2, PG15)
+    calls = []
+    monkeypatch.setattr(cluster, "exists", lambda: True)
+    monkeypatch.setattr(cluster, "on", lambda image: True)
+    monkeypatch.setattr(cluster, "isolate", lambda log: calls.append("isolate"))
+    monkeypatch.setattr(cluster, "load", lambda image, log: calls.append("load"))
+    monkeypatch.setattr(cluster, "kubectl", lambda *a, **k: (calls.append(a[0]), (0, "", ""))[1])
+    monkeypatch.setattr(harness, "_run", lambda *a, **k: (calls.append("up.sh"), (0, "", ""))[1])
+
+    class Log:
+        def section(self, text):
+            calls.append("reset")
+
+    cluster.ensure("img", Log())
+    assert calls == ["isolate"]
+    calls.clear()
+    cluster.used = True
+    cluster.ensure("img", Log())
+    assert calls[:3] == ["reset", "load", "delete"] and "up.sh" in calls
+    assert cluster.used is False
+
+
 def test_resume_skips_only_clean_valid_records(tmp_path):
     from tsupgrade.evidence import build_record, record_path, write_record
 

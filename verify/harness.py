@@ -13,7 +13,8 @@ and then, once per mode (empty, seeded):
 
 1. ``tsupgrade plan`` -- offline; a refusal is the row's result, no cluster
 2. brings the kind cluster onto the row's first image (a fresh namespace when
-   it runs anything else) and loads every image the plan names
+   it runs anything else, or after a major change, which leaves directories
+   on the disk) and loads every image the plan names
 3. stages database ``verify`` at the exact source release, seeds it or not
 4. ``tsupgrade apply`` with the verification acknowledgement
 5. reads ``extversion`` back and, on a seeded run, runs ``check.sql``
@@ -588,6 +589,11 @@ class Cluster:
         if not bash:
             raise HarnessError("bash not found on PATH (set HARNESS_BASH)")
         self.bash = bash
+        # A major change leaves directories on ordinal 0's disk (pg_upgrade's
+        # old one, or rollback's set-aside); a run after it starts on a fresh
+        # namespace even when the cluster looks healthy on the right image,
+        # as it does after a rollback.
+        self.used = False
 
     def kubectl(self, *args: str, input: Optional[str] = None, timeout: float = 120,
                 log: Optional[Log] = None) -> Tuple[int, str, str]:
@@ -690,10 +696,11 @@ class Cluster:
         """Leave the cluster healthy on ``image``, TimescaleDB in no database
         but the row's. Isolation runs every time: a healthy cluster says
         nothing about whether an earlier setup got that far."""
-        if self.exists() and self.on(image):
+        if self.exists() and not self.used and self.on(image):
             self.isolate(log)
             return
         log.section("reset cluster onto " + image)
+        self.used = False
         if not self.exists():
             # Created here rather than by up.sh, so the image is side-loaded
             # before any pod starts pulling it from the registry.
@@ -849,6 +856,7 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         cluster.ensure(pin(run.start_image, contents), log)
         for image in images:
             cluster.load(pin(image, contents), log)
+        cluster.used = run.cross
         baseline = stage(cluster, run, base, log)
     except HarnessError as exc:
         log.write("HARNESS ERROR: {0}".format(exc))
