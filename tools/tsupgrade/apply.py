@@ -644,7 +644,9 @@ _DCS_SUFFIXES = ("", "-config", "-leader", "-failover", "-sync")
 
 
 def _patroni_scope(kube: Kube, pod: str, container: str) -> str:
-    """The Patroni scope, as Patroni itself reports it."""
+    """The Patroni scope, as Patroni itself reports it. Both sources were
+    checked on Patroni 2.0.2 (the pg11 image) and 4.0.5: ``patronictl list
+    -f json`` names it per member, REST ``/patroni`` as ``patroni.scope``."""
     rc, out, _ = kube.exec(pod, container, ["patronictl", "list", "-f", "json"])
     try:
         clusters = {m.get("Cluster") for m in json.loads(out)} if rc == 0 else set()
