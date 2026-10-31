@@ -49,6 +49,7 @@ class FakeKube:
             })
         self.writes: List[str] = []
         self.alter_error = None
+        self.strategy = "OnDelete"
 
     def _pod_json(self, pod):
         return {
@@ -70,8 +71,9 @@ class FakeKube:
         if args[:2] == ["get", "pods"]:
             return {"items": [self._pod_json(p) for p in self.pods]}
         if args[:2] == ["get", "statefulset"]:
-            return {"spec": {"template": {"spec": {"containers": [
-                {"name": "timescaledb", "image": self.template}]}}}}
+            return {"spec": {"updateStrategy": {"type": self.strategy},
+                             "template": {"spec": {"containers": [
+                                 {"name": "timescaledb", "image": self.template}]}}}}
         raise AssertionError("unexpected kubectl json {0}".format(args))
 
     def run(self, args, namespaced=True):
@@ -387,3 +389,21 @@ def test_cli_apply_exit_codes(tmp_path, monkeypatch, capsys):
                      "--report", str(report_path)])
     assert code == cli.EXIT_OK
     assert json.loads(report_path.read_text())["result"] == "pass"
+
+
+@pytest.mark.parametrize("strategy", ["RollingUpdate", None])
+def test_a_statefulset_the_controller_rolls_itself_is_refused(strategy):
+    """R10: with RollingUpdate (also the default when unset), set image makes
+    the controller replace pods while apply deletes them."""
+    kube = FakeKube(PG15_13, "15.18", {"verify": "2.20.3"})
+    kube.strategy = strategy
+    with pytest.raises(ApplyRefused) as info:
+        _run(_plan(), kube)
+    assert kube.writes == []
+    assert "updates with RollingUpdate" in str(info.value)
+    assert '"type":"OnDelete"' in str(info.value)
+
+
+def test_an_on_delete_statefulset_is_accepted():
+    kube = FakeKube(PG15_13, "15.18", {"verify": "2.20.3"})
+    assert apply_mod.check_statefulset(kube, ApplyOptions()) == []

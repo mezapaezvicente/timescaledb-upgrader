@@ -27,7 +27,10 @@ Before the first step it refuses outright, having written nothing, when:
 * an ``update_extension`` step carries SQL other than the one statement its own
   ``to`` field implies. The plan is a file and files get edited; ``apply``
   executes upgrades, not whatever SQL a document contains;
-* a digest in the plan is not a ``sha256:`` digest.
+* a digest in the plan is not a ``sha256:`` digest;
+* the StatefulSet does not update ``OnDelete``. With ``RollingUpdate`` the
+  controller replaces pods itself, the primary included, as soon as
+  ``kubectl set image`` runs, racing apply's own deletions.
 
 Images run by digest. A step's ``digest`` (and a major upgrade's
 ``run_digest``) turns its image into ``image@sha256:...`` for every rollout,
@@ -252,6 +255,23 @@ def check_plan(plan: Any, opts: ApplyOptions) -> List[str]:
             if not isinstance(step.get("link"), bool):
                 reasons.append("steps[{0}]: major_upgrade needs link true or false".format(i))
     return reasons
+
+
+def check_statefulset(kube: Kube, opts: ApplyOptions) -> List[str]:
+    """apply rolls pods itself, so the controller must not: ``OnDelete`` only."""
+    try:
+        sts = kube.json(["get", "statefulset", opts.statefulset])
+    except PreflightError as exc:
+        return ["cannot read statefulset/{0}: {1}".format(opts.statefulset, exc)]
+    # Kubernetes' default, when the field is absent, is RollingUpdate.
+    kind = ((sts.get("spec") or {}).get("updateStrategy") or {}).get("type") or "RollingUpdate"
+    if kind == "OnDelete":
+        return []
+    return ["statefulset/{0} updates with {1}: kubectl set image would make the controller "
+            "replace pods itself, the primary included, while apply deletes them in its own "
+            "order. Switch it first: kubectl -n {2} patch statefulset {0} --type merge -p "
+            "'{{\"spec\":{{\"updateStrategy\":{{\"type\":\"OnDelete\"}}}}}}'".format(
+                opts.statefulset, kind, opts.namespace)]
 
 
 def _same_pg(planned: str, running: Optional[str]) -> bool:
@@ -997,6 +1017,7 @@ def apply_plan(
     if found.status == FAIL:
         raise ApplyRefused(["cannot read the cluster: {0}".format(found.summary)] + found.details)
     reasons, databases = check_source(plan, instances, opts)
+    reasons += check_statefulset(kube, opts)
     if reasons:
         raise ApplyRefused(reasons)
 

@@ -372,7 +372,10 @@ every database on every instance reports the new version.
 
 `apply` refuses, having written nothing, when the cluster is not in the state
 the plan was made from, when an update step carries SQL other than the one
-statement its version implies, and when the plan was built with
+statement its version implies, when the StatefulSet does not update
+`OnDelete` (with `RollingUpdate` the controller would replace pods itself,
+the primary included, while `apply` deletes them in its own order), and when
+the plan was built with
 `--verification-run` unless `--acknowledge-verification-run` is also given.
 It stops at the first failing step, keeps the error verbatim, and reports what
 it had already done. It never retries or rolls back on its own.

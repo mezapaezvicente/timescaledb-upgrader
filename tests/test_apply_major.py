@@ -49,6 +49,7 @@ class MajorKube(FakeKube):
         if args[:2] == ["get", "statefulset"]:
             return {"spec": {
                 "replicas": self.replicas,
+                "updateStrategy": {"type": "OnDelete"},
                 "template": {"spec": {
                     "securityContext": {"runAsUser": 1000, "fsGroup": 1000},
                     "containers": [{"name": "timescaledb", "image": self.template,
