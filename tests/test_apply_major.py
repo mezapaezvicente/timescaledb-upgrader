@@ -542,3 +542,16 @@ def test_the_scope_falls_back_to_patronis_rest_api():
     kube.exec = older_patronictl
     report = _apply(_plan(), kube)
     assert report["result"] == "pass", report.get("failure")
+
+
+def test_a_finished_major_upgrade_reports_what_a_rollback_needs():
+    """R14: structured facts in the report, not text to parse back."""
+    report = _apply(_plan(), MajorKube())
+    detail = report["steps"][0]["detail"]
+    assert detail == {
+        "from_pg": 12, "to_pg": 13, "link": False, "old_image": OLD, "run_image": NEW,
+        "data": "/home/postgres/pgdata/data", "kept": "/home/postgres/pgdata/data.pg12",
+        "replicas": 2, "claim": "pgdata", "scope": "tsdb",
+        "system_identifier_before": "7000000000000000001",
+    }
+    assert "detail" not in report["steps"][1]

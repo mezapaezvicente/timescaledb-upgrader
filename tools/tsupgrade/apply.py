@@ -167,15 +167,30 @@ class StepResult:
     status: str
     summary: str
     output: List[str] = field(default_factory=list)
+    detail: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        doc = {
             "hop": self.hop,
             "action": self.action,
             "status": self.status,
             "summary": self.summary,
             "output": list(self.output),
         }
+        if self.detail is not None:
+            doc["detail"] = dict(self.detail)
+        return doc
+
+
+@dataclass
+class _Outcome:
+    """What a step function returns: its own status, not one read from its text."""
+
+    summary: str
+    output: List[str] = field(default_factory=list)
+    status: str = DONE
+    # Structured facts a later command needs (rollback reads a major upgrade's).
+    detail: Optional[Dict[str, Any]] = None
 
 
 class _StepFailed(Exception):
@@ -426,7 +441,7 @@ def _step_preflight(
     step: Dict[str, Any],
     opts: ApplyOptions,
     preflight: Callable[[PreflightOptions], Sequence[Any]],
-) -> Tuple[str, List[str]]:
+) -> _Outcome:
     results = preflight(
         PreflightOptions(
             target_image=step["image"],
@@ -456,10 +471,10 @@ def _step_preflight(
         raise _StepFailed(
             "preflight failed: {0}".format(", ".join(r.name for r in failed)), detail
         )
-    return "{0} checks, none failed".format(len(results)), lines
+    return _Outcome("{0} checks, none failed".format(len(results)), lines)
 
 
-def _step_ensure_image(step: Dict[str, Any], cluster: _Cluster) -> Tuple[str, List[str]]:
+def _step_ensure_image(step: Dict[str, Any], cluster: _Cluster) -> _Outcome:
     image = pinned(step["image"], step.get("digest"))
     opts = cluster.opts
     sts = cluster.kube.json(["get", "statefulset", opts.statefulset])
@@ -470,7 +485,7 @@ def _step_ensure_image(step: Dict[str, Any], cluster: _Cluster) -> Tuple[str, Li
     pods = cluster.pods()
     stale = [p for p in pods if cluster.pod_image(p) != image]
     if template_image == image and not stale:
-        return "already running {0}".format(image), []
+        return _Outcome("already running {0}".format(image), status=SKIPPED)
 
     output: List[str] = []
     try:
@@ -481,7 +496,7 @@ def _step_ensure_image(step: Dict[str, Any], cluster: _Cluster) -> Tuple[str, Li
         summary = exc.summary if isinstance(exc, _StepFailed) else str(exc)
         extra = exc.output if isinstance(exc, _StepFailed) else []
         raise _StepFailed(summary, output + extra) from exc
-    return "rolled {0} pod(s) onto {1}".format(len(stale), image), output
+    return _Outcome("rolled {0} pod(s) onto {1}".format(len(stale), image), output)
 
 
 def _roll(
@@ -540,7 +555,7 @@ def _roll(
 
 def _step_update(
     step: Dict[str, Any], cluster: _Cluster, databases: Sequence[str]
-) -> Tuple[str, List[str]]:
+) -> _Outcome:
     primary = cluster.primary()
     if primary is None:
         raise _StepFailed("no ready primary to run ALTER EXTENSION on")
@@ -554,12 +569,12 @@ def _step_update(
                 [line for line in (err or out).splitlines() if line.strip()],
             )
         output.append(db)
-    return "updated {0} database(s) to {1}".format(len(databases), step["to"]), [
+    return _Outcome("updated {0} database(s) to {1}".format(len(databases), step["to"]), [
         "{0}: {1}".format(db, step["sql"]) for db in output
-    ]
+    ])
 
 
-def _step_cycle(cluster: _Cluster, databases: Sequence[str]) -> Tuple[str, List[str]]:
+def _step_cycle(cluster: _Cluster, databases: Sequence[str]) -> _Outcome:
     names = "ARRAY[{0}]::name[]".format(", ".join(_literal(d) for d in databases))
     sql = (
         "SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity "
@@ -573,12 +588,12 @@ def _step_cycle(cluster: _Cluster, databases: Sequence[str]) -> Tuple[str, List[
         if rc != 0:
             raise _StepFailed("cannot terminate sessions on {0}".format(name), [err or out])
         output.append("{0}: {1} session(s) terminated".format(name, out.strip() or "0"))
-    return "sessions cycled on {0} instance(s)".format(len(output)), output
+    return _Outcome("sessions cycled on {0} instance(s)".format(len(output)), output)
 
 
 def _step_verify(
     step: Dict[str, Any], cluster: _Cluster, databases: Sequence[str]
-) -> Tuple[str, List[str]]:
+) -> _Outcome:
     expect = step["expect"]
     sql = "SELECT coalesce((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '')"
     pods = [p["metadata"]["name"] for p in cluster.pods()]
@@ -599,9 +614,10 @@ def _step_verify(
     except _StepFailed as exc:
         wrong = ["{0}/{1}: {2}".format(p, d, v) for (p, d), v in sorted(seen.items()) if v != expect]
         raise _StepFailed("not every database reports {0}".format(expect), wrong) from exc
-    return "{0} database(s) x {1} instance(s) report {2}".format(len(databases), len(pods), expect), [
+    return _Outcome("{0} database(s) x {1} instance(s) report {2}".format(
+        len(databases), len(pods), expect), [
         "{0}/{1}: {2}".format(p, d, v) for (p, d), v in sorted(seen.items())
-    ]
+    ])
 
 
 # Runs in the pg_upgrade pod, as the StatefulSet's user, on ordinal 0's disk.
@@ -660,7 +676,7 @@ echo "old data directories on this disk, to remove once the result is accepted: 
 """
 
 
-def _step_major_upgrade(step: Dict[str, Any], cluster: _Cluster) -> Tuple[str, List[str]]:
+def _step_major_upgrade(step: Dict[str, Any], cluster: _Cluster) -> _Outcome:
     opts = cluster.opts
     kube = cluster.kube
     output: List[str] = []
@@ -865,6 +881,8 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
         raise _StepFailed("container {0} does not mount {1}".format(opts.container, claim))
     first = "{0}-0".format(opts.statefulset)
     pod = "{0}-pg-upgrade-{1}-{2}".format(opts.statefulset, old, new)
+    # What the cluster ran before, for a rollback to start it on again.
+    template_image = container.get("image")
 
     # 0. An upgrade pod left from an earlier run may still be working on the
     # disk, or holds the only account of what happened to it: never delete it.
@@ -902,7 +920,8 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
         ", ".join("{0}={1}".format(k.lower(), v) for k, v in locale.items() if v)))
     rc, out, _ = cluster.psql(primary, opts.admin_db,
                               "SELECT system_identifier FROM pg_control_system()")
-    output.append("before: primary {0}, system identifier {1}".format(primary, out.strip()))
+    sysid_before = out.strip()
+    output.append("before: primary {0}, system identifier {1}".format(primary, sysid_before))
     if primary != first:
         rc, out, err = kube.exec(primary, opts.container, [
             "patronictl", "switchover", "--leader", primary, "--candidate", first, "--force"])
@@ -1028,10 +1047,17 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
         raise _StepFailed("the primary runs PostgreSQL {0}, not {1}".format(major or "?", new))
     output.append("after: primary {0} on PostgreSQL {1}, system identifier {2}".format(
         primary, major, sysid))
-    return "PostgreSQL {0} -> {1}; {2} instance(s) on {3}".format(old, new, replicas, run_image), output
+    return _Outcome("PostgreSQL {0} -> {1}; {2} instance(s) on {3}".format(
+        old, new, replicas, run_image), output, detail={
+            "from_pg": old, "to_pg": new, "link": bool(step["link"]),
+            "old_image": template_image, "run_image": run_image,
+            "data": opts.data_dir, "kept": "{0}.pg{1}".format(opts.data_dir, old),
+            "replicas": replicas, "claim": claim, "scope": scope,
+            "system_identifier_before": sysid_before,
+        })
 
 
-def _step_analyze(cluster: _Cluster, databases: Sequence[str]) -> Tuple[str, List[str]]:
+def _step_analyze(cluster: _Cluster, databases: Sequence[str]) -> _Outcome:
     primary = cluster.primary()
     if primary is None:
         raise _StepFailed("no ready primary to analyze on")
@@ -1045,7 +1071,7 @@ def _step_analyze(cluster: _Cluster, databases: Sequence[str]) -> Tuple[str, Lis
     lines = [l for l in (out + "\n" + err).splitlines() if l.strip()]
     if rc != 0:
         raise _StepFailed("vacuumdb --analyze-in-stages failed", lines[-20:])
-    return "analyzed every database on {0}".format(primary), lines[-6:]
+    return _Outcome("analyzed every database on {0}".format(primary), lines[-6:])
 
 
 _ACTIONS = ("preflight", "ensure_image", "update_extension", "cycle_sessions", "verify_version",
@@ -1136,27 +1162,27 @@ def apply_plan(
         action, hop = step["action"], step.get("hop", 0)
         try:
             if action == "preflight":
-                summary, output = _step_preflight(step, opts, preflight)
+                outcome = _step_preflight(step, opts, preflight)
             elif action == "ensure_image":
-                summary, output = _step_ensure_image(step, cluster)
+                outcome = _step_ensure_image(step, cluster)
             elif action == "update_extension":
-                summary, output = _step_update(step, cluster, databases)
+                outcome = _step_update(step, cluster, databases)
             elif action == "cycle_sessions":
-                summary, output = _step_cycle(cluster, databases)
+                outcome = _step_cycle(cluster, databases)
             elif action == "major_upgrade":
-                summary, output = _step_major_upgrade(step, cluster)
+                outcome = _step_major_upgrade(step, cluster)
             elif action == "analyze":
-                summary, output = _step_analyze(cluster, databases)
+                outcome = _step_analyze(cluster, databases)
             else:
-                summary, output = _step_verify(step, cluster, databases)
+                outcome = _step_verify(step, cluster, databases)
         except (_StepFailed, PreflightError) as exc:
             out = exc.output if isinstance(exc, _StepFailed) else []
             summary = exc.summary if isinstance(exc, _StepFailed) else str(exc)
             report["steps"].append(StepResult(hop, action, FAILED, summary, out).to_dict())
             failure = {"hop": hop, "action": action, "summary": summary, "error": out}
             break
-        status = SKIPPED if summary.startswith("already running") else DONE
-        report["steps"].append(StepResult(hop, action, status, summary, output).to_dict())
+        report["steps"].append(StepResult(hop, action, outcome.status, outcome.summary,
+                                          outcome.output, outcome.detail).to_dict())
 
     report["finished_at"] = _now()
     report["result"] = "fail" if failure else "pass"
