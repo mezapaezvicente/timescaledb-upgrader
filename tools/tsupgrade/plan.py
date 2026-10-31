@@ -500,7 +500,8 @@ def build_plan(
                         "image": hop.run_image,
                         "target_pg": _tag_versions(hop.run_image).get("pg") or str(hop.to_pg),
                         "target_ts": hop.ts,
-                        "pg_upgrade": {"from_pg": hop.from_pg, "to_pg": hop.to_pg, "link": link},
+                        "pg_upgrade": {"from_pg": hop.from_pg, "to_pg": hop.to_pg, "link": link,
+                                       "image": hop.image},
                     },
                     {
                         "hop": i,

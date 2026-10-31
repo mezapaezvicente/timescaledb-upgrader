@@ -18,6 +18,12 @@ object both present) -- the same rule preflight applies to a live pod. The
 result is ``data/image-contents.json``, written by ``tsupgrade contents
 measure`` so it can be re-run rather than trusted.
 
+The same listings also say what else each major ships: ``extensions`` (every
+extension with a control file, and the versions it has an install script
+for) and ``libraries`` (every shared object in ``PKGLIBDIR``, without
+``.so``). Preflight checks a cluster's other extensions against them, the way
+``pg_upgrade --check`` checks libraries, but before anything stops.
+
 A measured entry overrules the labels outright. Images that were never
 measured fall back to the labels, still marked as a prediction.
 
@@ -31,6 +37,7 @@ import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .drift import ImageProfile, installable_from_listings
@@ -47,6 +54,8 @@ __all__ = [
     "ContentsError",
     "ImageContents",
     "default_contents_path",
+    "extensions_from_listing",
+    "libraries_from_listing",
     "load_contents",
     "measure_image",
     "merge_measurements",
@@ -75,6 +84,29 @@ for m in $(ls /usr/lib/postgresql); do
   echo "-- pkglibdir"; ls /usr/lib/postgresql/$m/lib 2>/dev/null
 done
 """
+
+
+_CONTROL = re.compile(r"^(.+)\.control$")
+_INSTALL = re.compile(r"^(.+?)--([^-]+)\.sql$")
+
+
+def extensions_from_listing(sharedir_names: Sequence[str]) -> Dict[str, List[str]]:
+    """``{extension: [versions with an install script]}`` from ``ls`` of
+    ``SHAREDIR/extension``; an extension whose control file names no
+    script of its own (``default_version`` only, or upgrade scripts only)
+    gets an empty list."""
+    names = [n.strip() for n in sharedir_names]
+    found: Dict[str, List[str]] = {m.group(1): [] for m in map(_CONTROL.match, names) if m}
+    for name in names:
+        match = _INSTALL.match(name)
+        if match and match.group(1) in found:
+            found[match.group(1)].append(match.group(2))
+    return {ext: sorted(set(v)) for ext, v in sorted(found.items())}
+
+
+def libraries_from_listing(pkglibdir_names: Sequence[str]) -> List[str]:
+    """Shared objects in ``PKGLIBDIR``, without ``.so``: what ``$libdir/<name>`` resolves."""
+    return sorted({n.strip()[:-3] for n in pkglibdir_names if n.strip().endswith(".so")})
 
 
 class ContentsError(Exception):
@@ -109,6 +141,10 @@ class ImageContents:
     def entry(self, reference: str) -> Optional[Dict[str, Any]]:
         tag = _tag_for(reference, self.repository)
         return self.images.get(tag) if tag is not None else None
+
+    def major(self, reference: str, pg_major: int) -> Optional[Dict[str, Any]]:
+        """Everything measured for one major of one image, or None."""
+        return ((self.entry(reference) or {}).get("pg") or {}).get(str(pg_major))
 
     def profile(self, reference: str, pg_major: Optional[int] = None) -> Optional[ImageProfile]:
         """The measured profile for ``reference``, or None if never measured.
@@ -165,7 +201,8 @@ def load_contents(path: Optional[object] = None) -> ImageContents:
 
 def parse_measurement(output: str) -> Dict[str, Dict[str, Any]]:
     """Reduce the probe's output to ``{major: {server_version, default_version,
-    installable}}``. Majors with nothing installable are dropped."""
+    installable, extensions, libraries}}``. Majors with no installable
+    TimescaleDB are dropped."""
     blocks: Dict[str, Dict[str, List[str]]] = {}
     major: Optional[str] = None
     section: Optional[str] = None
@@ -204,6 +241,8 @@ def parse_measurement(output: str) -> Dict[str, Dict[str, Any]]:
             "server_version": server,
             "default_version": defaults[0] if defaults else None,
             "installable": installable,
+            "extensions": extensions_from_listing(sections.get("sharedir", [])),
+            "libraries": libraries_from_listing(sections.get("pkglibdir", [])),
         }
     return result
 

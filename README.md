@@ -400,6 +400,14 @@ bash scripts/tsupgrade.sh plan --from-pg 12.22 --from-ts 2.11.2 \
   --target-image timescale/timescaledb-ha:pg16.15-ts2.30.1 --output plan.json
 ```
 
+**Other extensions.** The matrix verdicts cover TimescaleDB only. Before
+every hop, preflight lists the other extensions installed in each database
+and the libraries their C functions use (as `pg_upgrade --check` selects
+them), and checks them against what the target image ships for that major,
+measured (`make image-contents`); before a `pg_upgrade`, against the image it
+runs in as well. A missing library fails the preflight, before anything has
+stopped.
+
 **Backups break at a major upgrade.** `pg_upgrade` gives the cluster a new
 system identifier, so backups and the WAL archive made before no longer match
 it. Take a full backup before. Afterwards, with pgBackRest, run

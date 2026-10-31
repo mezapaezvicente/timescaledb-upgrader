@@ -252,7 +252,7 @@ def test_every_pg_upgrade_is_preceded_by_a_preflight_with_its_mode():
             assert before["action"] == "preflight"
             assert before["image"] == step["run_image"] and before["target_ts"] == step["ts"]
             assert before["pg_upgrade"] == {"from_pg": step["from_pg"], "to_pg": step["to_pg"],
-                                            "link": True}
+                                            "link": True, "image": step["image"]}
     assert "remove it once the result is accepted" in render_runbook(plan)
 
 

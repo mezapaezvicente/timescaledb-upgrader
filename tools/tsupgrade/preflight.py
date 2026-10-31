@@ -30,6 +30,7 @@ from .images import (
     parse_image_reference,
     parse_release_tag,
 )
+from .contents import ContentsError, load_contents
 from .drift import AVAILABLE_VERSIONS_VIEW_WARNING
 from .drift import INDETERMINATE as DRIFT_INDETERMINATE
 from .drift import classify, installable_from_listings
@@ -108,6 +109,12 @@ class PreflightOptions:
     # Set before a pg_upgrade: True for --link, False for a copy. Adds the
     # check that ordinal 0's disk can hold what pg_upgrade writes there.
     pg_upgrade_link: Optional[bool] = None
+    # Before a pg_upgrade: the image it runs in and the major it upgrades to,
+    # whose measured contents the other extensions are checked against too.
+    pg_upgrade_image: Optional[str] = None
+    pg_upgrade_to: Optional[int] = None
+    # Measured image contents (default: data/image-contents.json).
+    contents_path: Optional[str] = None
 
 
 # Older Patroni labels the leader `master` whatever the configuration asks
@@ -796,6 +803,107 @@ def check_archiving(kube: Kube, opts: PreflightOptions, instances: Sequence[Inst
         ["archive_command: {0}".format(command or "(empty)"), BACKUPS_AT_A_MAJOR_UPGRADE])
 
 
+# Other extensions, and the libraries of user C functions as pg_upgrade --check
+# lists them (prolang 13 is C; below FirstNormalObjectId, 16384, is built in).
+# TimescaleDB is left out: drift and the plan's releases already cover it.
+_EXTENSIONS_SQL = (
+    "SELECT 'ext|' || extname || '|' || extversion FROM pg_extension "
+    "WHERE extname <> 'timescaledb' "
+    "UNION ALL SELECT DISTINCT 'lib|' || probin FROM pg_proc "
+    "WHERE prolang = 13 AND probin IS NOT NULL AND oid >= 16384 "
+    "AND probin NOT LIKE '$libdir/timescaledb%'")
+
+
+def _images_to_check(opts: PreflightOptions, target_pg: Optional[str]) -> List[Tuple[str, Optional[int], str]]:
+    """``(image, major, role)``: the target image on its major and, before a
+    pg_upgrade, the pg_upgrade image on the new one."""
+    try:
+        major = parse_version(target_pg)[0] if target_pg else None
+    except InvalidVersion:
+        major = None
+    found = [(opts.target_image, major, "runs the cluster")]
+    if opts.pg_upgrade_image and opts.pg_upgrade_to:
+        found.append((opts.pg_upgrade_image, opts.pg_upgrade_to, "runs pg_upgrade"))
+    return found
+
+
+def check_extensions(
+    kube: Kube, opts: PreflightOptions, instances: Sequence[Instance], target_pg: Optional[str]
+) -> CheckResult:
+    """Do the target image's binaries cover every other extension in use?
+
+    The matrix verdicts are about TimescaleDB only. Per database on the
+    primary: every other installed extension at its version, and every shared
+    library a user C function is defined in (``pg_proc.probin``, selected as
+    ``pg_upgrade --check`` selects them), against what the target image ships for the target
+    major, measured (:mod:`contents`). Before a ``pg_upgrade`` the image it
+    runs in is checked too, for the new major. A library that is not there
+    fails: ``pg_upgrade --check`` would refuse in the middle of the outage,
+    and a same-major rollout would leave functions that cannot load. An
+    extension version without an install script there is unknown: it can
+    still run, but cannot be created or updated from that image.
+    """
+    title = "Other extensions on the target image"
+    primary = next((i for i in instances if not i.error and i.role == "primary"), None)
+    if primary is None:
+        return CheckResult("extensions", title, UNKNOWN, "no reachable primary", [])
+    try:
+        contents = load_contents(opts.contents_path)
+    except ContentsError as exc:
+        return CheckResult("extensions", title, UNKNOWN, "no measured contents: {0}".format(exc), [])
+
+    used_ext: Dict[str, set] = {}
+    used_lib: Dict[str, set] = {}
+    details: List[str] = []
+    statuses: List[str] = []
+    for database in sorted(primary.extensions):
+        rc, out, err = kube.psql(primary.pod, opts.container, database, opts.psql_user, _EXTENSIONS_SQL)
+        if rc != 0:
+            statuses.append(UNKNOWN)
+            details.append("{0} : cannot list extensions ({1})".format(database, (err or out).strip()[:120]))
+            continue
+        for line in out.splitlines():
+            kind, _, rest = line.strip().partition("|")
+            if kind == "ext":
+                name, _, version = rest.partition("|")
+                used_ext.setdefault("{0} {1}".format(name, version), set()).add(database)
+            elif kind == "lib":
+                used_lib.setdefault(rest, set()).add(database)
+
+    for image, major, role in _images_to_check(opts, target_pg):
+        measured = contents.major(image, major) if major else None
+        if not measured or "libraries" not in measured:
+            statuses.append(UNKNOWN)
+            details.append("{0} ({1}) : pg{2} contents not measured with extensions; "
+                           "cannot check".format(image, role, major or "?"))
+            continue
+        shipped, libraries = measured.get("extensions") or {}, set(measured.get("libraries") or [])
+        missing, unknown = [], []
+        for lib in sorted(used_lib):
+            if not lib.startswith("$libdir/"):
+                unknown.append("library {0} (not under $libdir)".format(lib))
+            elif lib[len("$libdir/"):] not in libraries:
+                missing.append("library {0} (used in {1})".format(lib, ", ".join(sorted(used_lib[lib]))))
+        for key in sorted(used_ext):
+            name, version = key.split(" ", 1)
+            if name not in shipped:
+                missing.append("extension {0} {1} (in {2}): no control file".format(
+                    name, version, ", ".join(sorted(used_ext[key]))))
+            elif version not in shipped[name]:
+                unknown.append("extension {0} {1}: no install script for that version (ships {2})".format(
+                    name, version, ", ".join(shipped[name]) or "none"))
+        statuses.append(FAIL if missing else UNKNOWN if unknown else PASS)
+        details.append("{0} ({1}, pg{2}) : {3}".format(
+            image, role, major, "missing " + "; ".join(missing) if missing
+            else "ships every extension and library in use"))
+        details.extend("     unknown: " + u for u in unknown)
+    details.append("in use: {0}".format(", ".join(sorted(used_ext)) or "nothing"))
+    details.append("The matrix verdicts are about TimescaleDB only; this check is what covers the rest.")
+    return CheckResult("extensions", title, worst_status(statuses),
+                       "{0} extension(s), {1} librar(ies) in use".format(len(used_ext), len(used_lib)),
+                       details)
+
+
 def check_permissions(
     kube: Kube, opts: PreflightOptions, instances: Sequence[Instance]
 ) -> CheckResult:
@@ -1372,6 +1480,7 @@ def run_preflight(opts: PreflightOptions) -> List[CheckResult]:
     results.append(check_abi_break(instances))
     results.append(check_pg_minor_floor(instances, target_pg, target_ts))
     results.append(check_disk_headroom(kube, opts, instances))
+    results.append(check_extensions(kube, opts, instances, target_pg))
     if opts.pg_upgrade_link is not None:
         results.append(check_pg_upgrade_headroom(kube, opts, instances))
         results.append(check_archiving(kube, opts, instances))

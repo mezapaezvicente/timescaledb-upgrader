@@ -439,6 +439,8 @@ def _step_preflight(
             timeout=opts.timeout,
             registry_timeout=opts.registry_timeout,
             pg_upgrade_link=(step.get("pg_upgrade") or {}).get("link"),
+            pg_upgrade_image=(step.get("pg_upgrade") or {}).get("image"),
+            pg_upgrade_to=(step.get("pg_upgrade") or {}).get("to_pg"),
         )
     )
     lines = ["{0}: {1} - {2}".format(r.name, r.status, r.summary) for r in results]
