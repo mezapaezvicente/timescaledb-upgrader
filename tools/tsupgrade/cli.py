@@ -72,6 +72,7 @@ from .preflight import (
     run_preflight,
 )
 from .render import render_markdown
+from .rollback import LOST_WRITES, RollbackRefused, rollback
 from .versions import InvalidVersion, parse_version
 from .scaffold import scaffold_matrix
 
@@ -596,6 +597,38 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return EXIT_OK
 
 
+def cmd_rollback(args: argparse.Namespace) -> int:
+    """Undo the last copy-mode major upgrade of an apply run."""
+    try:
+        report = json.loads(Path(args.apply_report).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print("error: cannot read report {0}: {1}".format(args.apply_report, exc), file=sys.stderr)
+        return EXIT_ERROR
+    opts = ApplyOptions(context=args.context, namespace=args.namespace, selector=args.selector,
+                        container=args.container, statefulset=args.statefulset,
+                        timeout=args.timeout, rollout_timeout=args.rollout_timeout)
+    print("ROLLBACK: {0}".format(LOST_WRITES), file=sys.stderr)
+    try:
+        result = rollback(report, opts, discard_writes=args.discard_writes)
+    except RollbackRefused as exc:
+        print("refused: nothing was written", file=sys.stderr)
+        for reason in exc.reasons:
+            print("  - {0}".format(reason), file=sys.stderr)
+        return EXIT_CHECK_FAILED
+    if args.json:
+        print(json.dumps(result, indent=2))
+    else:
+        print("rollback PostgreSQL {0} -> {1}: {2}".format(
+            result["from_pg"], result["to_pg"], result["result"].upper()))
+        for line in result["output"]:
+            print("  " + line)
+        if result.get("failure"):
+            print("failure: " + result["failure"]["summary"])
+            for line in result["failure"]["error"]:
+                print("  " + line)
+    return EXIT_OK if result["result"] == "pass" else EXIT_CHECK_FAILED
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     """Execute a plan file against the cluster in the current context."""
     try:
@@ -885,6 +918,27 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--report", default=None, help="also write the report as JSON here")
     apply.add_argument("--json", action="store_true")
     apply.set_defaults(func=cmd_apply)
+
+    # --- rollback ---
+    back = sub.add_parser(
+        "rollback",
+        help="go back from the last copy-mode PostgreSQL major upgrade an apply report shows; "
+        "loses every write made since",
+    )
+    back.add_argument("--report", required=True, dest="apply_report",
+                      help="the report `tsupgrade apply --report` wrote")
+    back.add_argument("--discard-writes-since-upgrade", action="store_true", dest="discard_writes",
+                      help="required: the old data directory is the cluster as it was when "
+                      "pg_upgrade ran")
+    back.add_argument("--context", default=None)
+    back.add_argument("--namespace", default="timescale")
+    back.add_argument("--selector", default="application=patroni")
+    back.add_argument("--container", default="timescaledb")
+    back.add_argument("--statefulset", default="tsdb")
+    back.add_argument("--timeout", type=float, default=30.0)
+    back.add_argument("--rollout-timeout", type=float, default=600.0, dest="rollout_timeout")
+    back.add_argument("--json", action="store_true")
+    back.set_defaults(func=cmd_rollback)
 
     return parser
 

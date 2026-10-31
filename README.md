@@ -425,6 +425,16 @@ collation other than C/POSIX sorts its text indexes by glibc's rules, so
 preflight warns when a hop changes glibc under one, and names the check to
 run afterwards (`amcheck`'s `bt_index_check`, or `REINDEX`).
 
+**Going back from a copy.** `tsupgrade rollback --report report.json
+--discard-writes-since-upgrade` undoes the last major upgrade in an `apply`
+report: it stops the cluster, puts `<data>.pg<old>` back in place (the new
+directory goes to `<data>.rolled-back-pg<new>`), deletes the replicas' disks
+and Patroni's state, and starts the old image again, checking that the old
+system identifier is back. Every write since the upgrade is lost, extension
+updates included, which is why the flag is required. It refuses after
+`--link`, and after an upgrade that did not finish (whose report says how to
+start the old cluster instead).
+
 **Backups break at a major upgrade.** `pg_upgrade` gives the cluster a new
 system identifier, so backups and the WAL archive made before no longer match
 it. Take a full backup before. Afterwards, with pgBackRest, run

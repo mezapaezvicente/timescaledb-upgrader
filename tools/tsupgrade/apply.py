@@ -862,12 +862,9 @@ _SCHEDULING = ("tolerations", "nodeSelector", "affinity", "imagePullSecrets",
                "serviceAccountName", "priorityClassName")
 
 
-def _major_upgrade(step, cluster, kube, opts, output, state):
-    old, new = step["from_pg"], step["to_pg"]
-    image = pinned(step["image"], step.get("digest"))
-    run_image = pinned(step["run_image"], step.get("run_digest"))
-    sts = kube.json(["get", "statefulset", opts.statefulset])
-    replicas = int(sts.get("spec", {}).get("replicas") or 1)
+def _volume(sts: Dict[str, Any], opts: ApplyOptions) -> Tuple[str, str]:
+    """``(claim, mount)``: the data volume's claim template and where the
+    database container mounts it."""
     template = sts.get("spec", {}).get("template", {}).get("spec", {})
     claims = sts.get("spec", {}).get("volumeClaimTemplates") or []
     if not claims:
@@ -879,6 +876,55 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
                   if m.get("name") == claim), None)
     if mount is None:
         raise _StepFailed("container {0} does not mount {1}".format(opts.container, claim))
+    return claim, mount
+
+
+def _run_on_ordinal_0(kube: Kube, sts: Dict[str, Any], opts: ApplyOptions, pod: str, image: str,
+                      script: str, env: Dict[str, str]) -> Tuple[int, str, str]:
+    """Start a one-off pod running ``script`` on ordinal 0's disk.
+
+    Scheduled as the database pods are: where they may run (taints,
+    selectors, affinity), with their pull secrets, account, resources and
+    user. Without these it can sit Pending on a cluster with dedicated
+    database nodes or a private registry.
+    """
+    template = sts.get("spec", {}).get("template", {}).get("spec", {})
+    container = next((c for c in template.get("containers") or []
+                      if c.get("name") == opts.container), {})
+    claim, mount = _volume(sts, opts)
+    spec = {
+        "apiVersion": "v1",
+        "spec": dict({key: template[key] for key in _SCHEDULING if template.get(key)}, **{
+            "restartPolicy": "Never",
+            "securityContext": template.get("securityContext") or {},
+            "containers": [dict({"resources": container["resources"]} if container.get("resources")
+                                else {}, **{
+                "name": "pg-upgrade",
+                "image": image,
+                "imagePullPolicy": "IfNotPresent",
+                "command": ["bash", "-c", script],
+                "env": [{"name": k, "value": v} for k, v in env.items()],
+                "volumeMounts": [{"name": claim, "mountPath": mount}],
+            })],
+            "volumes": [{"name": claim, "persistentVolumeClaim": {
+                "claimName": "{0}-{1}-0".format(claim, opts.statefulset)}}],
+        }),
+    }
+    return kube.run(["run", pod, "--image", image, "--restart=Never",
+                     "--labels", "app.kubernetes.io/part-of=timescaledb-upgrader",
+                     "--overrides", json.dumps(spec)])
+
+
+def _major_upgrade(step, cluster, kube, opts, output, state):
+    old, new = step["from_pg"], step["to_pg"]
+    image = pinned(step["image"], step.get("digest"))
+    run_image = pinned(step["run_image"], step.get("run_digest"))
+    sts = kube.json(["get", "statefulset", opts.statefulset])
+    replicas = int(sts.get("spec", {}).get("replicas") or 1)
+    template = sts.get("spec", {}).get("template", {}).get("spec", {})
+    container = next((c for c in template.get("containers") or []
+                      if c.get("name") == opts.container), {})
+    claim, _ = _volume(sts, opts)
     first = "{0}-0".format(opts.statefulset)
     pod = "{0}-pg-upgrade-{1}-{2}".format(opts.statefulset, old, new)
     # What the cluster ran before, for a rollback to start it on again.
@@ -942,38 +988,12 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
     cluster.wait_for("every instance to stop", lambda: not cluster.pods())
     output.append("scaled statefulset/{0} to 0".format(opts.statefulset))
 
-    # 3. pg_upgrade on ordinal 0's disk, scheduled as the database pods are:
-    # where they may run (taints, selectors, affinity), with their pull
-    # secrets, account and resources. Without these it can sit Pending on a
-    # cluster with dedicated database nodes or a private registry.
-    spec = {
-        "apiVersion": "v1",
-        "spec": dict({key: template[key] for key in _SCHEDULING if template.get(key)}, **{
-            "restartPolicy": "Never",
-            "securityContext": template.get("securityContext") or {},
-            "containers": [dict({"resources": container["resources"]} if container.get("resources")
-                                else {}, **{
-                "name": "pg-upgrade",
-                "image": image,
-                "imagePullPolicy": "IfNotPresent",
-                "command": ["bash", "-c", _PG_UPGRADE_SCRIPT],
-                "env": [
-                    {"name": "FROM", "value": str(old)},
-                    {"name": "TO", "value": str(new)},
-                    {"name": "PG_BIN_OLD", "value": opts.pg_bin.format(old)},
-                    {"name": "PG_BIN_NEW", "value": opts.pg_bin.format(new)},
-                    {"name": "DATA", "value": opts.data_dir},
-                    {"name": "LINK", "value": "--link" if step["link"] else ""},
-                ] + [{"name": k, "value": v} for k, v in locale.items()],
-                "volumeMounts": [{"name": claim, "mountPath": mount}],
-            })],
-            "volumes": [{"name": claim, "persistentVolumeClaim": {
-                "claimName": "{0}-{1}".format(claim, first)}}],
-        }),
-    }
-    rc, out, err = kube.run(["run", pod, "--image", image, "--restart=Never",
-                             "--labels", "app.kubernetes.io/part-of=timescaledb-upgrader",
-                             "--overrides", json.dumps(spec)])
+    # 3. pg_upgrade on ordinal 0's disk.
+    rc, out, err = _run_on_ordinal_0(kube, sts, opts, pod, image, _PG_UPGRADE_SCRIPT, dict({
+        "FROM": str(old), "TO": str(new),
+        "PG_BIN_OLD": opts.pg_bin.format(old), "PG_BIN_NEW": opts.pg_bin.format(new),
+        "DATA": opts.data_dir, "LINK": "--link" if step["link"] else "",
+    }, **locale))
     if rc != 0:
         raise _StepFailed("cannot start the pg_upgrade pod: " + (err or out))
 
