@@ -451,3 +451,29 @@ def test_routes_are_written_only_where_every_record_agrees(tmp_path):
     assert routes == {0: route}
     assert any("different routes" in p for p in problems)
     assert any("not every record" in p and "seeded" in p for p in problems)
+
+
+# --- forward, then rollback (R21's evidence) ---------------------------------
+
+CROSS = harness.resolve(_row("12", "2.11", "2.15", target_pg="13"), XPG)
+
+
+def test_rollback_runs_are_copy_mode_major_changes_that_end_at_the_source():
+    run = harness.with_rollback(CROSS)
+    assert run.rollback and run.key("empty") == "rollback-empty"
+    assert run.end == run.source and CROSS.end == CROSS.target
+    assert "major change" in harness.with_rollback(RUN).reason
+    assert "copy" in harness.with_rollback(harness.with_link(CROSS)).reason
+
+
+def test_a_rollback_run_is_judged_on_the_rollback_and_the_source():
+    run = harness.with_rollback(CROSS)
+    report = {"result": "pass"}
+    ok = harness.judge(run, "empty", 0, "", report, run.source, None, back={"result": "pass"})
+    assert ok[0] is True
+    failed = harness.judge(run, "empty", 0, "", report, run.target, None,
+                           back={"result": "fail", "failure": {"summary": "swap failed",
+                                                               "error": ["ERROR: x"]}})
+    assert failed[0] is False and failed[3] == "rollback" and "swap failed" in failed[1]
+    still_new = harness.judge(run, "empty", 0, "", report, run.target, None, back={"result": "pass"})
+    assert still_new[0] is False and "not {0}".format(run.source) in still_new[1]

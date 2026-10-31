@@ -17,7 +17,11 @@ a harness can add what turns out to matter without a schema change:
                     older release and updated to the source before the run
                     (``history`` then names that release); ``link-empty`` or
                     ``link-seeded`` when a PostgreSQL major change ran
-                    ``pg_upgrade --link`` instead of copying
+                    ``pg_upgrade --link`` instead of copying; ``rollback-empty``
+                    or ``rollback-seeded`` when a copy-mode major change was
+                    then undone with ``tsupgrade rollback``: evidence for the
+                    rollback, never a row's verdict. ``versions.target`` is
+                    then the source, where the run must end
 ``images``          every image the run used, in order, each ``{reference,
                     digest}`` -- a two-image row lists both
 ``pg_version``      the exact server version the extension ran on
@@ -92,7 +96,8 @@ VERDICT_CODE = (
 )
 
 EVIDENCE_FORMAT = 1
-MODES = ("empty", "seeded", "history-empty", "history-seeded", "link-empty", "link-seeded")
+MODES = ("empty", "seeded", "history-empty", "history-seeded", "link-empty", "link-seeded",
+         "rollback-empty", "rollback-seeded")
 CONTROLS = ("direct",)
 RESULTS = ("pass", "fail")
 
