@@ -20,29 +20,29 @@
     "reached": "2.30.1"
   },
   "upgrader": {
-    "commit": "f1a4cb26cd8c540664372fe77696781a691afa46",
+    "commit": "0c4a9ac5ed304c985420f865c68c89ac572fe14d",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg18/2.24-to-2.30.seeded.log",
-  "recorded_at": "2026-10-30T15:36:31Z",
+  "recorded_at": "2026-10-31T17:26:17Z",
   "stage": "done",
-  "started_at": "2026-10-30T15:36:12Z",
-  "finished_at": "2026-10-30T15:36:31Z",
+  "started_at": "2026-10-31T17:25:53Z",
+  "finished_at": "2026-10-31T17:26:17Z",
   "source_pg_version": "18.6",
   "replicas": 2,
   "pods": [
     {
       "pod": "tsdb-0",
       "role": "primary",
-      "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+      "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1@sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
       "image_id": "docker.io/library/import-2026-10-29@sha256:d0c2997165541bd9b2a3dbe51d1642e3fc18c908a88431e20dc9ac00dfc7340e",
       "server_version": "18.6"
     },
     {
       "pod": "tsdb-1",
       "role": "replica",
-      "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+      "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1@sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
       "image_id": "docker.io/library/import-2026-10-29@sha256:d0c2997165541bd9b2a3dbe51d1642e3fc18c908a88431e20dc9ac00dfc7340e",
       "server_version": "18.6"
     }
@@ -86,5 +86,19 @@
   "plan": {
     "hops": 1,
     "path": "verify/out/pg18/2.24-to-2.30.plan.json"
+  },
+  "route": {
+    "start": {
+      "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+      "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+    },
+    "steps": [
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+        "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+        "to": "2.30.1"
+      }
+    ]
   }
 }
