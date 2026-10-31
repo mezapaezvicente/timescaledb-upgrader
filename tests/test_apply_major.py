@@ -43,6 +43,7 @@ class MajorKube(FakeKube):
         self.upgrade_pod = "tsdb-pg-upgrade-12-13" if leftover else None
         self.leftover = leftover
         self.fail_pvc = fail_pvc
+        self.dcs_extra = []
         self.spec_seen = None
 
     def json(self, args, namespaced=True):
@@ -56,6 +57,9 @@ class MajorKube(FakeKube):
                                     "volumeMounts": [{"name": "pgdata",
                                                       "mountPath": "/home/postgres/pgdata"}]}]}},
                 "volumeClaimTemplates": [{"metadata": {"name": "pgdata"}}]}}
+        if args[:2] == ["get", "endpoints,configmaps"]:
+            names = [("Endpoints", "tsdb"), ("Endpoints", "tsdb-config")] + self.dcs_extra
+            return {"items": [{"kind": k, "metadata": {"name": n}} for k, n in names]}
         return super().json(args, namespaced)
 
     def _upgrade_status(self):
@@ -110,12 +114,14 @@ class MajorKube(FakeKube):
                 return 1, "", "persistentvolumeclaims is forbidden"
             self.writes.append("delete pvc " + args[2])
             return 0, "", ""
-        if args[:2] == ["delete", "endpoints,configmaps"]:
-            self.writes.append("delete dcs " + args[args.index("-l") + 1])
-            return 0, "endpoints \"tsdb\" deleted", ""
+        if args[0] == "delete" and any(a.startswith(("endpoints/", "configmap/")) for a in args):
+            self.writes.append("delete dcs " + " ".join(a for a in args[1:] if "/" in a))
+            return 0, "", ""
         return super().run(args, namespaced)
 
     def exec(self, pod, container, argv):
+        if argv[:2] == ["patronictl", "list"]:
+            return 0, json.dumps([{"Cluster": "tsdb", "Member": p["name"]} for p in self.pods]), ""
         if argv[0] == "patronictl":
             self.writes.append("switchover to " + argv[argv.index("--candidate") + 1])
             for p in self.pods:
@@ -179,7 +185,7 @@ def test_major_upgrade_writes_in_the_one_safe_order():
         "run tsdb-pg-upgrade-12-13 on " + BOTH,
         "delete pod tsdb-pg-upgrade-12-13",
         "delete pvc pgdata-tsdb-1",
-        "delete dcs application=patroni,cluster-name=tsdb",
+        "delete dcs endpoints/tsdb endpoints/tsdb-config",
         "set image " + NEW,
         "scale 2",
         "vacuumdb on tsdb-0",
@@ -314,6 +320,8 @@ def test_a_failure_after_pg_upgrade_says_the_data_is_upgraded_and_how_to_finish(
     assert "upgraded to PostgreSQL 13" in error and "do not start it on PostgreSQL 12" in error
     assert "/home/postgres/pgdata/data.pg12" in error
     assert "set image statefulset/tsdb timescaledb=" + NEW in error
+    assert ("delete endpoints/tsdb endpoints/tsdb-config endpoints/tsdb-failover "
+            "--ignore-not-found") in error
     assert "data untouched" not in error
 
 
@@ -497,3 +505,40 @@ def test_the_script_passes_the_old_locale_to_initdb(tmp_path, provider, expect):
     rc, out, data = _script(tmp_path, "ok", link="", locale_provider=provider)
     assert rc == 0, out
     assert expect in (tmp_path / "new" / "initdb.args").read_text()
+
+
+# --- Patroni's DCS state, by name (R7) ---------------------------------------
+
+def test_patronis_state_is_deleted_by_name_for_its_scope_failover_included():
+    """A switchover leaves <scope>-failover behind (measured); it goes too."""
+    kube = MajorKube()
+    kube.dcs_extra = [("Endpoints", "tsdb-failover")]
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+    assert "delete dcs endpoints/tsdb endpoints/tsdb-config endpoints/tsdb-failover" in kube.writes
+    assert any("scope tsdb" in l for l in report["steps"][0]["output"])
+
+
+def test_a_selector_that_also_matches_other_objects_is_refused_before_anything_stops():
+    kube = MajorKube()
+    kube.dcs_extra = [("ConfigMap", "tsdb-chart-settings")]
+    report = _apply(_plan(), kube)
+    assert report["result"] == "fail"
+    assert kube.writes == []
+    assert "configmap/tsdb-chart-settings" in report["failure"]["summary"]
+    assert "will not guess" in report["failure"]["summary"]
+
+
+def test_the_scope_falls_back_to_patronis_rest_api():
+    kube = MajorKube()
+    exec_ = kube.exec
+
+    def older_patronictl(pod, container, argv):
+        if argv[:2] == ["patronictl", "list"]:
+            return 2, "", "no such option: -f"
+        if argv[0] == "curl":
+            return 0, json.dumps({"patroni": {"version": "2.0.2", "scope": "tsdb"}}), ""
+        return exec_(pod, container, argv)
+    kube.exec = older_patronictl
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")

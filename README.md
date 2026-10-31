@@ -436,7 +436,9 @@ such as 12 → 13 → 15 → 16 by copying ends with three of them; preflight an
 Under Patroni, `apply` moves the leader to ordinal 0, scales the StatefulSet
 to 0, runs `pg_upgrade` in a pod on ordinal 0's disk (matching the old
 cluster's data checksums), deletes the replicas' disks and Patroni's DCS
-state (`pg_upgrade` gives the cluster a new system identifier), and restarts
+state (`pg_upgrade` gives the cluster a new system identifier; by name, for
+the scope Patroni reports, and refused up front if the pod selector also
+matches endpoints or configmaps that are not Patroni's), and restarts
 everything on the new major's image; Patroni re-clones the replicas. The plan
 ends with `vacuumdb --all --analyze-in-stages`. `apply` waits for `pg_upgrade` as long as
 it runs (`--pg-upgrade-timeout` sets a limit; a pod that never starts fails

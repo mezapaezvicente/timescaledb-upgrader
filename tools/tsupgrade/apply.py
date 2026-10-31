@@ -54,7 +54,10 @@ A major upgrade, under Patroni, in this order:
    beside it as ``<data>.pg<old major>``; after ``--link`` it is unusable;
 4. the other ordinals' disks and Patroni's objects in the DCS are deleted:
    ``pg_upgrade`` gives the cluster a new system identifier, so the stored
-   state and the replicas' copies belong to a cluster that no longer exists;
+   state and the replicas' copies belong to a cluster that no longer exists.
+   Patroni's objects are deleted by name, for the scope Patroni reports, and
+   only those that carry the pod selector's labels; before anything stops,
+   apply refuses if that selector matches any other endpoints or configmap;
 5. the StatefulSet is set to the new major's image and scaled back up.
    Patroni starts ordinal 0 on the upgraded directory and re-clones the rest.
 
@@ -697,12 +700,55 @@ def _why_pending(status: Dict[str, Any]) -> str:
     return "no reason given"
 
 
-def _finish_by_hand(opts: ApplyOptions, claim: str, replicas: int, run_image: str) -> List[str]:
+# Patroni's objects in a Kubernetes DCS, by scope. Measured on Patroni 4.0.5
+# (2026-10-31): with use_endpoints, endpoints <scope> and <scope>-config;
+# without, configmaps <scope>-config and <scope>-leader; either way
+# <scope>-failover once a switchover has run. <scope>-sync (synchronous mode)
+# was not measured; it is Patroni's name for that state.
+_DCS_SUFFIXES = ("", "-config", "-leader", "-failover", "-sync")
+
+
+def _patroni_scope(kube: Kube, pod: str, container: str) -> str:
+    """The Patroni scope, as Patroni itself reports it."""
+    rc, out, _ = kube.exec(pod, container, ["patronictl", "list", "-f", "json"])
+    try:
+        clusters = {m.get("Cluster") for m in json.loads(out)} if rc == 0 else set()
+    except (ValueError, AttributeError):
+        clusters = set()
+    if len(clusters) == 1 and None not in clusters:
+        return clusters.pop()
+    rc, out, err = kube.exec(pod, container, ["curl", "-s", "localhost:8008/patroni"])
+    try:
+        scope = json.loads(out).get("patroni", {}).get("scope") if rc == 0 else None
+    except ValueError:
+        scope = None
+    if not scope:
+        raise _StepFailed("cannot read Patroni's scope from {0} (patronictl list, REST "
+                          "/patroni); nothing was done".format(pod), [err or out])
+    return scope
+
+
+def _dcs_objects(kube: Kube, opts: ApplyOptions, scope: str) -> Tuple[List[str], List[str]]:
+    """``(patroni, others)``: the endpoints and configmaps the pod selector
+    matches, as ``kind/name``, split by whether the name is Patroni's."""
+    names = {scope + suffix for suffix in _DCS_SUFFIXES}
+    items = kube.json(["get", "endpoints,configmaps", "-l", opts.selector]).get("items", [])
+    patroni, others = [], []
+    for item in items:
+        ref = "{0}/{1}".format(item.get("kind", "").lower() or "object",
+                               item.get("metadata", {}).get("name"))
+        (patroni if item.get("metadata", {}).get("name") in names else others).append(ref)
+    return sorted(patroni), sorted(others)
+
+
+def _finish_by_hand(opts: ApplyOptions, claim: str, replicas: int, run_image: str,
+                    dcs: Sequence[str]) -> List[str]:
     """What apply does after a successful pg_upgrade, as commands."""
     lines = [_kubectl(opts, "delete", "pvc", "{0}-{1}-{2}".format(claim, opts.statefulset, i))
              for i in range(1, replicas)]
     return lines + [
-        _kubectl(opts, "delete", "endpoints,configmaps", "-l", opts.selector),
+        _kubectl(opts, "delete", *dcs, "--ignore-not-found") if dcs
+        else "(Patroni had no objects in the DCS to delete)",
         _kubectl(opts, "set", "image", "statefulset/" + opts.statefulset,
                  "{0}={1}".format(opts.container, run_image)),
         _kubectl(opts, "scale", "statefulset/" + opts.statefulset, "--replicas={0}".format(replicas)),
@@ -843,6 +889,14 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
     primary = cluster.primary()
     if primary is None:
         raise _StepFailed("no ready primary")
+    # Patroni's state is deleted by name later, when no pod can say its scope.
+    scope = _patroni_scope(kube, primary, opts.container)
+    dcs, others = _dcs_objects(kube, opts, scope)
+    if others:
+        raise _StepFailed(
+            "the pod selector {0} also matches {1}, which are not Patroni's objects for scope "
+            "{2}; apply deletes Patroni's state by name and will not guess. Nothing was "
+            "done".format(opts.selector, ", ".join(others), scope))
     locale = _old_locale(cluster, primary, old)
     output.append("old cluster's template0: {0}".format(
         ", ".join("{0}={1}".format(k.lower(), v) for k, v in locale.items() if v)))
@@ -904,7 +958,11 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
     if rc != 0:
         raise _StepFailed("cannot start the pg_upgrade pod: " + (err or out))
 
-    finish = _finish_by_hand(opts, claim, replicas, run_image)
+    # By hand there is no listing again, so name the failover object a
+    # switchover may have left, in the kind Patroni uses here.
+    kinds = {d.split("/", 1)[0] for d in dcs}
+    finish = _finish_by_hand(opts, claim, replicas, run_image, sorted(
+        set(dcs) | {"{0}/{1}-failover".format(k, scope) for k in kinds}))
     phase = _await_pg_upgrade(cluster, pod, finish)
     _, log, _ = kube.run(["logs", pod])
     lines = [l for l in log.splitlines() if l.strip()]
@@ -931,11 +989,16 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
         if rc != 0:
             raise _StepFailed("cannot delete {0}".format(name), [err or out])
         output.append("deleted {0}".format(name))
-    rc, out, err = kube.run(["delete", "endpoints,configmaps", "-l", opts.selector,
-                             "--ignore-not-found"])
-    if rc != 0:
-        raise _StepFailed("cannot reset Patroni's state", [err or out])
-    output.append("reset Patroni's state: " + (" ".join(out.split()) or "nothing found"))
+    # Listed again: a switchover since (step 1) leaves a <scope>-failover.
+    dcs, others = _dcs_objects(kube, opts, scope)
+    if dcs:
+        rc, out, err = kube.run(["delete"] + dcs + ["--ignore-not-found"])
+        if rc != 0:
+            raise _StepFailed("cannot reset Patroni's state", [err or out])
+    output.append("reset Patroni's state for scope {0}: {1}".format(
+        scope, ", ".join(dcs) or "nothing found"))
+    if others:
+        output.append("left alone, not Patroni's: " + ", ".join(others))
 
     # 5. The new major's image, every instance back.
     rc, out, err = kube.run(["set", "image", "statefulset/" + opts.statefulset,
