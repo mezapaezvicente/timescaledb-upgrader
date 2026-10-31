@@ -507,9 +507,10 @@ change. The runbook and `apply`'s report say the same.
 **Going back from a copy.** `tsupgrade rollback --report report.json
 --discard-writes-since-upgrade` undoes the last major upgrade in an `apply`
 report. It stops the cluster, puts `<data>.pg<old>` back in place (the new
-directory goes to `<data>.rolled-back-pg<new>`), deletes the replicas' disks
-and Patroni's state, and starts the old image again, checking that the old
-system identifier is back. Every write since the upgrade is lost, extension
+directory goes to `<data>.rolled-back-pg<new>-<its system identifier>`, so a
+later upgrade and rollback on the same disk does not collide with it),
+deletes the replicas' disks and Patroni's state, and starts the old image
+again, checking that the old system identifier is back. Every write since the upgrade is lost, extension
 updates included, which is why the flag is required. It refuses after
 `--link`, and after an upgrade that did not finish (whose report says how to
 start the old cluster instead).

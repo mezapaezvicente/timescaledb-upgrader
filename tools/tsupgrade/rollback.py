@@ -7,7 +7,8 @@ them, for the *last* major upgrade in an ``apply`` report, in this order:
 
 1. the StatefulSet is scaled to 0;
 2. a pod on ordinal 0's disk moves the new directory aside
-   (``<data>.rolled-back-pg<new major>``) and the old one back;
+   (``<data>.rolled-back-pg<new major>-<its system identifier>``) and the
+   old one back;
 3. the other ordinals' disks and Patroni's objects for the scope are
    deleted: they belong to the upgraded cluster, whose system identifier is
    not the old one's;
@@ -135,7 +136,7 @@ def rollback(
     result: Dict[str, Any] = {"rollback_format": ROLLBACK_FORMAT, "from_pg": new, "to_pg": old,
                               "lost": LOST_WRITES, "output": output}
     try:
-        _go_back(cluster, kube, opts, detail, scope, output)
+        _go_back(cluster, kube, opts, detail, scope, sysid, output)
         result["result"] = "pass"
     except (_StepFailed, PreflightError) as exc:
         result["result"] = "fail"
@@ -146,7 +147,7 @@ def rollback(
 
 
 def _go_back(cluster: _Cluster, kube: Kube, opts: ApplyOptions, detail: Dict[str, Any],
-             scope: str, output: List[str]) -> None:
+             scope: str, sysid: str, output: List[str]) -> None:
     old, new, replicas = int(detail["from_pg"]), int(detail["to_pg"]), int(detail["replicas"])
     sts = kube.json(["get", "statefulset", opts.statefulset])
     claim = detail.get("claim") or "pgdata"
@@ -165,7 +166,8 @@ def _go_back(cluster: _Cluster, kube: Kube, opts: ApplyOptions, detail: Dict[str
                                           "--replicas={0}".format(replicas)))]
 
     rc, out, err = _run_on_ordinal_0(kube, sts, opts, pod, detail["old_image"], _SWAP_SCRIPT, {
-        "FROM": str(old), "TO": str(new), "DATA": detail["data"], "KEPT": detail["kept"]})
+        "FROM": str(old), "TO": str(new), "DATA": detail["data"], "KEPT": detail["kept"],
+        "SYSID": sysid})
     if rc != 0:
         raise _StepFailed("cannot start pod {0}: {1}".format(pod, err or out), stopped)
     cluster.wait_for("pod {0} to finish".format(pod), lambda: (_pod_phase(kube, pod) or {}).get(

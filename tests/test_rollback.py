@@ -42,7 +42,7 @@ class UpgradedKube(MajorKube):
             self.writes.append("run {0} on {1}".format(args[1], args[args.index("--image") + 1]))
             return 0, "", ""
         if args[0] == "logs" and args[1].startswith("tsdb-rollback-"):
-            return 0, ("PostgreSQL 13's data directory is now /home/postgres/pgdata/data.rolled-back-pg13"
+            return 0, ("PostgreSQL 13's data directory is now /home/postgres/pgdata/data.rolled-back-pg13-7000000000000000002"
                        if self.swap_phase == "Succeeded" else "data.pg12 is not there"), ""
         if args[:2] == ["delete", "pod"] and args[2].startswith("tsdb-rollback-"):
             self.writes.append("delete pod " + args[2])
@@ -91,7 +91,7 @@ def test_rollback_writes_in_order_and_ends_on_the_old_cluster():
     ]
     env = {e["name"]: e["value"] for e in kube.spec_seen["spec"]["containers"][0]["env"]}
     assert env == {"FROM": "12", "TO": "13", "DATA": "/home/postgres/pgdata/data",
-                   "KEPT": "/home/postgres/pgdata/data.pg12"}
+                   "KEPT": "/home/postgres/pgdata/data.pg12", "SYSID": "7000000000000000002"}
     assert kube.spec_seen["spec"]["volumes"][0]["persistentVolumeClaim"]["claimName"] == "pgdata-tsdb-0"
     assert result["lost"] == LOST_WRITES
     assert any("system identifier 7000000000000000001 (the old cluster's)" in l for l in result["output"])
@@ -144,18 +144,28 @@ def test_apply_then_rollback_round_trips_the_report():
 
 # --- the swap script, on a real disk ------------------------------------------
 
-def _swap(tmp_path, linked=False, aside=False):
+def _upgraded(tmp_path):
+    """The disk as a copy-mode pg_upgrade 12 -> 13 leaves it."""
     data = tmp_path / "pgdata" / "data"
     keep = tmp_path / "pgdata" / "data.pg12"
     (data / "global").mkdir(parents=True)
     (keep / "global").mkdir(parents=True)
+    (data / "PG_VERSION").write_text("13")
     (keep / "PG_VERSION").write_text("12")
+    return data, keep
+
+
+def _swap(tmp_path, linked=False, aside=False, sysid="7000000000000000002", fresh=True):
+    if fresh:
+        data, keep = _upgraded(tmp_path)
+    else:
+        data, keep = tmp_path / "pgdata" / "data", tmp_path / "pgdata" / "data.pg12"
     if linked:
         (keep / "global" / "pg_control.old").write_text("x")
     if aside:
-        (tmp_path / "pgdata" / "data.rolled-back-pg13").mkdir()
+        (tmp_path / "pgdata" / ("data.rolled-back-pg13-" + sysid)).mkdir()
     env = {"PATH": "/usr/bin:/bin", "FROM": "12", "TO": "13", "DATA": data.as_posix(),
-           "KEPT": keep.as_posix()}
+           "KEPT": keep.as_posix(), "SYSID": sysid}
     done = subprocess.run([BASH, "-c", _SWAP_SCRIPT], env=env, capture_output=True, text=True)
     return done.returncode, done.stdout, data
 
@@ -165,7 +175,27 @@ def test_the_swap_puts_the_old_directory_back(tmp_path):
     rc, out, data = _swap(tmp_path)
     assert rc == 0, out
     assert (data / "PG_VERSION").read_text() == "12"
-    assert (data.parent / "data.rolled-back-pg13" / "global").is_dir()
+    assert (data.parent / "data.rolled-back-pg13-7000000000000000002" / "global").is_dir()
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash")
+def test_a_second_rollback_on_the_same_disk_finds_its_name_free(tmp_path):
+    """Upgrade, go back, upgrade again, go back again: each upgraded cluster
+    has its own system identifier, so the second set-aside does not collide
+    with the first (measured: with one fixed name the second swap refused)."""
+    rc, out, data = _swap(tmp_path, sysid="7000000000000000002")
+    assert rc == 0, out
+    # pg_upgrade again: the old directory moves to data.pg12, a new 13 takes its place
+    keep = data.parent / "data.pg12"
+    data.rename(keep)
+    (data / "global").mkdir(parents=True)
+    (data / "PG_VERSION").write_text("13")
+    rc, out, data = _swap(tmp_path, sysid="7000000000000000003", fresh=False)
+    assert rc == 0, out
+    assert (data / "PG_VERSION").read_text() == "12"
+    for sysid in ("7000000000000000002", "7000000000000000003"):
+        assert (data.parent / ("data.rolled-back-pg13-" + sysid) / "PG_VERSION").read_text() == "13"
+
 
 
 @pytest.mark.skipif(BASH is None, reason="no bash")
@@ -173,4 +203,4 @@ def test_the_swap_puts_the_old_directory_back(tmp_path):
 def test_the_swap_refuses_a_linked_directory_or_one_in_the_way(tmp_path, kw, said):
     rc, out, data = _swap(tmp_path, **kw)
     assert rc == 2 and said in out
-    assert not (data / "PG_VERSION").exists()
+    assert (data / "PG_VERSION").read_text() == "13"
