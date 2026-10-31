@@ -1,0 +1,166 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "14",
+    "source_ts": "2.19",
+    "target_pg": "16",
+    "target_ts": "2.30"
+  },
+  "mode": "seeded",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+      "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+      "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+      "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg16.15-ts2.30.1-all",
+      "digest": "sha256:e8f5aeeea35474227bee96f60227942a8e63293a717ba3e8beb9731c3adbad4b"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+      "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+    }
+  ],
+  "pg_version": "16.15",
+  "versions": {
+    "source": "2.19.3",
+    "target": "2.30.1",
+    "reached": "2.30.1"
+  },
+  "upgrader": {
+    "commit": "9313496de87111b596508b9eda11324500084687",
+    "dirty": false
+  },
+  "result": "pass",
+  "log": "verify/out/pg14/2.19-to-pg16-2.30.seeded.log",
+  "recorded_at": "2026-10-31T10:19:56Z",
+  "stage": "done",
+  "started_at": "2026-10-31T10:16:37Z",
+  "finished_at": "2026-10-31T10:19:56Z",
+  "source_pg_version": "14.19",
+  "replicas": 2,
+  "pods": [
+    {
+      "pod": "tsdb-0",
+      "role": "primary",
+      "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1@sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:56aad992ad52708fa03cd94a24cb242b3b531a4c7a49662ba08ffef913437fd3",
+      "server_version": "16.15"
+    },
+    {
+      "pod": "tsdb-1",
+      "role": "replica",
+      "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1@sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:56aad992ad52708fa03cd94a24cb242b3b531a4c7a49662ba08ffef913437fd3",
+      "server_version": "16.15"
+    }
+  ],
+  "baseline": "seeded|2.19.3|50400|2521572.95|840|3|2",
+  "checks": {
+    "version": {
+      "status": "pass",
+      "detail": "extversion 2.30.1, expected 2.30.1"
+    },
+    "rows": {
+      "status": "pass",
+      "detail": "50400 rows, sum 2521572.95; seeded 50400 rows, sum 2521572.95 at 2.19.3"
+    },
+    "jobs": {
+      "status": "pass",
+      "detail": "2 jobs registered, seeded 2; fx_job_ok 1 runs, fx_job_fail 1 failures"
+    },
+    "still_compressed": {
+      "status": "pass",
+      "detail": "3 compressed chunks; seeded 3"
+    },
+    "cagg_survived": {
+      "status": "pass",
+      "detail": "840 materialized rows; seeded 840"
+    },
+    "cagg_matches": {
+      "status": "pass",
+      "detail": "0 differing buckets; refresh ran"
+    },
+    "write_and_refresh": {
+      "status": "pass",
+      "detail": "insert ok, refresh ok; 1 new buckets, 60 rows in them"
+    },
+    "decompress": {
+      "status": "pass",
+      "detail": "3 chunks decompressed; 50400 rows, sum 2521572.95 before the new writes"
+    }
+  },
+  "apply_exit": 0,
+  "plan": {
+    "hops": 5,
+    "path": "verify/out/pg14/2.19-to-pg16-2.30.plan.json"
+  },
+  "route": {
+    "start": {
+      "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+      "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+    },
+    "steps": [
+      {
+        "action": "major_upgrade",
+        "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+        "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+        "from_pg": 14,
+        "to_pg": 15,
+        "ts": "2.19.3",
+        "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+        "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+        "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+        "to": "2.27.2"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+        "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+        "to": "2.28.3"
+      },
+      {
+        "action": "major_upgrade",
+        "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1-all",
+        "digest": "sha256:e8f5aeeea35474227bee96f60227942a8e63293a717ba3e8beb9731c3adbad4b",
+        "from_pg": 15,
+        "to_pg": 16,
+        "ts": "2.28.3",
+        "run_image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+        "run_digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+        "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+        "to": "2.30.1"
+      }
+    ]
+  },
+  "major_upgrades": [
+    {
+      "from_pg": 14,
+      "to_pg": 15,
+      "files": "copy",
+      "shared_inodes": 0
+    },
+    {
+      "from_pg": 15,
+      "to_pg": 16,
+      "files": "copy",
+      "shared_inodes": 0
+    }
+  ]
+}

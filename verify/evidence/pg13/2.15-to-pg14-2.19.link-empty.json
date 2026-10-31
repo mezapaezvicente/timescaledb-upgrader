@@ -1,0 +1,97 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "13",
+    "source_ts": "2.15",
+    "target_pg": "14",
+    "target_ts": "2.19"
+  },
+  "mode": "link-empty",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+      "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg14.19-ts2.19.3-all",
+      "digest": "sha256:127e0220562ee2e5b1abe001deb87670465bc55fca75aeaeaaf861b55734af47"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+      "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+    }
+  ],
+  "pg_version": "14.19",
+  "versions": {
+    "source": "2.15.3",
+    "target": "2.19.3",
+    "reached": "2.19.3"
+  },
+  "upgrader": {
+    "commit": "9313496de87111b596508b9eda11324500084687",
+    "dirty": false
+  },
+  "result": "pass",
+  "log": "verify/out/pg13/2.15-to-pg14-2.19.link-empty.log",
+  "recorded_at": "2026-10-31T11:52:09Z",
+  "stage": "done",
+  "started_at": "2026-10-31T11:50:10Z",
+  "finished_at": "2026-10-31T11:52:09Z",
+  "source_pg_version": "13.22",
+  "replicas": 2,
+  "pods": [
+    {
+      "pod": "tsdb-0",
+      "role": "primary",
+      "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3@sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:cd92b26829bbca55db23f9cb5b59d55e23a5eb413ef3fc0cdf4bf88d2f736012",
+      "server_version": "14.19"
+    },
+    {
+      "pod": "tsdb-1",
+      "role": "replica",
+      "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3@sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:cd92b26829bbca55db23f9cb5b59d55e23a5eb413ef3fc0cdf4bf88d2f736012",
+      "server_version": "14.19"
+    }
+  ],
+  "baseline": null,
+  "checks": null,
+  "apply_exit": 0,
+  "plan": {
+    "hops": 2,
+    "path": "verify/out/pg13/2.15-to-pg14-2.19.link.plan.json"
+  },
+  "route": {
+    "start": {
+      "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+      "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+    },
+    "steps": [
+      {
+        "action": "major_upgrade",
+        "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3-all",
+        "digest": "sha256:127e0220562ee2e5b1abe001deb87670465bc55fca75aeaeaaf861b55734af47",
+        "from_pg": 13,
+        "to_pg": 14,
+        "ts": "2.15.3",
+        "run_image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+        "run_digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+        "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+        "to": "2.19.3"
+      }
+    ]
+  },
+  "major_upgrades": [
+    {
+      "from_pg": 13,
+      "to_pg": 14,
+      "files": "link",
+      "shared_inodes": 91
+    }
+  ]
+}

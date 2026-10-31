@@ -1,0 +1,193 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "11",
+    "source_ts": "2.1",
+    "target_pg": "17",
+    "target_ts": "2.30"
+  },
+  "mode": "empty",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+      "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2",
+      "digest": "sha256:76890c52aeb917561b3304413aced05eaccb969383486a93f6a15e58aef47724"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+      "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+      "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+      "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+      "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+      "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg17.11-ts2.30.1-all",
+      "digest": "sha256:e1d9b67f589e09108d4c54871378f2b6588192a3cc7c307773fbfb3a6380ebc6"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+      "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+    }
+  ],
+  "pg_version": "17.11",
+  "versions": {
+    "source": "2.1.1",
+    "target": "2.30.1",
+    "reached": "2.30.1"
+  },
+  "upgrader": {
+    "commit": "9313496de87111b596508b9eda11324500084687",
+    "dirty": false
+  },
+  "result": "pass",
+  "log": "verify/out/pg11/2.1-to-pg17-2.30.empty.log",
+  "recorded_at": "2026-10-31T13:36:13Z",
+  "stage": "done",
+  "started_at": "2026-10-31T13:28:55Z",
+  "finished_at": "2026-10-31T13:36:13Z",
+  "source_pg_version": "11.11",
+  "replicas": 2,
+  "pods": [
+    {
+      "pod": "tsdb-0",
+      "role": "primary",
+      "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1@sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:659f0ed8e303892cf8ee3f87fc88a3278fcfeaf51d18340cbaa4cb9a68e71908",
+      "server_version": "17.11"
+    },
+    {
+      "pod": "tsdb-1",
+      "role": "replica",
+      "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1@sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:659f0ed8e303892cf8ee3f87fc88a3278fcfeaf51d18340cbaa4cb9a68e71908",
+      "server_version": "17.11"
+    }
+  ],
+  "baseline": null,
+  "checks": null,
+  "apply_exit": 0,
+  "plan": {
+    "hops": 9,
+    "path": "verify/out/pg11/2.1-to-pg17-2.30.plan.json"
+  },
+  "route": {
+    "start": {
+      "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+      "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525"
+    },
+    "steps": [
+      {
+        "action": "major_upgrade",
+        "image": "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2",
+        "digest": "sha256:76890c52aeb917561b3304413aced05eaccb969383486a93f6a15e58aef47724",
+        "from_pg": 11,
+        "to_pg": 12,
+        "ts": "2.1.1",
+        "run_image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+        "run_digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+        "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+        "to": "2.11.2"
+      },
+      {
+        "action": "major_upgrade",
+        "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+        "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+        "from_pg": 12,
+        "to_pg": 13,
+        "ts": "2.11.2",
+        "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+        "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+        "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+        "to": "2.15.3"
+      },
+      {
+        "action": "major_upgrade",
+        "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+        "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+        "from_pg": 13,
+        "to_pg": 15,
+        "ts": "2.15.3",
+        "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+        "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+        "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+        "to": "2.27.2"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+        "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+        "to": "2.28.3"
+      },
+      {
+        "action": "major_upgrade",
+        "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1-all",
+        "digest": "sha256:e1d9b67f589e09108d4c54871378f2b6588192a3cc7c307773fbfb3a6380ebc6",
+        "from_pg": 15,
+        "to_pg": 17,
+        "ts": "2.28.3",
+        "run_image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+        "run_digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+        "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+        "to": "2.30.1"
+      }
+    ]
+  },
+  "major_upgrades": [
+    {
+      "from_pg": 11,
+      "to_pg": 12,
+      "files": "copy",
+      "shared_inodes": 0
+    },
+    {
+      "from_pg": 12,
+      "to_pg": 13,
+      "files": "copy",
+      "shared_inodes": 0
+    },
+    {
+      "from_pg": 13,
+      "to_pg": 15,
+      "files": "copy",
+      "shared_inodes": 0
+    },
+    {
+      "from_pg": 15,
+      "to_pg": 17,
+      "files": "copy",
+      "shared_inodes": 0
+    }
+  ]
+}
