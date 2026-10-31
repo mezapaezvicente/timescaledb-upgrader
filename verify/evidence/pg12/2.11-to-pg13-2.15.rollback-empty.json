@@ -1,0 +1,116 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "12",
+    "source_ts": "2.11",
+    "target_pg": "13",
+    "target_ts": "2.15"
+  },
+  "mode": "rollback-empty",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+      "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+      "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+      "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+    }
+  ],
+  "pg_version": "12.22",
+  "versions": {
+    "source": "2.11.2",
+    "target": "2.11.2",
+    "reached": "2.11.2"
+  },
+  "upgrader": {
+    "commit": "e71e3649352b89687716083463dae928748a3b95",
+    "dirty": false
+  },
+  "result": "pass",
+  "log": "verify/out/pg12/2.11-to-pg13-2.15.rollback-empty.log",
+  "recorded_at": "2026-10-31T15:34:35Z",
+  "stage": "done",
+  "started_at": "2026-10-31T15:29:59Z",
+  "finished_at": "2026-10-31T15:34:35Z",
+  "source_pg_version": "12.22",
+  "replicas": 2,
+  "pods": [
+    {
+      "pod": "tsdb-0",
+      "role": "primary",
+      "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3@sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
+      "server_version": "13.22"
+    },
+    {
+      "pod": "tsdb-1",
+      "role": "replica",
+      "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3@sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
+      "server_version": "13.22"
+    }
+  ],
+  "baseline": null,
+  "checks": null,
+  "apply_exit": 0,
+  "plan": {
+    "hops": 2,
+    "path": "verify/out/pg12/2.11-to-pg13-2.15.plan.json"
+  },
+  "route": {
+    "start": {
+      "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+      "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+    },
+    "steps": [
+      {
+        "action": "major_upgrade",
+        "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+        "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+        "from_pg": 12,
+        "to_pg": 13,
+        "ts": "2.11.2",
+        "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+        "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+        "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+        "to": "2.15.3"
+      }
+    ]
+  },
+  "major_upgrades": [
+    {
+      "from_pg": 12,
+      "to_pg": 13,
+      "files": "copy",
+      "shared_inodes": 0
+    }
+  ],
+  "forward": {
+    "target": "2.15.3",
+    "apply_exit": 0
+  },
+  "rollback": {
+    "rollback_format": 1,
+    "from_pg": 13,
+    "to_pg": 12,
+    "lost": "every write made since the upgrade is lost: the old data directory is the cluster as it was when pg_upgrade ran, extension updates included",
+    "output": [
+      "going back from PostgreSQL 13 (system identifier 7702855416635031576) to 12: every write made since the upgrade is lost: the old data directory is the cluster as it was when pg_upgrade ran, extension updates included",
+      "scaled statefulset/tsdb to 0",
+      "PostgreSQL 13's data directory is now /home/postgres/pgdata/data.rolled-back-pg13-7702855416635031576; PostgreSQL 12's is back at /home/postgres/pgdata/data",
+      "deleted pgdata-tsdb-1",
+      "reset Patroni's state for scope tsdb: endpoints/tsdb, endpoints/tsdb-config",
+      "back: primary tsdb-0 on PostgreSQL 12, system identifier 7702854705661722650 (the old cluster's)"
+    ],
+    "result": "pass"
+  }
+}
