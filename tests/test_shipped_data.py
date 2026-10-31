@@ -218,3 +218,62 @@ def test_every_route_a_row_cites_is_the_one_its_records_ran():
             if key in entry.evidence:
                 record = load_record(REPO / entry.evidence[key])
                 assert record.get("route") == entry.route, (entry.transition, key)
+
+
+# What decides how a verification run goes. A record made before a change to
+# any of these ran code that no longer ships.
+VERDICT_CODE = (
+    "tools/tsupgrade/plan.py", "tools/tsupgrade/apply.py", "tools/tsupgrade/majors.py",
+    "tools/tsupgrade/drift.py", "tools/tsupgrade/gates.py", "tools/tsupgrade/preflight.py",
+    "tools/tsupgrade/scripts",
+)
+
+
+def _git(*args):
+    import subprocess
+    try:
+        done = subprocess.run(["git", "-C", str(REPO)] + list(args), capture_output=True, text=True)
+    except FileNotFoundError:
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def stale_records(entries, git=_git):
+    """``(transition, key, why)`` for every cited record that ran code which
+    has changed since, or ran from a dirty tree."""
+    found = []
+    for entry in entries:
+        for key, path in (entry.evidence or {}).items():
+            upgrader = load_record(REPO / path)["upgrader"]
+            commit = upgrader.get("commit")
+            if upgrader.get("dirty") is not False or not commit:
+                found.append((entry.transition, key, "not from a clean tree"))
+                continue
+            changed = git("log", "--format=%h", commit + "..HEAD", "--", *VERDICT_CODE)
+            if changed is None:
+                found.append((entry.transition, key, "commit {0} is not in this history".format(commit[:8])))
+            elif changed:
+                found.append((entry.transition, key, "ran {0}; changed since by {1}".format(
+                    commit[:8], " ".join(changed.split()))))
+    return found
+
+
+def test_every_cited_record_ran_the_code_that_ships():
+    """R5: verdicts must come from the code that ships. Enforced once a
+    release is tagged (every row re-run, then `git tag v...`); until then the
+    re-runs are still to come, which TODO.md tracks."""
+    if _git("rev-parse", "HEAD") is None:
+        pytest.skip("not a git checkout")
+    if not _git("tag", "--list", "v*"):
+        pytest.skip("no release tagged yet: re-run every row, then tag (R5)")
+    stale = stale_records(load_matrix())
+    assert not stale, "\n".join("{0} [{1}]: {2}".format(*s) for s in stale[:20])
+
+
+def test_the_freshness_rule_catches_a_record_older_than_the_code():
+    entry = next(e for e in load_matrix() if e.evidence)
+    assert stale_records([entry], git=lambda *a: "") == []
+    found = stale_records([entry], git=lambda *a: "abc1234")
+    assert found and "changed since by abc1234" in found[0][2]
+    found = stale_records([entry], git=lambda *a: None)
+    assert found and "not in this history" in found[0][2]

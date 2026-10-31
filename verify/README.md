@@ -105,6 +105,13 @@ link runs) into `data/upgrade-matrix.json`. A row whose records name no
 route, or different ones, keeps none, and `plan` treats it as unestablished
 until it is run again.
 
+**Fresh evidence.** A verdict has to come from the code that ships. Before a
+release is tagged, every row is run again so all records name one commit;
+`tests/test_shipped_data.py` then fails for any cited record from a dirty
+tree, or one whose commit has been followed by a change to `plan.py`,
+`apply.py`, `majors.py`, `drift.py`, `gates.py`, `preflight.py` or
+`tools/tsupgrade/scripts/`. The check is skipped until the first `v*` tag.
+
 **What is not a row result.** If staging or seeding fails, that is the harness
 or the environment, not the transition. It writes no record; it prints
 `ERROR`, logs it, and moves on. `verify/out/runs.jsonl` has one line per row
