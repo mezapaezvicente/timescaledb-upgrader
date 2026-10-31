@@ -62,7 +62,7 @@ from .images import (
     parse_release_tag,
 )
 from .matrix import MatrixError, default_matrix_path, load_matrix
-from .plan import PlanRefused, build_plan, render_runbook, route_images
+from .plan import PlanRefused, build_plan, render_runbook, render_script, route_images
 from .preflight import (
     FAIL,
     UNKNOWN,
@@ -590,8 +590,14 @@ def cmd_plan(args: argparse.Namespace) -> int:
     if args.output:
         _write_json(Path(args.output), plan)
         print("wrote {0}".format(args.output), file=sys.stderr)
-    if args.json:
+    fmt = "json" if args.json else args.format
+    if fmt == "json":
         print(json.dumps(plan, indent=2))
+    elif fmt == "script":
+        # Bytes, so it stays LF on Windows: bash will not run a CRLF script.
+        sys.stdout.flush()
+        sys.stdout.buffer.write((render_script(plan) + "\n").encode("utf-8"))
+        sys.stdout.flush()
     else:
         print(render_runbook(plan))
     return EXIT_OK
@@ -877,7 +883,12 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument(
         "--registry-timeout", type=float, default=15.0, dest="registry_timeout"
     )
-    plan.add_argument("--json", action="store_true")
+    plan.add_argument("--json", action="store_true", help="same as --format json")
+    plan.add_argument(
+        "--format", choices=("runbook", "json", "script"), default="runbook",
+        help="script: the plan as a commented shell script to run by hand under any "
+        "deployment; it does the SQL and pauses for image rollouts and pg_upgrade",
+    )
     plan.set_defaults(func=cmd_plan)
 
     # --- apply ---

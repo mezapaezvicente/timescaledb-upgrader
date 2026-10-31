@@ -86,6 +86,7 @@ __all__ = [
     "build_plan",
     "pinned",
     "render_runbook",
+    "render_script",
     "route_images",
     "route_of",
 ]
@@ -706,4 +707,114 @@ def render_runbook(plan: Dict[str, Any]) -> str:
                          "image's default release, past any stop this plan makes")
         elif action == "analyze":
             lines.append("{0}. vacuumdb --all --analyze-in-stages: {1}".format(prefix, step["why"]))
+    return "\n".join(lines)
+
+
+def _shell_quote(text: str) -> str:
+    return "'" + str(text).replace("'", "'\\''") + "'"
+
+
+_SCRIPT_HEAD = """#!/usr/bin/env bash
+# TimescaleDB upgrade, as planned by `tsupgrade plan --format script`.
+#
+# The plan's version stepping, for a person to run step by step under any
+# deployment (an operator, a chart, Spilo, plain Kubernetes): the stops for
+# known TimescaleDB bugs, the images that ship each release, the release
+# pg_upgrade needs on both majors. What only the deployment can do (roll out
+# an image, run pg_upgrade) is described and paused on; what SQL can do is
+# done here, against the primary, with psql -X.
+#
+# Connection: the usual libpq variables (PGHOST, PGPORT, PGUSER, PGPASSWORD)
+# pointing at the primary. DATABASES: every database with timescaledb, space
+# separated; each must be at the source version.
+set -euo pipefail
+: "${DATABASES:?set DATABASES to every database with timescaledb installed}"
+
+say() { printf '\\n== %s\\n' "$*"; }
+pause() { printf '%s\\n' "$@"; read -r -p "Done? Press Enter to go on, Ctrl-C to stop. " _; }
+sql() { psql -X -v ON_ERROR_STOP=1 -qAt -d "$1" -c "$2"; }
+check_version() {
+  local db v
+  for db in $DATABASES; do
+    v=$(sql "$db" "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'")
+    [ "$v" = "$1" ] || { echo "$db reports timescaledb ${v:-nothing}, expected $1; stopping"; exit 1; }
+  done
+  echo "every database reports $1 (on the primary; check the replicas as well)"
+}
+"""
+
+
+def render_script(plan: Dict[str, Any]) -> str:
+    """The plan as a commented shell script: the same steps as the runbook,
+    with the SQL ones done and the deployment's ones paused on."""
+    src, tgt = plan["source"], plan["target"]
+    m = plan.get("matrix") or {}
+    lines = [_SCRIPT_HEAD.rstrip("\n"), ""]
+    if plan["mode"] == VERIFICATION:
+        lines += ["# !!! VERIFICATION RUN: built WITHOUT an established verdict. Only for a",
+                  "# !!! disposable database whose result you intend to record.",
+                  'echo "VERIFICATION RUN: not for production" >&2', ""]
+    lines += [
+        "# source : pg{0} / ts{1}".format(src["pg"], src["ts"]),
+        "# target : pg{0} / ts{1} ({2})".format(tgt["pg"], tgt["ts"], tgt["image"]),
+        "# matrix : {0}".format(
+            "{0}, verified for this route".format(m.get("verdict")) if m.get("route_verified")
+            else "{0}, not verified for this route".format(m.get("verdict") or "no entry")),
+    ]
+    lines += ["# warning: {0}".format(w) for w in plan["warnings"]]
+    lines += ["", "check_version {0}".format(_shell_quote(src["ts"]))]
+    for step in plan["steps"]:
+        hop, action = step["hop"], step["action"]
+        lines.append("")
+        if action == "preflight":
+            lines += ["say {0}".format(_shell_quote("hop {0}: preflight against {1}".format(hop, step["image"]))),
+                      "# Optional, Patroni clusters only:",
+                      "#   tsupgrade preflight --target-image {0} --target-ts {1}".format(
+                          step["image"], step["target_ts"])]
+        elif action == "ensure_image":
+            image = pinned(step["image"], step.get("digest"))
+            lines += ["say {0}".format(_shell_quote("hop {0}: every instance on {1}".format(hop, image))),
+                      "pause {0} {1}".format(
+                          _shell_quote("Roll every instance onto " + image + ", replicas first and the "
+                                       "primary last, the way your deployment does it."),
+                          _shell_quote("Skip this if they already run it."))]
+        elif action == "update_extension":
+            lines += ["say {0}".format(_shell_quote("hop {0}: timescaledb {1} -> {2}".format(
+                hop, step["from"], step["to"])))]
+            if step.get("why"):
+                lines.append("# stops here: {0}".format(step["why"]))
+            lines += ["# one fresh session per database, the ALTER its first statement",
+                      "for db in $DATABASES; do sql \"$db\" {0}; done".format(_shell_quote(step["sql"]))]
+        elif action == "cycle_sessions":
+            lines += ["say {0}".format(_shell_quote("hop {0}: cycle client sessions".format(hop))),
+                      "# sessions, on replicas too, keep the old library loaded until they reconnect",
+                      "sql postgres \"SELECT count(pg_terminate_backend(pid)) FROM pg_stat_activity "
+                      "WHERE backend_type = 'client backend' AND pid <> pg_backend_pid()\"",
+                      "pause 'Do the same on every replica (or restart their clients).'"]
+        elif action == "verify_version":
+            lines.append("check_version {0}".format(_shell_quote(step["expect"])))
+        elif action == "major_upgrade":
+            both = pinned(step["image"], step.get("digest"))
+            run = pinned(step["run_image"], step.get("run_digest"))
+            lines += [
+                "say {0}".format(_shell_quote("hop {0}: PostgreSQL {1} -> {2} at TimescaleDB {3}".format(
+                    hop, step["from_pg"], step["to_pg"], step["ts"]))),
+                "# pg_upgrade{0}, in {1}, which carries both majors' binaries and".format(
+                    " --link" if step["link"] else "", both),
+                "# TimescaleDB {0} for both. initdb the new cluster with the old one's".format(step["ts"]),
+                "# encoding, locale and data checksums, and shared_preload_libraries =",
+                "# 'timescaledb'. Do NOT run the update_extensions.sql pg_upgrade writes: it",
+                "# updates timescaledb straight to the image's default release, past the",
+                "# stops in this script. Then run PostgreSQL {0} on {1};".format(step["to_pg"], run),
+                "# the system identifier changes, so replicas are re-created from the new",
+                "# primary and backups and the WAL archive start over (pgBackRest:",
+                "# stanza-upgrade, then a full backup).",
+                "pause {0}".format(_shell_quote(
+                    "Upgrade PostgreSQL {0} -> {1} as above, then point the PG* variables at the "
+                    "new primary.".format(step["from_pg"], step["to_pg"]))),
+            ]
+        elif action == "analyze":
+            lines += ["say 'statistics: pg_upgrade carries none over before PostgreSQL 18'",
+                      "vacuumdb --all --analyze-in-stages"]
+    lines += ["", "say 'done: timescaledb {0} on PostgreSQL {1}'".format(tgt["ts"], tgt["pg"]), ""]
     return "\n".join(lines)

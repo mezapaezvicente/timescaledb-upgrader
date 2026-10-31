@@ -392,6 +392,24 @@ it had already done. It never retries or rolls back on its own.
 TimescaleDB must be at the source version, because a real upgrade has to
 cover them all.
 
+### Without `apply`: a script for any deployment
+
+`apply` drives a Patroni StatefulSet itself, so it cannot run under an
+operator, which would fight it for the pods. The version stepping does not
+depend on Patroni, and it is the part operators leave to you: the stops for
+known TimescaleDB bugs, the images that ship each release, the release
+`pg_upgrade` needs on both majors, never running `update_extensions.sql`.
+`plan --format script` writes the plan as a commented shell script. It runs
+the `ALTER EXTENSION`s and the version checks with `psql -X` against the
+primary (`PG*` variables, `DATABASES`), and stops at each step only your
+deployment can do (rolling out an image, the `pg_upgrade`), saying exactly
+what that step must do.
+
+```bash
+bash scripts/tsupgrade.sh plan --from-pg 15.13 --from-ts 2.20.3   --target-image timescale/timescaledb-ha:pg15.18-ts2.28.3 --format script > upgrade.sh
+DATABASES="app metrics" PGHOST=... bash upgrade.sh
+```
+
 ### Changing the PostgreSQL major
 
 A target on a newer major is planned as a route of `pg_upgrade` hops between
