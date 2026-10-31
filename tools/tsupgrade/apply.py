@@ -84,13 +84,20 @@ restart. Either way the rollout waits for a primary to be back before going on.
 from __future__ import annotations
 
 import json
-import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
 from .plan import PLAN_FORMAT, VERIFICATION, pinned
+from .steps import (
+    EnsureImage,
+    MajorUpgrade,
+    Preflight,
+    UpdateExtension,
+    VerifyVersion,
+    parse_steps,
+)
 from .preflight import (
     BACKUPS_AT_A_MAJOR_UPGRADE,
     FAIL,
@@ -118,10 +125,6 @@ DONE = "done"
 SKIPPED = "skipped"
 FAILED = "failed"
 
-_UPDATE_SQL = "ALTER EXTENSION timescaledb UPDATE TO '{0}';"
-_EXACT_VERSION = re.compile(r"^[0-9]+(\.[0-9]+)*$")
-_RELEASE = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class ApplyRefused(Exception):
@@ -233,47 +236,7 @@ def check_plan(plan: Any, opts: ApplyOptions) -> List[str]:
     source = plan.get("source") or {}
     if not source.get("pg") or not source.get("ts"):
         reasons.append("plan.source needs pg and ts")
-    steps = plan.get("steps")
-    if not isinstance(steps, list):
-        return reasons + ["plan.steps is not a list"]
-    for i, step in enumerate(steps):
-        if not isinstance(step, dict):
-            reasons.append("steps[{0}] is not an object".format(i))
-            continue
-        action = step.get("action")
-        for key in ("digest", "run_digest"):
-            if step.get(key) is not None and not _DIGEST.match(str(step[key])):
-                reasons.append("steps[{0}]: {1} is not a sha256 digest: {2!r}".format(
-                    i, key, step[key]))
-        if action not in _ACTIONS:
-            reasons.append("steps[{0}]: unknown action {1!r}".format(i, action))
-        elif action == "update_extension":
-            to = str(step.get("to") or "")
-            if not _EXACT_VERSION.match(to):
-                reasons.append("steps[{0}]: 'to' is not a version: {1!r}".format(i, to))
-            elif step.get("sql") != _UPDATE_SQL.format(to):
-                reasons.append(
-                    "steps[{0}]: sql is not the one statement its 'to' implies "
-                    "({1})".format(i, _UPDATE_SQL.format(to))
-                )
-        elif action in ("preflight", "ensure_image") and not step.get("image"):
-            reasons.append("steps[{0}]: {1} needs an image".format(i, action))
-        elif action == "preflight" and step.get("pg_upgrade") is not None and not isinstance(
-                (step["pg_upgrade"] or {}).get("link"), bool):
-            reasons.append("steps[{0}]: preflight's pg_upgrade needs link true or false".format(i))
-        elif action == "verify_version" and not step.get("expect"):
-            reasons.append("steps[{0}]: verify_version needs expect".format(i))
-        elif action == "major_upgrade":
-            if not step.get("image") or not step.get("run_image"):
-                reasons.append("steps[{0}]: major_upgrade needs image and run_image".format(i))
-            if not (isinstance(step.get("from_pg"), int) and isinstance(step.get("to_pg"), int)
-                    and step["from_pg"] < step["to_pg"]):
-                reasons.append("steps[{0}]: major_upgrade needs from_pg below to_pg".format(i))
-            if not _RELEASE.match(str(step.get("ts") or "")):
-                reasons.append("steps[{0}]: major_upgrade 'ts' is not a version".format(i))
-            if not isinstance(step.get("link"), bool):
-                reasons.append("steps[{0}]: major_upgrade needs link true or false".format(i))
-    return reasons
+    return reasons + parse_steps(plan.get("steps"))[1]
 
 
 def check_statefulset(kube: Kube, opts: ApplyOptions) -> List[str]:
@@ -438,27 +401,27 @@ class _Cluster:
 
 
 def _step_preflight(
-    step: Dict[str, Any],
+    step: Preflight,
     opts: ApplyOptions,
     preflight: Callable[[PreflightOptions], Sequence[Any]],
 ) -> _Outcome:
     results = preflight(
         PreflightOptions(
-            target_image=step["image"],
+            target_image=step.image,
             context=opts.context,
             namespace=opts.namespace,
             selector=opts.selector,
             container=opts.container,
             psql_user=opts.psql_user,
             admin_db=opts.admin_db,
-            target_pg=step.get("target_pg"),
-            target_ts=step.get("target_ts"),
+            target_pg=step.target_pg,
+            target_ts=step.target_ts,
             matrix_path=opts.matrix_path,
             timeout=opts.timeout,
             registry_timeout=opts.registry_timeout,
-            pg_upgrade_link=(step.get("pg_upgrade") or {}).get("link"),
-            pg_upgrade_image=(step.get("pg_upgrade") or {}).get("image"),
-            pg_upgrade_to=(step.get("pg_upgrade") or {}).get("to_pg"),
+            pg_upgrade_link=step.pg_upgrade.link if step.pg_upgrade else None,
+            pg_upgrade_image=step.pg_upgrade.image if step.pg_upgrade else None,
+            pg_upgrade_to=step.pg_upgrade.to_pg if step.pg_upgrade else None,
         )
     )
     lines = ["{0}: {1} - {2}".format(r.name, r.status, r.summary) for r in results]
@@ -474,8 +437,8 @@ def _step_preflight(
     return _Outcome("{0} checks, none failed".format(len(results)), lines)
 
 
-def _step_ensure_image(step: Dict[str, Any], cluster: _Cluster) -> _Outcome:
-    image = pinned(step["image"], step.get("digest"))
+def _step_ensure_image(step: EnsureImage, cluster: _Cluster) -> _Outcome:
+    image = pinned(step.image, step.digest)
     opts = cluster.opts
     sts = cluster.kube.json(["get", "statefulset", opts.statefulset])
     containers = sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers") or []
@@ -554,14 +517,14 @@ def _roll(
 
 
 def _step_update(
-    step: Dict[str, Any], cluster: _Cluster, databases: Sequence[str]
+    step: UpdateExtension, cluster: _Cluster, databases: Sequence[str]
 ) -> _Outcome:
     primary = cluster.primary()
     if primary is None:
         raise _StepFailed("no ready primary to run ALTER EXTENSION on")
     output: List[str] = []
     for db in databases:
-        rc, out, err = cluster.psql(primary, db, step["sql"])
+        rc, out, err = cluster.psql(primary, db, step.sql)
         if rc != 0:
             done = ", ".join(output) or "none"
             raise _StepFailed(
@@ -569,8 +532,8 @@ def _step_update(
                 [line for line in (err or out).splitlines() if line.strip()],
             )
         output.append(db)
-    return _Outcome("updated {0} database(s) to {1}".format(len(databases), step["to"]), [
-        "{0}: {1}".format(db, step["sql"]) for db in output
+    return _Outcome("updated {0} database(s) to {1}".format(len(databases), step.to), [
+        "{0}: {1}".format(db, step.sql) for db in output
     ])
 
 
@@ -592,9 +555,9 @@ def _step_cycle(cluster: _Cluster, databases: Sequence[str]) -> _Outcome:
 
 
 def _step_verify(
-    step: Dict[str, Any], cluster: _Cluster, databases: Sequence[str]
+    step: VerifyVersion, cluster: _Cluster, databases: Sequence[str]
 ) -> _Outcome:
-    expect = step["expect"]
+    expect = step.expect
     sql = "SELECT coalesce((SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'), '')"
     pods = [p["metadata"]["name"] for p in cluster.pods()]
     seen: Dict[Tuple[str, str], str] = {}
@@ -634,7 +597,7 @@ def load_script(name: str) -> str:
 _PG_UPGRADE_SCRIPT = load_script("pg_upgrade.sh")
 
 
-def _step_major_upgrade(step: Dict[str, Any], cluster: _Cluster) -> _Outcome:
+def _step_major_upgrade(step: MajorUpgrade, cluster: _Cluster) -> _Outcome:
     opts = cluster.opts
     kube = cluster.kube
     output: List[str] = []
@@ -874,9 +837,9 @@ def _run_on_ordinal_0(kube: Kube, sts: Dict[str, Any], opts: ApplyOptions, pod: 
 
 
 def _major_upgrade(step, cluster, kube, opts, output, state):
-    old, new = step["from_pg"], step["to_pg"]
-    image = pinned(step["image"], step.get("digest"))
-    run_image = pinned(step["run_image"], step.get("run_digest"))
+    old, new = step.from_pg, step.to_pg
+    image = pinned(step.image, step.digest)
+    run_image = pinned(step.run_image, step.run_digest)
     sts = kube.json(["get", "statefulset", opts.statefulset])
     replicas = int(sts.get("spec", {}).get("replicas") or 1)
     template = sts.get("spec", {}).get("template", {}).get("spec", {})
@@ -950,7 +913,7 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
     rc, out, err = _run_on_ordinal_0(kube, sts, opts, pod, image, _PG_UPGRADE_SCRIPT, dict({
         "FROM": str(old), "TO": str(new),
         "PG_BIN_OLD": opts.pg_bin.format(old), "PG_BIN_NEW": opts.pg_bin.format(new),
-        "DATA": opts.data_dir, "LINK": "--link" if step["link"] else "",
+        "DATA": opts.data_dir, "LINK": "--link" if step.link else "",
     }, **locale))
     if rc != 0:
         raise _StepFailed("cannot start the pg_upgrade pod: " + (err or out))
@@ -977,7 +940,7 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
                     new, old, opts.data_dir,
                     "; with --link it is reusable only while the new cluster has never started, "
                     "after renaming its global/pg_control.old back to global/pg_control"
-                    if step["link"] else "")] + ["    " + l for l in finish]
+                    if step.link else "")] + ["    " + l for l in finish]
 
     # 4. The replicas' copies and Patroni's stored state belong to the old cluster.
     for i in range(1, replicas):
@@ -1027,7 +990,7 @@ def _major_upgrade(step, cluster, kube, opts, output, state):
         primary, major, sysid))
     return _Outcome("PostgreSQL {0} -> {1}; {2} instance(s) on {3}".format(
         old, new, replicas, run_image), output, detail={
-            "from_pg": old, "to_pg": new, "link": bool(step["link"]),
+            "from_pg": old, "to_pg": new, "link": step.link,
             "old_image": template_image, "run_image": run_image,
             "data": opts.data_dir, "kept": "{0}.pg{1}".format(opts.data_dir, old),
             "replicas": replicas, "claim": claim, "scope": scope,
@@ -1051,9 +1014,6 @@ def _step_analyze(cluster: _Cluster, databases: Sequence[str]) -> _Outcome:
         raise _StepFailed("vacuumdb --analyze-in-stages failed", lines[-20:])
     return _Outcome("analyzed every database on {0}".format(primary), lines[-6:])
 
-
-_ACTIONS = ("preflight", "ensure_image", "update_extension", "cycle_sessions", "verify_version",
-            "major_upgrade", "analyze")
 
 
 # ---------------------------------------------------------------------------
@@ -1136,23 +1096,20 @@ def apply_plan(
     }
     failure: Optional[Dict[str, Any]] = None
 
-    for step in plan["steps"]:
-        action, hop = step["action"], step.get("hop", 0)
+    run: Dict[str, Callable[[Any], _Outcome]] = {
+        "preflight": lambda step: _step_preflight(step, opts, preflight),
+        "ensure_image": lambda step: _step_ensure_image(step, cluster),
+        "update_extension": lambda step: _step_update(step, cluster, databases),
+        "cycle_sessions": lambda step: _step_cycle(cluster, databases),
+        "verify_version": lambda step: _step_verify(step, cluster, databases),
+        "major_upgrade": lambda step: _step_major_upgrade(step, cluster),
+        "analyze": lambda step: _step_analyze(cluster, databases),
+    }
+    steps, _ = parse_steps(plan["steps"])  # check_plan has already refused a bad one
+    for step in steps:
+        action, hop = step.action, step.hop
         try:
-            if action == "preflight":
-                outcome = _step_preflight(step, opts, preflight)
-            elif action == "ensure_image":
-                outcome = _step_ensure_image(step, cluster)
-            elif action == "update_extension":
-                outcome = _step_update(step, cluster, databases)
-            elif action == "cycle_sessions":
-                outcome = _step_cycle(cluster, databases)
-            elif action == "major_upgrade":
-                outcome = _step_major_upgrade(step, cluster)
-            elif action == "analyze":
-                outcome = _step_analyze(cluster, databases)
-            else:
-                outcome = _step_verify(step, cluster, databases)
+            outcome = run[action](step)
         except (_StepFailed, PreflightError) as exc:
             out = exc.output if isinstance(exc, _StepFailed) else []
             summary = exc.summary if isinstance(exc, _StepFailed) else str(exc)
