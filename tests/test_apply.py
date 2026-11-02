@@ -325,7 +325,7 @@ def test_pod_deletion_does_not_block_on_graceful_shutdown():
 def test_old_aggregates_stop_the_run_before_any_write():
     """The stop comes from reading alone: no preflight step, no pod, no ALTER."""
     kube = FakeKube(PG15_18, "15.18", {"verify": "2.20.3"})
-    kube.old_caggs = chr(31).join(["public.ca", "public.t", "1024", "1", "0", "", ""])
+    kube.old_caggs = chr(31).join(["public.ca", "public.t", "1024", "1", "0", "", "", "end"])
     with pytest.raises(ApplyRefused) as refused:
         _run(_plan(), kube)
     assert kube.writes == [] and refused.value.plain
@@ -334,7 +334,7 @@ def test_old_aggregates_stop_the_run_before_any_write():
 
 def test_agreeing_migrates_in_the_order_the_stop_said():
     kube = FakeKube(PG15_18, "15.18", {"verify": "2.20.3"})
-    kube.old_caggs = chr(31).join(["public.ca", "public.t", "1024", "1", "0", "", ""])
+    kube.old_caggs = chr(31).join(["public.ca", "public.t", "1024", "1", "0", "", "", "end"])
     calls = []
     original = kube.exec
 

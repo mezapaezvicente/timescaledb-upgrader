@@ -29,8 +29,9 @@ from tsupgrade.steps import (
     VerifyVersion,
 )
 
-CAGG = "\x1f".join(["public.fx_hourly", "public.fx_metrics", "311296", "2", "1", "", "reader:SELECT"])
-WITH_VIEW = "\x1f".join(["public.fx_hourly", "public.fx_metrics", "311296", "2", "1", "public.fx_depends", ""])
+CAGG = "\x1f".join(["public.fx_hourly", "public.fx_metrics", "311296", "2", "1", "", "reader:SELECT", "end"])
+WITH_VIEW = "\x1f".join(["public.fx_hourly", "public.fx_metrics", "311296", "2", "1", "public.fx_depends", "", "end"])
+BARE = "\x1f".join(["public.fx_hourly", "public.fx_metrics", "311296", "2", "0", "", "", "end"])
 
 
 def _route():
@@ -167,14 +168,32 @@ def test_a_route_below_2_25_is_not_stopped_and_not_even_asked():
     assert _decide(list(steps), cluster) == steps and cluster.sql == []
 
 
-def test_a_question_that_fails_does_not_stop_it_and_is_told():
-    """The gate at the hop still stops it; a guess here would be worse."""
-    told = []
+def test_a_question_that_fails_stops_it_before_anything():
+    """Measured: going on left it to the gate at hop 6, after three pg_upgrades."""
     cluster = Cluster()
     cluster.psql = lambda *a: (1, "", "connection lost")
+    text = _refusal(cluster=cluster, migrate_caggs=True)
+    assert "could not be established" in text and "Nothing has been changed" in text
+
+
+def test_no_primary_stops_it_before_anything():
     steps = _route()
-    assert _decide(list(steps), cluster, notify=told.append) == steps
-    assert "could not establish" in told[0]
+    replica = Instance(pod="tsdb-1", role="replica", extensions={"verify": "2.1.1"})
+    with pytest.raises(ApplyRefused, match="no primary"):
+        _plan_cagg_migration(steps, {"source": {"ts": "2.1.1"}}, Cluster(), [replica], ["verify"],
+                             ApplyOptions())
+
+
+def test_empty_last_fields_survive_output_being_stripped():
+    """Measured on pg11: kubectl output is stripped, chr(31) counts as whitespace
+    to Python, and an aggregate with no views and no grants looked malformed."""
+    def runner(database, sql):
+        if "information_schema.columns" in sql:
+            return 0, "f", ""
+        return 0, BARE.strip(), ""
+
+    found = old_caggs(runner, "verify", "2.1.1")
+    assert found and found[0].dependents == () and found[0].grants == ()
 
 
 # --- the step -----------------------------------------------------------------
@@ -271,6 +290,7 @@ def test_old_caggs_reads_the_report():
         if "information_schema.columns" in sql:
             return 0, "t", ""
         assert sql.endswith("WHERE c.finalized IS FALSE")
+        assert "'end')" in sql
         return 0, CAGG, ""
 
     assert old_caggs(runner, "verify", "2.15.3") == [OldCagg(

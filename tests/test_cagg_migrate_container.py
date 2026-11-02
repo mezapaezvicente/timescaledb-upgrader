@@ -47,14 +47,15 @@ class Box:
         done = subprocess.run(["docker", "exec", "-i", self.name] + argv, capture_output=True)
         return done.returncode, done.stdout.decode("utf-8"), done.stderr.decode("utf-8")
 
-    def database(self, name, view=False):
+    def database(self, name, view=False, grant=True):
         assert self.psql("postgres", "CREATE DATABASE " + name)[0] == 0
         self.psql(name, "DROP EXTENSION IF EXISTS timescaledb CASCADE")
         assert self.psql(name, "CREATE EXTENSION timescaledb VERSION '2.1.1'")[0] == 0
         rc, _, err = self.psql(name, stdin=SEED.read_text(encoding="utf-8"))
         assert rc == 0, err
-        self.psql(name, "DO $$ BEGIN CREATE ROLE reader; EXCEPTION WHEN duplicate_object THEN NULL; END $$")
-        assert self.psql(name, "GRANT SELECT ON fx_hourly TO reader")[0] == 0
+        if grant:
+            self.psql(name, "DO $$ BEGIN CREATE ROLE reader; EXCEPTION WHEN duplicate_object THEN NULL; END $$")
+            assert self.psql(name, "GRANT SELECT ON fx_hourly TO reader")[0] == 0
         if view:
             assert self.psql(name, "CREATE VIEW fx_depends AS SELECT device FROM fx_hourly")[0] == 0
 
@@ -109,6 +110,17 @@ def test_the_step_clears_the_gate_and_keeps_data_and_grants(box):
     assert rc == 0, err
     lines = [l.split("|") for l in out.splitlines() if l.startswith("check|")]
     assert len(lines) >= 7 and all(l[2] == "pass" for l in lines), lines
+
+
+def test_an_aggregate_with_no_views_and_no_grants_is_read_through_stripped_output(box):
+    """As kubectl hands it over: this is what got past the check on pg11."""
+    box.database("bare", grant=False)
+    def runner(database, sql):
+        rc, out, err = box.psql(database, sql)
+        return rc, out.strip(), err.strip()
+
+    found = old_caggs(runner, "bare", "2.1.1")
+    assert [c.name for c in found] == ["public.fx_hourly"] and found[0].grants == ()
 
 
 def test_a_view_on_the_aggregate_is_found_at_the_oldest_release(box):
