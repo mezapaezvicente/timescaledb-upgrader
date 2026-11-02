@@ -36,15 +36,15 @@
     "reached": "2.19.3"
   },
   "upgrader": {
-    "commit": "0c4a9ac5ed304c985420f865c68c89ac572fe14d",
+    "commit": "e2e3c13344fd4246561de8f948c4a0d5bd5730ec",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg12/2.11-to-pg14-2.19.seeded.log",
-  "recorded_at": "2026-10-31T18:06:34Z",
+  "recorded_at": "2026-11-02T09:47:48Z",
   "stage": "done",
-  "started_at": "2026-10-31T18:01:30Z",
-  "finished_at": "2026-10-31T18:06:34Z",
+  "started_at": "2026-11-02T09:42:44Z",
+  "finished_at": "2026-11-02T09:47:48Z",
   "source_pg_version": "12.22",
   "replicas": 2,
   "pods": [

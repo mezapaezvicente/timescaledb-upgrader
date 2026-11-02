@@ -23,7 +23,21 @@
         "empty": "verify/evidence/pg11/1.7-to-2.1.empty.json",
         "seeded": "verify/evidence/pg11/1.7-to-2.1.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+          "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+            "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525",
+            "to": "2.1.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "11",
@@ -38,7 +52,21 @@
         "empty": "verify/evidence/pg11/2.0-to-2.1.empty.json",
         "seeded": "verify/evidence/pg11/2.0-to-2.1.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+          "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+            "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525",
+            "to": "2.1.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "11",
@@ -73,7 +101,31 @@
         "link-empty": "verify/evidence/pg11/2.1-to-pg12-2.11.link-empty.json",
         "link-seeded": "verify/evidence/pg11/2.1-to-pg12-2.11.link-seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+          "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2",
+            "digest": "sha256:76890c52aeb917561b3304413aced05eaccb969383486a93f6a15e58aef47724",
+            "from_pg": 11,
+            "to_pg": 12,
+            "ts": "2.1.1",
+            "run_image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "run_digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "11",
@@ -97,7 +149,47 @@
         "link-empty": "verify/evidence/pg11/2.1-to-pg13-2.15.link-empty.json",
         "link-seeded": "verify/evidence/pg11/2.1-to-pg13-2.15.link-seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+          "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2",
+            "digest": "sha256:76890c52aeb917561b3304413aced05eaccb969383486a93f6a15e58aef47724",
+            "from_pg": 11,
+            "to_pg": 12,
+            "ts": "2.1.1",
+            "run_image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "run_digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+            "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+            "from_pg": 12,
+            "to_pg": 13,
+            "ts": "2.11.2",
+            "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "11",
@@ -123,55 +215,493 @@
         "link-empty": "verify/evidence/pg11/2.1-to-pg14-2.19.link-empty.json",
         "link-seeded": "verify/evidence/pg11/2.1-to-pg14-2.19.link-seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+          "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2",
+            "digest": "sha256:76890c52aeb917561b3304413aced05eaccb969383486a93f6a15e58aef47724",
+            "from_pg": 11,
+            "to_pg": 12,
+            "ts": "2.1.1",
+            "run_image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "run_digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+            "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+            "from_pg": 12,
+            "to_pg": 13,
+            "ts": "2.11.2",
+            "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3-all",
+            "digest": "sha256:127e0220562ee2e5b1abe001deb87670465bc55fca75aeaeaaf861b55734af47",
+            "from_pg": 13,
+            "to_pg": 14,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "run_digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "11",
       "source_ts": "2.1",
       "target_pg": "15",
       "target_ts": "2.28",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "PostgreSQL 11 -> 12 -> 13 -> 15 with pg_upgrade under Patroni: 11 -> 12 at 2.1.1 in pg12.6-ts2.1.1-p2; 12 -> 13 at 2.11.2 in pg13.12-ts2.11.2-all; 13 -> 15 at 2.15.3 in pg15.13-ts2.19.3-all. The fewest pg_upgrade runs the measured images allow: none carries pg11 with anything past 12. On pg15 the update stops at 2.27.2: the database was created below 2.15, so a direct update to 2.28.3 hits #10272, as in the A' rows. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 15.18; with --link the old data directory is unusable once the new cluster starts. A continuous aggregate created before 2.7 cannot cross the 2.25 update, which also removes cagg_migrate(). apply finds one before changing anything and stops; on agreement, or with --migrate-caggs, it migrates it at 2.15.3 on PostgreSQL 13, the first stop on this route in 2.14-2.24. The seeded runs did so and pass every check, copying and with --link.",
+      "steps": [
+        "pg_upgrade PostgreSQL 11 -> 12 at 2.1.1 with pg12.6-ts2.1.1-p2 (copy, or --link), then start PostgreSQL 12 on pg12.22-ts2.11.2 and re-clone the replicas",
+        "roll out pg12.22-ts2.11.2 and update to 2.11.2",
+        "pg_upgrade PostgreSQL 12 -> 13 at 2.11.2 with pg13.12-ts2.11.2-all (copy, or --link), then start PostgreSQL 13 on pg13.22-ts2.15.3 and re-clone the replicas",
+        "roll out pg13.22-ts2.15.3 and update to 2.15.3",
+        "if any continuous aggregate was created before 2.7: `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on each, dropping any view on it first and restoring its grants after (apply does this with --migrate-caggs, and stops without it)",
+        "pg_upgrade PostgreSQL 13 -> 15 at 2.15.3 with pg15.13-ts2.19.3-all (copy, or --link), then start PostgreSQL 15 on pg15.18-ts2.28.3 and re-clone the replicas",
+        "roll out pg15.18-ts2.28.3 and update to 2.27.2",
+        "roll out pg15.18-ts2.28.3 and update to 2.28.3",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg11/2.1-to-pg15-2.28.empty.json",
+        "seeded": "verify/evidence/pg11/2.1-to-pg15-2.28.seeded.json",
+        "link-empty": "verify/evidence/pg11/2.1-to-pg15-2.28.link-empty.json",
+        "link-seeded": "verify/evidence/pg11/2.1-to-pg15-2.28.link-seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+          "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2",
+            "digest": "sha256:76890c52aeb917561b3304413aced05eaccb969383486a93f6a15e58aef47724",
+            "from_pg": 11,
+            "to_pg": 12,
+            "ts": "2.1.1",
+            "run_image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "run_digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+            "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+            "from_pg": 12,
+            "to_pg": 13,
+            "ts": "2.11.2",
+            "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 13,
+            "to_pg": 15,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "11",
       "source_ts": "2.1",
       "target_pg": "16",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "PostgreSQL 11 -> 12 -> 13 -> 15 -> 16 with pg_upgrade under Patroni: 11 -> 12 at 2.1.1 in pg12.6-ts2.1.1-p2; 12 -> 13 at 2.11.2 in pg13.12-ts2.11.2-all; 13 -> 15 at 2.15.3 in pg15.13-ts2.19.3-all; 15 -> 16 at 2.28.3 in pg16.15-ts2.30.1-all. The fewest pg_upgrade runs the measured images allow: none carries pg11 with anything past 12. On pg15 the update stops at 2.27.2: the database was created below 2.15, so a direct update to 2.28.3 hits #10272, as in the A' rows. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 16.15; with --link the old data directory is unusable once the new cluster starts. A continuous aggregate created before 2.7 cannot cross the 2.25 update, which also removes cagg_migrate(). apply finds one before changing anything and stops; on agreement, or with --migrate-caggs, it migrates it at 2.15.3 on PostgreSQL 13, the first stop on this route in 2.14-2.24. The seeded runs did so and pass every check, copying and with --link.",
+      "steps": [
+        "pg_upgrade PostgreSQL 11 -> 12 at 2.1.1 with pg12.6-ts2.1.1-p2 (copy, or --link), then start PostgreSQL 12 on pg12.22-ts2.11.2 and re-clone the replicas",
+        "roll out pg12.22-ts2.11.2 and update to 2.11.2",
+        "pg_upgrade PostgreSQL 12 -> 13 at 2.11.2 with pg13.12-ts2.11.2-all (copy, or --link), then start PostgreSQL 13 on pg13.22-ts2.15.3 and re-clone the replicas",
+        "roll out pg13.22-ts2.15.3 and update to 2.15.3",
+        "if any continuous aggregate was created before 2.7: `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on each, dropping any view on it first and restoring its grants after (apply does this with --migrate-caggs, and stops without it)",
+        "pg_upgrade PostgreSQL 13 -> 15 at 2.15.3 with pg15.13-ts2.19.3-all (copy, or --link), then start PostgreSQL 15 on pg15.18-ts2.28.3 and re-clone the replicas",
+        "roll out pg15.18-ts2.28.3 and update to 2.27.2",
+        "roll out pg15.18-ts2.28.3 and update to 2.28.3",
+        "pg_upgrade PostgreSQL 15 -> 16 at 2.28.3 with pg16.15-ts2.30.1-all (copy, or --link), then start PostgreSQL 16 on pg16.15-ts2.30.1 and re-clone the replicas",
+        "roll out pg16.15-ts2.30.1 and update to 2.30.1",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg11/2.1-to-pg16-2.30.empty.json",
+        "seeded": "verify/evidence/pg11/2.1-to-pg16-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg11/2.1-to-pg16-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg11/2.1-to-pg16-2.30.link-seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+          "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2",
+            "digest": "sha256:76890c52aeb917561b3304413aced05eaccb969383486a93f6a15e58aef47724",
+            "from_pg": 11,
+            "to_pg": 12,
+            "ts": "2.1.1",
+            "run_image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "run_digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+            "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+            "from_pg": 12,
+            "to_pg": 13,
+            "ts": "2.11.2",
+            "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 13,
+            "to_pg": 15,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1-all",
+            "digest": "sha256:e8f5aeeea35474227bee96f60227942a8e63293a717ba3e8beb9731c3adbad4b",
+            "from_pg": 15,
+            "to_pg": 16,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "run_digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "11",
       "source_ts": "2.1",
       "target_pg": "17",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "PostgreSQL 11 -> 12 -> 13 -> 15 -> 17 with pg_upgrade under Patroni: 11 -> 12 at 2.1.1 in pg12.6-ts2.1.1-p2; 12 -> 13 at 2.11.2 in pg13.12-ts2.11.2-all; 13 -> 15 at 2.15.3 in pg15.13-ts2.19.3-all; 15 -> 17 at 2.28.3 in pg17.11-ts2.30.1-all. The fewest pg_upgrade runs the measured images allow: none carries pg11 with anything past 12. On pg15 the update stops at 2.27.2: the database was created below 2.15, so a direct update to 2.28.3 hits #10272, as in the A' rows. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 17.11; with --link the old data directory is unusable once the new cluster starts. A continuous aggregate created before 2.7 cannot cross the 2.25 update, which also removes cagg_migrate(). apply finds one before changing anything and stops; on agreement, or with --migrate-caggs, it migrates it at 2.15.3 on PostgreSQL 13, the first stop on this route in 2.14-2.24. The seeded runs did so and pass every check, copying and with --link.",
+      "steps": [
+        "pg_upgrade PostgreSQL 11 -> 12 at 2.1.1 with pg12.6-ts2.1.1-p2 (copy, or --link), then start PostgreSQL 12 on pg12.22-ts2.11.2 and re-clone the replicas",
+        "roll out pg12.22-ts2.11.2 and update to 2.11.2",
+        "pg_upgrade PostgreSQL 12 -> 13 at 2.11.2 with pg13.12-ts2.11.2-all (copy, or --link), then start PostgreSQL 13 on pg13.22-ts2.15.3 and re-clone the replicas",
+        "roll out pg13.22-ts2.15.3 and update to 2.15.3",
+        "if any continuous aggregate was created before 2.7: `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on each, dropping any view on it first and restoring its grants after (apply does this with --migrate-caggs, and stops without it)",
+        "pg_upgrade PostgreSQL 13 -> 15 at 2.15.3 with pg15.13-ts2.19.3-all (copy, or --link), then start PostgreSQL 15 on pg15.18-ts2.28.3 and re-clone the replicas",
+        "roll out pg15.18-ts2.28.3 and update to 2.27.2",
+        "roll out pg15.18-ts2.28.3 and update to 2.28.3",
+        "pg_upgrade PostgreSQL 15 -> 17 at 2.28.3 with pg17.11-ts2.30.1-all (copy, or --link), then start PostgreSQL 17 on pg17.11-ts2.30.1 and re-clone the replicas",
+        "roll out pg17.11-ts2.30.1 and update to 2.30.1",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg11/2.1-to-pg17-2.30.empty.json",
+        "seeded": "verify/evidence/pg11/2.1-to-pg17-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg11/2.1-to-pg17-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg11/2.1-to-pg17-2.30.link-seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+          "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2",
+            "digest": "sha256:76890c52aeb917561b3304413aced05eaccb969383486a93f6a15e58aef47724",
+            "from_pg": 11,
+            "to_pg": 12,
+            "ts": "2.1.1",
+            "run_image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "run_digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+            "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+            "from_pg": 12,
+            "to_pg": 13,
+            "ts": "2.11.2",
+            "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 13,
+            "to_pg": 15,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1-all",
+            "digest": "sha256:e1d9b67f589e09108d4c54871378f2b6588192a3cc7c307773fbfb3a6380ebc6",
+            "from_pg": 15,
+            "to_pg": 17,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "run_digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "11",
       "source_ts": "2.1",
       "target_pg": "18",
       "target_ts": "2.30",
-      "verdict": null,
-      "reason": "",
-      "steps": [],
-      "verified": false,
-      "evidence": null,
-      "references": []
+      "verdict": "in_place",
+      "reason": "PostgreSQL 11 -> 12 -> 13 -> 15 -> 18 with pg_upgrade under Patroni: 11 -> 12 at 2.1.1 in pg12.6-ts2.1.1-p2; 12 -> 13 at 2.11.2 in pg13.12-ts2.11.2-all; 13 -> 15 at 2.15.3 in pg15.13-ts2.19.3-all; 15 -> 18 at 2.28.3 in pg18.6-ts2.30.1-all. The fewest pg_upgrade runs the measured images allow: none carries pg11 with anything past 12. On pg15 the update stops at 2.27.2: the database was created below 2.15, so a direct update to 2.28.3 hits #10272, as in the A' rows. pg_upgrade writes an update_extensions.sql (ALTER EXTENSION timescaledb UPDATE, to the image's default release); it is not run, since it would skip the planned stops. Verified copying and with --link (relation files hard-linked to the old directory), ending on PostgreSQL 18.6; with --link the old data directory is unusable once the new cluster starts. A continuous aggregate created before 2.7 cannot cross the 2.25 update, which also removes cagg_migrate(). apply finds one before changing anything and stops; on agreement, or with --migrate-caggs, it migrates it at 2.15.3 on PostgreSQL 13, the first stop on this route in 2.14-2.24. The seeded runs did so and pass every check, copying and with --link.",
+      "steps": [
+        "pg_upgrade PostgreSQL 11 -> 12 at 2.1.1 with pg12.6-ts2.1.1-p2 (copy, or --link), then start PostgreSQL 12 on pg12.22-ts2.11.2 and re-clone the replicas",
+        "roll out pg12.22-ts2.11.2 and update to 2.11.2",
+        "pg_upgrade PostgreSQL 12 -> 13 at 2.11.2 with pg13.12-ts2.11.2-all (copy, or --link), then start PostgreSQL 13 on pg13.22-ts2.15.3 and re-clone the replicas",
+        "roll out pg13.22-ts2.15.3 and update to 2.15.3",
+        "if any continuous aggregate was created before 2.7: `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on each, dropping any view on it first and restoring its grants after (apply does this with --migrate-caggs, and stops without it)",
+        "pg_upgrade PostgreSQL 13 -> 15 at 2.15.3 with pg15.13-ts2.19.3-all (copy, or --link), then start PostgreSQL 15 on pg15.18-ts2.28.3 and re-clone the replicas",
+        "roll out pg15.18-ts2.28.3 and update to 2.27.2",
+        "roll out pg15.18-ts2.28.3 and update to 2.28.3",
+        "pg_upgrade PostgreSQL 15 -> 18 at 2.28.3 with pg18.6-ts2.30.1-all (copy, or --link), then start PostgreSQL 18 on pg18.6-ts2.30.1 and re-clone the replicas",
+        "roll out pg18.6-ts2.30.1 and update to 2.30.1",
+        "vacuumdb --all --analyze-in-stages"
+      ],
+      "verified": true,
+      "evidence": {
+        "empty": "verify/evidence/pg11/2.1-to-pg18-2.30.empty.json",
+        "seeded": "verify/evidence/pg11/2.1-to-pg18-2.30.seeded.json",
+        "link-empty": "verify/evidence/pg11/2.1-to-pg18-2.30.link-empty.json",
+        "link-seeded": "verify/evidence/pg11/2.1-to-pg18-2.30.link-seeded.json"
+      },
+      "references": [
+        "https://github.com/timescale/timescaledb/issues/10272",
+        "https://github.com/timescale/timescaledb/pull/10278",
+        "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
+        "https://github.com/timescale/timescaledb/pull/10284"
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg11.11-ts2.1.1-p0",
+          "digest": "sha256:33f2fe74a7c9605890eab06328387938e84f8c3eb510bc00f2e09ceb32a2f525"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2",
+            "digest": "sha256:76890c52aeb917561b3304413aced05eaccb969383486a93f6a15e58aef47724",
+            "from_pg": 11,
+            "to_pg": 12,
+            "ts": "2.1.1",
+            "run_image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "run_digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+            "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+            "from_pg": 12,
+            "to_pg": 13,
+            "ts": "2.11.2",
+            "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 13,
+            "to_pg": 15,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1-all",
+            "digest": "sha256:df13246f8b73705f991d201e64c62426df001f062ce9700e6ee4a1283030f8bb",
+            "from_pg": 15,
+            "to_pg": 18,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "run_digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -190,7 +720,27 @@
       },
       "references": [
         "https://github.com/timescale/timescaledb/issues/5789"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.1.1"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -208,7 +758,27 @@
         "empty": "verify/evidence/pg12/2.0-to-2.11.empty.json",
         "seeded": "verify/evidence/pg12/2.0-to-2.11.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2",
+          "digest": "sha256:76890c52aeb917561b3304413aced05eaccb969383486a93f6a15e58aef47724"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2",
+            "digest": "sha256:76890c52aeb917561b3304413aced05eaccb969383486a93f6a15e58aef47724",
+            "to": "2.1.1"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -223,7 +793,21 @@
         "empty": "verify/evidence/pg12/2.1-to-2.11.empty.json",
         "seeded": "verify/evidence/pg12/2.1-to-2.11.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -238,7 +822,21 @@
         "empty": "verify/evidence/pg12/2.2-to-2.11.empty.json",
         "seeded": "verify/evidence/pg12/2.2-to-2.11.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -253,7 +851,21 @@
         "empty": "verify/evidence/pg12/2.3-to-2.11.empty.json",
         "seeded": "verify/evidence/pg12/2.3-to-2.11.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -268,7 +880,21 @@
         "empty": "verify/evidence/pg12/2.4-to-2.11.empty.json",
         "seeded": "verify/evidence/pg12/2.4-to-2.11.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -283,7 +909,21 @@
         "empty": "verify/evidence/pg12/2.5-to-2.11.empty.json",
         "seeded": "verify/evidence/pg12/2.5-to-2.11.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -298,7 +938,21 @@
         "empty": "verify/evidence/pg12/2.6-to-2.11.empty.json",
         "seeded": "verify/evidence/pg12/2.6-to-2.11.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -313,7 +967,21 @@
         "empty": "verify/evidence/pg12/2.7-to-2.11.empty.json",
         "seeded": "verify/evidence/pg12/2.7-to-2.11.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -328,7 +996,21 @@
         "empty": "verify/evidence/pg12/2.8-to-2.11.empty.json",
         "seeded": "verify/evidence/pg12/2.8-to-2.11.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -343,7 +1025,21 @@
         "empty": "verify/evidence/pg12/2.9-to-2.11.empty.json",
         "seeded": "verify/evidence/pg12/2.9-to-2.11.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -358,7 +1054,21 @@
         "empty": "verify/evidence/pg12/2.10-to-2.11.empty.json",
         "seeded": "verify/evidence/pg12/2.10-to-2.11.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+            "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+            "to": "2.11.2"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -393,7 +1103,31 @@
         "link-empty": "verify/evidence/pg12/2.11-to-pg13-2.15.link-empty.json",
         "link-seeded": "verify/evidence/pg12/2.11-to-pg13-2.15.link-seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+            "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+            "from_pg": 12,
+            "to_pg": 13,
+            "ts": "2.11.2",
+            "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -416,7 +1150,47 @@
         "link-empty": "verify/evidence/pg12/2.11-to-pg14-2.19.link-empty.json",
         "link-seeded": "verify/evidence/pg12/2.11-to-pg14-2.19.link-seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+            "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+            "from_pg": 12,
+            "to_pg": 13,
+            "ts": "2.11.2",
+            "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3-all",
+            "digest": "sha256:127e0220562ee2e5b1abe001deb87670465bc55fca75aeaeaaf861b55734af47",
+            "from_pg": 13,
+            "to_pg": 14,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "run_digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -445,7 +1219,53 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+            "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+            "from_pg": 12,
+            "to_pg": 13,
+            "ts": "2.11.2",
+            "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 13,
+            "to_pg": 15,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -476,7 +1296,69 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+            "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+            "from_pg": 12,
+            "to_pg": 13,
+            "ts": "2.11.2",
+            "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 13,
+            "to_pg": 15,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1-all",
+            "digest": "sha256:e8f5aeeea35474227bee96f60227942a8e63293a717ba3e8beb9731c3adbad4b",
+            "from_pg": 15,
+            "to_pg": 16,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "run_digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -507,7 +1389,69 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+            "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+            "from_pg": 12,
+            "to_pg": 13,
+            "ts": "2.11.2",
+            "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 13,
+            "to_pg": 15,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1-all",
+            "digest": "sha256:e1d9b67f589e09108d4c54871378f2b6588192a3cc7c307773fbfb3a6380ebc6",
+            "from_pg": 15,
+            "to_pg": 17,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "run_digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "12",
@@ -538,7 +1482,69 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2",
+          "digest": "sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg13.12-ts2.11.2-all",
+            "digest": "sha256:5dc09a030baf6ba2a5b9ee8463835cf53507b05cd03c3313f1641db583bae9f1",
+            "from_pg": 12,
+            "to_pg": 13,
+            "ts": "2.11.2",
+            "run_image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "run_digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 13,
+            "to_pg": 15,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1-all",
+            "digest": "sha256:df13246f8b73705f991d201e64c62426df001f062ce9700e6ee4a1283030f8bb",
+            "from_pg": 15,
+            "to_pg": 18,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "run_digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -560,7 +1566,21 @@
         "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
         "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
         "https://github.com/timescale/timescaledb/pull/8859"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -582,7 +1602,21 @@
         "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
         "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
         "https://github.com/timescale/timescaledb/pull/8859"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -604,7 +1638,21 @@
         "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
         "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
         "https://github.com/timescale/timescaledb/pull/8859"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -626,7 +1674,21 @@
         "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
         "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
         "https://github.com/timescale/timescaledb/pull/8859"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -648,7 +1710,21 @@
         "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
         "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
         "https://github.com/timescale/timescaledb/pull/8859"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -670,7 +1746,21 @@
         "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
         "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
         "https://github.com/timescale/timescaledb/pull/8859"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -685,7 +1775,21 @@
         "empty": "verify/evidence/pg13/2.7-to-2.15.empty.json",
         "seeded": "verify/evidence/pg13/2.7-to-2.15.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -700,7 +1804,21 @@
         "empty": "verify/evidence/pg13/2.8-to-2.15.empty.json",
         "seeded": "verify/evidence/pg13/2.8-to-2.15.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -715,7 +1833,21 @@
         "empty": "verify/evidence/pg13/2.9-to-2.15.empty.json",
         "seeded": "verify/evidence/pg13/2.9-to-2.15.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -730,7 +1862,21 @@
         "empty": "verify/evidence/pg13/2.10-to-2.15.empty.json",
         "seeded": "verify/evidence/pg13/2.10-to-2.15.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -745,7 +1891,21 @@
         "empty": "verify/evidence/pg13/2.11-to-2.15.empty.json",
         "seeded": "verify/evidence/pg13/2.11-to-2.15.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -760,7 +1920,21 @@
         "empty": "verify/evidence/pg13/2.12-to-2.15.empty.json",
         "seeded": "verify/evidence/pg13/2.12-to-2.15.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -775,7 +1949,21 @@
         "empty": "verify/evidence/pg13/2.13-to-2.15.empty.json",
         "seeded": "verify/evidence/pg13/2.13-to-2.15.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -790,7 +1978,21 @@
         "empty": "verify/evidence/pg13/2.14-to-2.15.empty.json",
         "seeded": "verify/evidence/pg13/2.14-to-2.15.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+            "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
+            "to": "2.15.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -825,7 +2027,31 @@
         "link-empty": "verify/evidence/pg13/2.15-to-pg14-2.19.link-empty.json",
         "link-seeded": "verify/evidence/pg13/2.15-to-pg14-2.19.link-seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3-all",
+            "digest": "sha256:127e0220562ee2e5b1abe001deb87670465bc55fca75aeaeaaf861b55734af47",
+            "from_pg": 13,
+            "to_pg": 14,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "run_digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -852,7 +2078,37 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 13,
+            "to_pg": 15,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -881,7 +2137,53 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 13,
+            "to_pg": 15,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1-all",
+            "digest": "sha256:e8f5aeeea35474227bee96f60227942a8e63293a717ba3e8beb9731c3adbad4b",
+            "from_pg": 15,
+            "to_pg": 16,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "run_digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -910,7 +2212,53 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 13,
+            "to_pg": 15,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1-all",
+            "digest": "sha256:e1d9b67f589e09108d4c54871378f2b6588192a3cc7c307773fbfb3a6380ebc6",
+            "from_pg": 15,
+            "to_pg": 17,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "run_digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "13",
@@ -939,7 +2287,53 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+          "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 13,
+            "to_pg": 15,
+            "ts": "2.15.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1-all",
+            "digest": "sha256:df13246f8b73705f991d201e64c62426df001f062ce9700e6ee4a1283030f8bb",
+            "from_pg": 15,
+            "to_pg": 18,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "run_digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -961,7 +2355,21 @@
         "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
         "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
         "https://github.com/timescale/timescaledb/pull/8859"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -983,7 +2391,21 @@
         "https://github.com/timescale/timescaledb/releases/tag/2.14.0",
         "https://www.tigerdata.com/docs/reference/timescaledb/continuous-aggregates/cagg_migrate",
         "https://github.com/timescale/timescaledb/pull/8859"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -998,7 +2420,21 @@
         "empty": "verify/evidence/pg14/2.7-to-2.19.empty.json",
         "seeded": "verify/evidence/pg14/2.7-to-2.19.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1013,7 +2449,21 @@
         "empty": "verify/evidence/pg14/2.8-to-2.19.empty.json",
         "seeded": "verify/evidence/pg14/2.8-to-2.19.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1028,7 +2478,21 @@
         "empty": "verify/evidence/pg14/2.9-to-2.19.empty.json",
         "seeded": "verify/evidence/pg14/2.9-to-2.19.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1043,7 +2507,21 @@
         "empty": "verify/evidence/pg14/2.10-to-2.19.empty.json",
         "seeded": "verify/evidence/pg14/2.10-to-2.19.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1058,7 +2536,21 @@
         "empty": "verify/evidence/pg14/2.11-to-2.19.empty.json",
         "seeded": "verify/evidence/pg14/2.11-to-2.19.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1073,7 +2565,21 @@
         "empty": "verify/evidence/pg14/2.12-to-2.19.empty.json",
         "seeded": "verify/evidence/pg14/2.12-to-2.19.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1088,7 +2594,21 @@
         "empty": "verify/evidence/pg14/2.13-to-2.19.empty.json",
         "seeded": "verify/evidence/pg14/2.13-to-2.19.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1103,7 +2623,21 @@
         "empty": "verify/evidence/pg14/2.14-to-2.19.empty.json",
         "seeded": "verify/evidence/pg14/2.14-to-2.19.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1118,7 +2652,21 @@
         "empty": "verify/evidence/pg14/2.15-to-2.19.empty.json",
         "seeded": "verify/evidence/pg14/2.15-to-2.19.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1133,7 +2681,21 @@
         "empty": "verify/evidence/pg14/2.16-to-2.19.empty.json",
         "seeded": "verify/evidence/pg14/2.16-to-2.19.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1148,7 +2710,21 @@
         "empty": "verify/evidence/pg14/2.17-to-2.19.empty.json",
         "seeded": "verify/evidence/pg14/2.17-to-2.19.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1163,7 +2739,21 @@
         "empty": "verify/evidence/pg14/2.18-to-2.19.empty.json",
         "seeded": "verify/evidence/pg14/2.18-to-2.19.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+            "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+            "to": "2.19.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1204,7 +2794,37 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 14,
+            "to_pg": 15,
+            "ts": "2.19.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1233,7 +2853,53 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 14,
+            "to_pg": 15,
+            "ts": "2.19.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1-all",
+            "digest": "sha256:e8f5aeeea35474227bee96f60227942a8e63293a717ba3e8beb9731c3adbad4b",
+            "from_pg": 15,
+            "to_pg": 16,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "run_digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1262,7 +2928,53 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 14,
+            "to_pg": 15,
+            "ts": "2.19.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1-all",
+            "digest": "sha256:e1d9b67f589e09108d4c54871378f2b6588192a3cc7c307773fbfb3a6380ebc6",
+            "from_pg": 15,
+            "to_pg": 17,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "run_digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "14",
@@ -1291,7 +3003,53 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+          "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.19.3-all",
+            "digest": "sha256:2537b26f5ae3356402f7dce8e2d3512f987556090a7e7e8515b1a661ccdd3324",
+            "from_pg": 14,
+            "to_pg": 15,
+            "ts": "2.19.3",
+            "run_image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "run_digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          },
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1-all",
+            "digest": "sha256:df13246f8b73705f991d201e64c62426df001f062ce9700e6ee4a1283030f8bb",
+            "from_pg": 15,
+            "to_pg": 18,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "run_digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1314,7 +3072,33 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.13-ts2.20.3",
+          "digest": "sha256:c89ebb3dc18218a92cdbc0fd1014f65632fcf1bfa0728f5f36650ce88127690c"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.20.3",
+            "digest": "sha256:c89ebb3dc18218a92cdbc0fd1014f65632fcf1bfa0728f5f36650ce88127690c",
+            "to": "2.20.3"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1337,7 +3121,33 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.13-ts2.20.3",
+          "digest": "sha256:c89ebb3dc18218a92cdbc0fd1014f65632fcf1bfa0728f5f36650ce88127690c"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.20.3",
+            "digest": "sha256:c89ebb3dc18218a92cdbc0fd1014f65632fcf1bfa0728f5f36650ce88127690c",
+            "to": "2.20.3"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1360,7 +3170,33 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.13-ts2.20.3",
+          "digest": "sha256:c89ebb3dc18218a92cdbc0fd1014f65632fcf1bfa0728f5f36650ce88127690c"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.20.3",
+            "digest": "sha256:c89ebb3dc18218a92cdbc0fd1014f65632fcf1bfa0728f5f36650ce88127690c",
+            "to": "2.20.3"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1383,7 +3219,33 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.13-ts2.20.3",
+          "digest": "sha256:c89ebb3dc18218a92cdbc0fd1014f65632fcf1bfa0728f5f36650ce88127690c"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.13-ts2.20.3",
+            "digest": "sha256:c89ebb3dc18218a92cdbc0fd1014f65632fcf1bfa0728f5f36650ce88127690c",
+            "to": "2.20.3"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1398,7 +3260,21 @@
         "empty": "verify/evidence/pg15/2.13-to-2.28.empty.json",
         "seeded": "verify/evidence/pg15/2.13-to-2.28.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1413,7 +3289,21 @@
         "empty": "verify/evidence/pg15/2.14-to-2.28.empty.json",
         "seeded": "verify/evidence/pg15/2.14-to-2.28.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1439,7 +3329,27 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1465,7 +3375,27 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1491,7 +3421,27 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1517,7 +3467,27 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1543,7 +3513,27 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1569,7 +3559,27 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1595,7 +3605,27 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1621,7 +3651,27 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1647,7 +3697,27 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1673,7 +3743,27 @@
         "https://github.com/timescale/timescaledb/pull/10278",
         "https://github.com/timescale/timescaledb/releases/tag/2.29.0",
         "https://github.com/timescale/timescaledb/pull/10284"
-      ]
+      ],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.27.2"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1688,7 +3778,21 @@
         "empty": "verify/evidence/pg15/2.25-to-2.28.empty.json",
         "seeded": "verify/evidence/pg15/2.25-to-2.28.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1703,7 +3807,21 @@
         "empty": "verify/evidence/pg15/2.26-to-2.28.empty.json",
         "seeded": "verify/evidence/pg15/2.26-to-2.28.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1718,7 +3836,21 @@
         "empty": "verify/evidence/pg15/2.27-to-2.28.empty.json",
         "seeded": "verify/evidence/pg15/2.27-to-2.28.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+            "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+            "to": "2.28.3"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1753,7 +3885,31 @@
         "link-empty": "verify/evidence/pg15/2.28-to-pg16-2.30.link-empty.json",
         "link-seeded": "verify/evidence/pg15/2.28-to-pg16-2.30.link-seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1-all",
+            "digest": "sha256:e8f5aeeea35474227bee96f60227942a8e63293a717ba3e8beb9731c3adbad4b",
+            "from_pg": 15,
+            "to_pg": 16,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "run_digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1774,7 +3930,31 @@
         "link-empty": "verify/evidence/pg15/2.28-to-pg17-2.30.link-empty.json",
         "link-seeded": "verify/evidence/pg15/2.28-to-pg17-2.30.link-seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1-all",
+            "digest": "sha256:e1d9b67f589e09108d4c54871378f2b6588192a3cc7c307773fbfb3a6380ebc6",
+            "from_pg": 15,
+            "to_pg": 17,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "run_digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "15",
@@ -1795,7 +3975,31 @@
         "link-empty": "verify/evidence/pg15/2.28-to-pg18-2.30.link-empty.json",
         "link-seeded": "verify/evidence/pg15/2.28-to-pg18-2.30.link-seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+          "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1-all",
+            "digest": "sha256:df13246f8b73705f991d201e64c62426df001f062ce9700e6ee4a1283030f8bb",
+            "from_pg": 15,
+            "to_pg": 18,
+            "ts": "2.28.3",
+            "run_image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "run_digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+          },
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1810,7 +4014,21 @@
         "empty": "verify/evidence/pg16/2.13-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.13-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1825,7 +4043,21 @@
         "empty": "verify/evidence/pg16/2.14-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.14-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1840,7 +4072,21 @@
         "empty": "verify/evidence/pg16/2.15-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.15-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1855,7 +4101,21 @@
         "empty": "verify/evidence/pg16/2.16-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.16-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1870,7 +4130,21 @@
         "empty": "verify/evidence/pg16/2.17-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.17-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1885,7 +4159,21 @@
         "empty": "verify/evidence/pg16/2.18-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.18-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1900,7 +4188,21 @@
         "empty": "verify/evidence/pg16/2.19-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.19-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1915,7 +4217,21 @@
         "empty": "verify/evidence/pg16/2.20-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.20-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1930,7 +4246,21 @@
         "empty": "verify/evidence/pg16/2.21-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.21-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1945,7 +4275,21 @@
         "empty": "verify/evidence/pg16/2.22-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.22-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1960,7 +4304,21 @@
         "empty": "verify/evidence/pg16/2.23-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.23-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1975,7 +4333,21 @@
         "empty": "verify/evidence/pg16/2.24-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.24-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -1990,7 +4362,21 @@
         "empty": "verify/evidence/pg16/2.25-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.25-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -2005,7 +4391,21 @@
         "empty": "verify/evidence/pg16/2.26-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.26-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -2020,7 +4420,21 @@
         "empty": "verify/evidence/pg16/2.27-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.27-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -2035,7 +4449,21 @@
         "empty": "verify/evidence/pg16/2.28-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.28-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -2050,7 +4478,21 @@
         "empty": "verify/evidence/pg16/2.29-to-2.30.empty.json",
         "seeded": "verify/evidence/pg16/2.29-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+            "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -2070,7 +4512,25 @@
         "link-empty": "verify/evidence/pg16/2.30-to-pg17-2.30.link-empty.json",
         "link-seeded": "verify/evidence/pg16/2.30-to-pg17-2.30.link-seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1-all",
+            "digest": "sha256:e1d9b67f589e09108d4c54871378f2b6588192a3cc7c307773fbfb3a6380ebc6",
+            "from_pg": 16,
+            "to_pg": 17,
+            "ts": "2.30.1",
+            "run_image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "run_digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+          }
+        ]
+      }
     },
     {
       "source_pg": "16",
@@ -2090,7 +4550,25 @@
         "link-empty": "verify/evidence/pg16/2.30-to-pg18-2.30.link-empty.json",
         "link-seeded": "verify/evidence/pg16/2.30-to-pg18-2.30.link-seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg16.15-ts2.30.1",
+          "digest": "sha256:4f288c0a521362cad799f265bc0ebd60c3f8f98596b850172cc2da72883420ff"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1-all",
+            "digest": "sha256:df13246f8b73705f991d201e64c62426df001f062ce9700e6ee4a1283030f8bb",
+            "from_pg": 16,
+            "to_pg": 18,
+            "ts": "2.30.1",
+            "run_image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "run_digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2105,7 +4583,21 @@
         "empty": "verify/evidence/pg17/2.17-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.17-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2120,7 +4612,21 @@
         "empty": "verify/evidence/pg17/2.18-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.18-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2135,7 +4641,21 @@
         "empty": "verify/evidence/pg17/2.19-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.19-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2150,7 +4670,21 @@
         "empty": "verify/evidence/pg17/2.20-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.20-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2165,7 +4699,21 @@
         "empty": "verify/evidence/pg17/2.21-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.21-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2180,7 +4728,21 @@
         "empty": "verify/evidence/pg17/2.22-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.22-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2195,7 +4757,21 @@
         "empty": "verify/evidence/pg17/2.23-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.23-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2210,7 +4786,21 @@
         "empty": "verify/evidence/pg17/2.24-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.24-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2225,7 +4815,21 @@
         "empty": "verify/evidence/pg17/2.25-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.25-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2240,7 +4844,21 @@
         "empty": "verify/evidence/pg17/2.26-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.26-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2255,7 +4873,21 @@
         "empty": "verify/evidence/pg17/2.27-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.27-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2270,7 +4902,21 @@
         "empty": "verify/evidence/pg17/2.28-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.28-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2285,7 +4931,21 @@
         "empty": "verify/evidence/pg17/2.29-to-2.30.empty.json",
         "seeded": "verify/evidence/pg17/2.29-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+            "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "17",
@@ -2305,7 +4965,25 @@
         "link-empty": "verify/evidence/pg17/2.30-to-pg18-2.30.link-empty.json",
         "link-seeded": "verify/evidence/pg17/2.30-to-pg18-2.30.link-seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+          "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+        },
+        "steps": [
+          {
+            "action": "major_upgrade",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1-all",
+            "digest": "sha256:df13246f8b73705f991d201e64c62426df001f062ce9700e6ee4a1283030f8bb",
+            "from_pg": 17,
+            "to_pg": 18,
+            "ts": "2.30.1",
+            "run_image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "run_digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+          }
+        ]
+      }
     },
     {
       "source_pg": "18",
@@ -2320,7 +4998,21 @@
         "empty": "verify/evidence/pg18/2.23-to-2.30.empty.json",
         "seeded": "verify/evidence/pg18/2.23-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+          "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "18",
@@ -2335,7 +5027,21 @@
         "empty": "verify/evidence/pg18/2.24-to-2.30.empty.json",
         "seeded": "verify/evidence/pg18/2.24-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+          "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "18",
@@ -2350,7 +5056,21 @@
         "empty": "verify/evidence/pg18/2.25-to-2.30.empty.json",
         "seeded": "verify/evidence/pg18/2.25-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+          "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "18",
@@ -2365,7 +5085,21 @@
         "empty": "verify/evidence/pg18/2.26-to-2.30.empty.json",
         "seeded": "verify/evidence/pg18/2.26-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+          "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "18",
@@ -2380,7 +5114,21 @@
         "empty": "verify/evidence/pg18/2.27-to-2.30.empty.json",
         "seeded": "verify/evidence/pg18/2.27-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+          "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "18",
@@ -2395,7 +5143,21 @@
         "empty": "verify/evidence/pg18/2.28-to-2.30.empty.json",
         "seeded": "verify/evidence/pg18/2.28-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+          "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+            "to": "2.30.1"
+          }
+        ]
+      }
     },
     {
       "source_pg": "18",
@@ -2410,7 +5172,21 @@
         "empty": "verify/evidence/pg18/2.29-to-2.30.empty.json",
         "seeded": "verify/evidence/pg18/2.29-to-2.30.seeded.json"
       },
-      "references": []
+      "references": [],
+      "route": {
+        "start": {
+          "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+          "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+        },
+        "steps": [
+          {
+            "action": "update",
+            "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+            "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+            "to": "2.30.1"
+          }
+        ]
+      }
     }
   ]
 }

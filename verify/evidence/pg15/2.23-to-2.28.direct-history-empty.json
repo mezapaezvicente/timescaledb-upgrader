@@ -20,19 +20,19 @@
     "reached": "2.23.1"
   },
   "upgrader": {
-    "commit": "0c4a9ac5ed304c985420f865c68c89ac572fe14d",
+    "commit": "e2e3c13344fd4246561de8f948c4a0d5bd5730ec",
     "dirty": false
   },
   "result": "fail",
   "log": "verify/out/pg15/2.23-to-2.28.direct-history-empty.log",
-  "recorded_at": "2026-10-31T17:41:43Z",
+  "recorded_at": "2026-11-02T14:35:58Z",
   "failure": {
     "explanation": "the direct update 2.23.1 -> 2.28.3 failed",
     "error": "ERROR:  cannot drop table _timescaledb_internal.bgw_job_stat_history because other objects depend on it\nDETAIL:  view timescaledb_information.job_errors depends on table _timescaledb_internal.bgw_job_stat_history\nHINT:  Use DROP ... CASCADE to drop the dependent objects too.\nCONTEXT:  SQL statement \"DROP TABLE _timescaledb_internal.bgw_job_stat_history\""
   },
   "stage": "apply",
-  "started_at": "2026-10-31T17:41:37Z",
-  "finished_at": "2026-10-31T17:41:43Z",
+  "started_at": "2026-11-02T14:35:52Z",
+  "finished_at": "2026-11-02T14:35:58Z",
   "source_pg_version": "15.18",
   "replicas": 2,
   "pods": null,

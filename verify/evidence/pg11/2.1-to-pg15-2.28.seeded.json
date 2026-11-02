@@ -41,22 +41,18 @@
   "versions": {
     "source": "2.1.1",
     "target": "2.28.3",
-    "reached": "2.15.3"
+    "reached": "2.28.3"
   },
   "upgrader": {
-    "commit": "9313496de87111b596508b9eda11324500084687",
+    "commit": "e2e3c13344fd4246561de8f948c4a0d5bd5730ec",
     "dirty": false
   },
-  "result": "fail",
+  "result": "pass",
   "log": "verify/out/pg11/2.1-to-pg15-2.28.seeded.log",
-  "recorded_at": "2026-10-31T13:15:32Z",
-  "failure": {
-    "explanation": "hop 6 preflight failed: preflight failed: gates",
-    "error": "gates: target ts2.27.2\n  tsdb-0/verify : Continuous aggregates blocked at 2.25 - continuous aggregates present that the update will refuse\n       old format : public.fx_hourly\n       time_bucket_ng : none\n       Run the cagg_migrate procedure on each BEFORE updating. The 2.25 update drops cagg_migrate itself, so afterwards the only remaining fix is restoring a backup.\n       source: https://github.com/timescale/timescaledb/blob/main/sql/updates/2.24.0--2.25.0.sql\n  tsdb-0/verify : User views on timescaledb_information - no user views depend on timescaledb_information\n  tsdb-1/verify : Continuous aggregates blocked at 2.25 - continuous aggregates present that the update will refuse\n       old format : public.fx_hourly\n       time_bucket_ng : none\n       Run the cagg_migrate procedure on each BEFORE updating. The 2.25 update drops cagg_migrate itself, so afterwards the only remaining fix is restoring a backup.\n       source: https://github.com/timescale/timescaledb/blob/main/sql/updates/2.24.0--2.25.0.sql"
-  },
-  "stage": "apply",
-  "started_at": "2026-10-31T13:09:25Z",
-  "finished_at": "2026-10-31T13:15:32Z",
+  "recorded_at": "2026-11-02T05:11:42Z",
+  "stage": "done",
+  "started_at": "2026-11-02T05:06:15Z",
+  "finished_at": "2026-11-02T05:11:42Z",
   "source_pg_version": "11.11",
   "replicas": 2,
   "pods": [
@@ -78,8 +74,8 @@
   "baseline": "seeded|2.1.1|50400|2521572.95|840|3|2",
   "checks": {
     "version": {
-      "status": "fail",
-      "detail": "extversion 2.15.3, expected 2.28.3"
+      "status": "pass",
+      "detail": "extversion 2.28.3, expected 2.28.3"
     },
     "rows": {
       "status": "pass",
@@ -94,15 +90,15 @@
       "detail": "3 compressed chunks; seeded 3"
     },
     "cagg_survived": {
-      "status": "fail",
-      "detail": "840 materialized rows; seeded 840 (could not set materialized_only; count includes real-time rows)"
+      "status": "pass",
+      "detail": "840 materialized rows; seeded 840"
     },
     "cagg_matches": {
-      "status": "fail",
+      "status": "pass",
       "detail": "0 differing buckets; refresh ran"
     },
     "write_and_refresh": {
-      "status": "fail",
+      "status": "pass",
       "detail": "insert ok, refresh ok; 1 new buckets, 60 rows in them"
     },
     "decompress": {
@@ -110,7 +106,7 @@
       "detail": "3 chunks decompressed; 50400 rows, sum 2521572.95 before the new writes"
     }
   },
-  "apply_exit": 2,
+  "apply_exit": 0,
   "plan": {
     "hops": 7,
     "path": "verify/out/pg11/2.1-to-pg15-2.28.plan.json"
