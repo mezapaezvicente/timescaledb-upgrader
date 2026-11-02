@@ -131,9 +131,11 @@ class PreflightOptions:
     pg_upgrade_to: Optional[int] = None
     # Measured image contents (default: data/image-contents.json).
     contents_path: Optional[str] = None
-    # From apply: every image the plan still has to run, checked by digest in
-    # place of the target image, and the StatefulSet that runs them.
+    # From apply, at its first hop: every image the plan has to run, checked by
+    # digest in place of the target image, and the StatefulSet that runs them.
     route_images: Tuple[RouteImage, ...] = ()
+    # From apply, at a later hop: those were checked, and a digest does not change.
+    route_checked: bool = False
     # The updates later in the plan, as ``(hop, release)``.
     later_updates: Tuple[Tuple[int, str], ...] = ()
     use_cached_images: bool = False
@@ -1734,8 +1736,9 @@ def run_preflight(opts: PreflightOptions) -> List[CheckResult]:
     results: List[CheckResult] = []
 
     results.append(check_context(kube, opts))
-    if opts.route_images:
-        results.append(check_route_images(kube, opts))
+    if opts.route_images or opts.route_checked:
+        if opts.route_images:
+            results.append(check_route_images(kube, opts))
         target_pg, target_ts = _implied_versions(opts)
     else:
         image_result, target_pg, target_ts = check_target_image(opts)

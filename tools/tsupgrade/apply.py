@@ -432,6 +432,7 @@ def _step_preflight(
     opts: ApplyOptions,
     preflight: Callable[[PreflightOptions], Sequence[Any]],
     later: Sequence[Any] = (),
+    first: bool = True,
 ) -> _Outcome:
     results = preflight(
         PreflightOptions(
@@ -450,7 +451,8 @@ def _step_preflight(
             pg_upgrade_link=step.pg_upgrade.link if step.pg_upgrade else None,
             pg_upgrade_image=step.pg_upgrade.image if step.pg_upgrade else None,
             pg_upgrade_to=step.pg_upgrade.to_pg if step.pg_upgrade else None,
-            route_images=_route_images(later, opts),
+            route_images=_route_images(later, opts) if first else (),
+            route_checked=not first,
             use_cached_images=opts.use_cached_images,
             statefulset=opts.statefulset,
             later_updates=tuple((s.hop, s.to) for s in later
@@ -1222,7 +1224,9 @@ def apply_plan(
     failure: Optional[Dict[str, Any]] = None
 
     run: Dict[str, Callable[[Any], _Outcome]] = {
-        "preflight": lambda step: _step_preflight(step, opts, preflight, steps[steps.index(step) + 1:]),
+        "preflight": lambda step: _step_preflight(
+            step, opts, preflight, steps[steps.index(step) + 1:],
+            not any(isinstance(s, Preflight) for s in steps[:steps.index(step)])),
         "ensure_image": lambda step: _step_ensure_image(step, cluster),
         "update_extension": lambda step: _step_update(step, cluster, databases),
         "cycle_sessions": lambda step: _step_cycle(cluster, databases),

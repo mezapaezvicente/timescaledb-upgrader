@@ -504,10 +504,11 @@ full backup (pgBackRest's "Upgrading PostgreSQL", for the 2.54–2.59 the
 images ship). The data directory keeps its path, so `pg1-path` does not
 change. The runbook and `apply`'s report say the same.
 
-**Where images come from.** Before each hop, `apply` asks the registry for every
-image the plan still has to run, by digest, the `pg_upgrade` images included, so
-a missing one shows up before anything stops. If an image is not there, `apply`
-stops. If the registry does not answer, `apply` also stops, says that the image
+**Where images come from.** Before its first hop, `apply` asks the registry for
+every image the plan has to run, by digest, the `pg_upgrade` images included, so
+a missing one shows up before anything stops. It asks once: a digest does not
+change, so an outage at a later hop does not stop a run whose images were
+confirmed. If an image is not there, `apply` stops. If the registry does not answer, `apply` also stops, says that the image
 may well be fine, and lists what can be done:
 
 - try again once the registry answers;

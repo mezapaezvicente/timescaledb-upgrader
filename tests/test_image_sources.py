@@ -213,6 +213,43 @@ def test_a_notice_reaches_the_operator_and_the_report(monkeypatch):
     assert any("read this" in s["summary"] for s in report["steps"] if s["action"] == "preflight")
 
 
+def test_the_registry_is_asked_once_before_the_first_hop():
+    """A digest does not change: an outage at a later hop must not stop a run
+    whose images were confirmed."""
+    asked, clock = [], Clock()
+    plan = _plan()
+    target = plan["target"]["image"]
+    plan["steps"][1:1] = [
+        {"hop": 2, "action": "preflight", "image": target, "target_pg": "13.22", "target_ts": "2.11.2"}]
+    plan["steps"].insert(0, {"hop": 1, "action": "preflight", "image": target,
+                             "target_pg": "13.22", "target_ts": "2.11.2"})
+
+    def preflight(options):
+        asked.append((options.route_images, options.route_checked))
+        return []
+
+    report = apply_plan(
+        plan, ApplyOptions(poll_interval=1, rollout_timeout=5, acknowledge_verification=True,
+                           selector="application=patroni,cluster-name=tsdb"),
+        kube=MajorKube(), preflight=preflight, sleep=clock.sleep, clock=clock)
+    assert report["result"] == "pass", report.get("failure")
+    assert asked[0][0] and asked[0][1] is False
+    assert asked[1] == ((), True)
+
+
+def test_a_later_hop_does_not_ask_the_registry(monkeypatch):
+    called = []
+    monkeypatch.setattr(pf, "manifest_exists", lambda *a, **k: called.append(a))
+    monkeypatch.setattr(pf, "Kube", lambda *a: Kube())
+    for name in ("check_context", "check_abi_break", "check_pg_minor_floor", "check_disk_headroom",
+                 "check_extensions", "check_collation", "check_permissions", "check_drift",
+                 "check_gates", "check_later_gates", "check_matrix"):
+        monkeypatch.setattr(pf, name, lambda *a, **k: None)
+    monkeypatch.setattr(pf, "discover_instances", lambda *a: ([], None))
+    pf.run_preflight(PreflightOptions(target_image=HUB.split("@")[0], route_checked=True))
+    assert called == []
+
+
 def test_the_plan_file_keeps_the_verified_route_the_runbook_names_the_mirror():
     plan = cross_plan("pg16.15-ts2.30.1")
     before = str(plan)
