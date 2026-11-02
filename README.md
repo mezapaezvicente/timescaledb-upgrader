@@ -218,12 +218,33 @@ registry answers it: such a row cites the registry listing in `references`.
 Otherwise `references` holds upstream issues and release notes that explain a
 verdict; they are never its proof.
 
-Today 127 of the 131 rows are verified: every same-PG row, and 24 of the 28
-rows that change major. The four left, pg11 2.1 to pg15-pg18, ship as `null` /
-`verified: false`: a seeded run reaches the 2.25 update with a continuous
-aggregate created at 2.1 (non-finalized), and the `gates` preflight refuses it
-there, as it should. The data is intact, but the route only completes with a
-`cagg_migrate()` stop below 2.25, which no run has exercised yet.
+All 131 rows are verified: 126 by running them (98 same-PG, 28 that change
+major) and 5 `no_image` rows by the registry. Every record names one commit, on
+a clean tree, and each row's route is pinned by digest.
+
+Verified does not mean every run passed. On ten rows (pg13 2.1-2.6 and pg14
+2.5-2.6 same-PG, pg11 2.1 to pg13 and pg14) the seeded run fails the three
+fixture checks that need to alter a continuous aggregate created before 2.7.
+The upgrade completes and the data is intact; the row says so and gives the
+step. pg11 2.1 to pg15-pg18 pass seeded because those routes have to migrate the
+aggregate on the way (see "Old continuous aggregates").
+
+Known limits:
+
+- `--image-registry` reaches the registry anonymously, so a private mirror
+  needs `--use-cached-images`. No run went through a real mirror: the harness
+  uses a host that cannot resolve, and a registry that answers is stubbed in
+  the tests.
+- A registry that does not answer stops `apply` unless `--use-cached-images` is
+  given.
+- The reset of Patroni's state deletes `<scope>-sync` if present and labelled,
+  but synchronous mode was not measured.
+- That WAL archiving fails until `stanza-upgrade` has run is inferred from
+  pgBackRest checking the system identifier, not observed. The rest of the
+  backup advice is from pgBackRest's user guide.
+- The old-aggregate migration was run on one aggregate per database, through
+  2.15.3 on PostgreSQL 13 and, in a container, with a grant to restore. A
+  dependent view or a `time_bucket_ng` aggregate stops the run instead.
 
 ### Which images actually exist
 
@@ -598,8 +619,8 @@ tests/             unit tests over the loader, lookup and shipped data
 - [x] **Phase 3** — read-only preflight checks against a live instance
 - [x] **Phase 4** — drift classifier, update-script gates, measured image contents
 - [x] **Phase 5** — `plan` and `apply` (extension updates and image rollouts)
-- [x] Verification harness; every same-PG row and 7 of 28 cross-PG rows
-      established by running them with the upgrader (the rest in progress)
+- [x] Verification harness; every row established by running it with the
+      upgrader, or by the registry where no image exists
 - [x] PostgreSQL major upgrades (`pg_upgrade` under Patroni, copy or `--link`)
 - [x] Rollback of a copy-mode major upgrade (`tsupgrade rollback`)
 - [x] `plan --format script`, for deployments `apply` cannot drive
