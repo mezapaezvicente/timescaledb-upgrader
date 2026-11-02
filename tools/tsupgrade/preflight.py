@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 from .images import (
     RegistryError,
     manifest_exists,
+    node_image_name,
     parse_image_reference,
     parse_release_tag,
 )
@@ -62,6 +63,8 @@ __all__ = [
     "check_pg_minor_floor",
     "check_drift",
     "check_gates",
+    "check_route_images",
+    "RouteImage",
     "installable_on_instance",
     "patroni_role",
 ]
@@ -88,6 +91,18 @@ class CheckResult:
     status: str
     summary: str
     details: List[str] = field(default_factory=list)
+    # Something the operator should read even though the check does not stop.
+    notice: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class RouteImage:
+    """An image a plan still has to run. ``on_statefulset``: it runs through
+    the StatefulSet, under that pull policy. If not, it runs in apply's one-off
+    pod, which is always ``IfNotPresent``."""
+
+    reference: str
+    on_statefulset: bool = True
 
 
 @dataclass
@@ -115,6 +130,11 @@ class PreflightOptions:
     pg_upgrade_to: Optional[int] = None
     # Measured image contents (default: data/image-contents.json).
     contents_path: Optional[str] = None
+    # From apply: every image the plan still has to run, checked by digest in
+    # place of the target image, and the StatefulSet that runs them.
+    route_images: Tuple[RouteImage, ...] = ()
+    use_cached_images: bool = False
+    statefulset: Optional[str] = None
 
 
 # Older Patroni labels the leader `master` whatever the configuration asks
@@ -375,6 +395,118 @@ def check_target_image(opts: PreflightOptions) -> Tuple[CheckResult, Optional[st
         target_pg,
         target_ts,
     )
+
+
+def _implied_versions(opts: PreflightOptions) -> Tuple[Optional[str], Optional[str]]:
+    """The target's versions as given, else as its tag implies them."""
+    try:
+        parsed = parse_release_tag(parse_image_reference(opts.target_image)[2]) or {}
+    except RegistryError:
+        parsed = {}
+    return opts.target_pg or parsed.get("pg"), opts.target_ts or parsed.get("ts")
+
+
+def _why_cache_is_not_enough(kube: "Kube", opts: PreflightOptions,
+                             images: Sequence[RouteImage]) -> List[str]:
+    """Why these images could not run without their registry; empty if they
+    could: on every node by digest, under a pull policy that will not pull."""
+    try:
+        nodes = kube.json(["get", "nodes"], namespaced=False).get("items") or []
+    except PreflightError as exc:
+        return ["cannot list the nodes: {0}".format(exc)]
+    if not nodes:
+        return ["no nodes are listed"]
+    reasons: List[str] = []
+    listed = {
+        node.get("metadata", {}).get("name", "?"): {
+            name for image in node.get("status", {}).get("images") or []
+            for name in image.get("names") or []}
+        for node in nodes}
+    for image in images:
+        wanted = node_image_name(image.reference)
+        absent = sorted(name for name, names in listed.items() if wanted not in names)
+        if absent:
+            reasons.append("{0} is not on {1}".format(image.reference, ", ".join(absent)))
+    if not any(image.on_statefulset for image in images):
+        return reasons
+    if not opts.statefulset:
+        return reasons + ["no StatefulSet was named, so its pull policy is unknown"]
+    try:
+        sts = kube.json(["get", "statefulset", opts.statefulset])
+    except PreflightError as exc:
+        return reasons + ["cannot read statefulset/{0}: {1}".format(opts.statefulset, exc)]
+    containers = sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers") or []
+    policy = next((c.get("imagePullPolicy") for c in containers if c.get("name") == opts.container), None)
+    if policy == "Always":
+        reasons.append(
+            "statefulset/{0} pulls with imagePullPolicy Always, which needs the registry even "
+            "for a cached image. To change it: kubectl -n {1} patch statefulset {0} -p "
+            "'{{\"spec\":{{\"template\":{{\"spec\":{{\"containers\":[{{\"name\":\"{2}\","
+            "\"imagePullPolicy\":\"IfNotPresent\"}}]}}}}}}}}'".format(
+                opts.statefulset, opts.namespace, opts.container))
+    elif policy not in ("IfNotPresent", "Never"):
+        reasons.append("cannot read the pull policy of container {0} in statefulset/{1}".format(
+            opts.container, opts.statefulset))
+    return reasons
+
+
+def check_route_images(kube: "Kube", opts: PreflightOptions) -> CheckResult:
+    """Can every image the plan still has to run be run? Asked before anything
+    stops, of each image by digest, not only the next hop's.
+
+    A registry that says an image is not there always fails. One that does not
+    answer also fails, and says why and what can be done about it, unless the
+    operator chose ``--use-cached-images`` and the images can really run
+    without it.
+    """
+    name, title = "route_images", "Images this plan still has to run"
+    details: List[str] = []
+    missing: List[RouteImage] = []
+    silent: List[RouteImage] = []
+    for image in opts.route_images:
+        try:
+            exists, answer = manifest_exists(image.reference, timeout=opts.registry_timeout)
+        except RegistryError as exc:
+            silent.append(image)
+            details.append("{0} : registry did not answer: {1}".format(image.reference, exc))
+            continue
+        details.append("{0} : {1}".format(image.reference, answer))
+        if not exists:
+            missing.append(image)
+    if missing:
+        details.append("Nothing has been changed. If the images are in another registry, name "
+                       "it with --image-registry <host/path>; it must hold these digests, which "
+                       "a copy of every platform keeps (skopeo copy --all).")
+        return CheckResult(name, title, FAIL, "the registry does not have {0}".format(
+            ", ".join(i.reference for i in missing)), details)
+    if not silent:
+        return CheckResult(name, title, PASS, "{0} image(s), all in their registry".format(
+            len(opts.route_images)), details)
+
+    reasons = _why_cache_is_not_enough(kube, opts, silent)
+    summary = "the registry did not answer for {0} of {1} image(s)".format(
+        len(silent), len(opts.route_images))
+    if not reasons and opts.use_cached_images:
+        return CheckResult(
+            name, title, UNKNOWN, summary + "; going on with cached images, as asked", details,
+            notice="{0}: going on with the images cached on the nodes (--use-cached-images). A "
+                   "pod that moves to a node without them will not start until the registry "
+                   "answers.".format(summary))
+    details.append("This does not mean an image is missing. Nothing has been changed.")
+    if reasons:
+        details.append("Running without the registry is not possible yet:")
+        details.extend("  - " + reason for reason in reasons)
+    else:
+        details.append("Running without the registry is possible: every image is on every "
+                       "node, and the pull policy will not force a pull.")
+    details.extend([
+        "Options:",
+        "  1. try again once the registry answers",
+        "  2. use another registry: --image-registry <host/path>, which must hold these digests",
+        "  3. use the cached images: --use-cached-images"
+        + (", once the above is fixed" if reasons else ""),
+    ])
+    return CheckResult(name, title, FAIL, summary, details)
 
 
 def check_image_on_nodes(kube: Kube, opts: PreflightOptions) -> CheckResult:
@@ -1546,9 +1678,13 @@ def run_preflight(opts: PreflightOptions) -> List[CheckResult]:
     results: List[CheckResult] = []
 
     results.append(check_context(kube, opts))
-    image_result, target_pg, target_ts = check_target_image(opts)
-    results.append(image_result)
-    results.append(check_image_on_nodes(kube, opts))
+    if opts.route_images:
+        results.append(check_route_images(kube, opts))
+        target_pg, target_ts = _implied_versions(opts)
+    else:
+        image_result, target_pg, target_ts = check_target_image(opts)
+        results.append(image_result)
+        results.append(check_image_on_nodes(kube, opts))
 
     instances, instances_result = discover_instances(kube, opts)
     results.append(instances_result)

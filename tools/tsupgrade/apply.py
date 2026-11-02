@@ -89,6 +89,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from .images import mirrored
 from .plan import PLAN_FORMAT, VERIFICATION, pinned
 from .steps import (
     EnsureImage,
@@ -105,6 +106,7 @@ from .preflight import (
     Kube,
     PreflightError,
     PreflightOptions,
+    RouteImage,
     discover_instances,
     patroni_role,
     run_preflight,
@@ -161,6 +163,14 @@ class ApplyOptions:
     pg_bin: str = "/usr/lib/postgresql/{0}/bin"
     registry_timeout: float = 15.0
     poll_interval: float = 2.0
+    # Run the plan's images from here instead (images.mirrored); the plan and
+    # the route it was verified on do not change.
+    image_registry: Optional[str] = None
+    # Go on when a registry does not answer, if the images can run without it.
+    use_cached_images: bool = False
+    # Called as soon as something is worth telling the operator, since a run
+    # can take hours and the report comes at the end.
+    notify: Optional[Callable[[str], None]] = None
 
 
 @dataclass
@@ -400,10 +410,28 @@ class _Cluster:
 # ---------------------------------------------------------------------------
 
 
+def _route_images(later: Sequence[Any], opts: ApplyOptions) -> Tuple[RouteImage, ...]:
+    """Each image the steps still have to run, as it will be asked for."""
+    found: Dict[str, bool] = {}
+
+    def add(image: str, digest: Optional[str], on_statefulset: bool) -> None:
+        reference = mirrored(pinned(image, digest), opts.image_registry)
+        found[reference] = found.get(reference, False) or on_statefulset
+
+    for step in later:
+        if isinstance(step, EnsureImage):
+            add(step.image, step.digest, True)
+        elif isinstance(step, MajorUpgrade):
+            add(step.image, step.digest, False)
+            add(step.run_image, step.run_digest, True)
+    return tuple(RouteImage(reference, on) for reference, on in found.items())
+
+
 def _step_preflight(
     step: Preflight,
     opts: ApplyOptions,
     preflight: Callable[[PreflightOptions], Sequence[Any]],
+    later: Sequence[Any] = (),
 ) -> _Outcome:
     results = preflight(
         PreflightOptions(
@@ -422,9 +450,16 @@ def _step_preflight(
             pg_upgrade_link=step.pg_upgrade.link if step.pg_upgrade else None,
             pg_upgrade_image=step.pg_upgrade.image if step.pg_upgrade else None,
             pg_upgrade_to=step.pg_upgrade.to_pg if step.pg_upgrade else None,
+            route_images=_route_images(later, opts),
+            use_cached_images=opts.use_cached_images,
+            statefulset=opts.statefulset,
         )
     )
     lines = ["{0}: {1} - {2}".format(r.name, r.status, r.summary) for r in results]
+    notices = [r.notice for r in results if getattr(r, "notice", None)]
+    for notice in notices:
+        if opts.notify:
+            opts.notify(notice)
     failed = [r for r in results if r.status == FAIL]
     if failed:
         detail = []
@@ -434,12 +469,12 @@ def _step_preflight(
         raise _StepFailed(
             "preflight failed: {0}".format(", ".join(r.name for r in failed)), detail
         )
-    return _Outcome("{0} checks, none failed".format(len(results)), lines)
+    return _Outcome("; ".join(["{0} checks, none failed".format(len(results))] + notices), lines)
 
 
 def _step_ensure_image(step: EnsureImage, cluster: _Cluster) -> _Outcome:
-    image = pinned(step.image, step.digest)
     opts = cluster.opts
+    image = mirrored(pinned(step.image, step.digest), opts.image_registry)
     sts = cluster.kube.json(["get", "statefulset", opts.statefulset])
     containers = sts.get("spec", {}).get("template", {}).get("spec", {}).get("containers") or []
     template_image = next(
@@ -877,11 +912,11 @@ class _Hop:
 
     @property
     def image(self) -> str:
-        return pinned(self.step.image, self.step.digest)
+        return mirrored(pinned(self.step.image, self.step.digest), self.opts.image_registry)
 
     @property
     def run_image(self) -> str:
-        return pinned(self.step.run_image, self.step.run_digest)
+        return mirrored(pinned(self.step.run_image, self.step.run_digest), self.opts.image_registry)
 
     @property
     def old_image(self) -> Optional[str]:
@@ -1178,13 +1213,14 @@ def apply_plan(
         "source": plan.get("source"),
         "target": plan.get("target"),
         "databases": list(databases),
+        "image_registry": opts.image_registry,
         "started_at": _now(),
         "steps": [],
     }
     failure: Optional[Dict[str, Any]] = None
 
     run: Dict[str, Callable[[Any], _Outcome]] = {
-        "preflight": lambda step: _step_preflight(step, opts, preflight),
+        "preflight": lambda step: _step_preflight(step, opts, preflight, steps[steps.index(step) + 1:]),
         "ensure_image": lambda step: _step_ensure_image(step, cluster),
         "update_extension": lambda step: _step_update(step, cluster, databases),
         "cycle_sessions": lambda step: _step_cycle(cluster, databases),

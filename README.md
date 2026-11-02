@@ -344,7 +344,7 @@ nobody has established is `unknown`, not approval.
 Registry auth failures and timeouts are **failures**, not unknowns, and every
 request carries an explicit timeout so nothing hangs a maintenance window. A
 registry that will not answer is never recorded as a registry that has no such
-image.
+image. Under `apply` the one way past it is the operator's choice, below.
 
 ---
 
@@ -503,6 +503,32 @@ match it. Take a full backup before. Afterwards, with pgBackRest, run
 full backup (pgBackRest's "Upgrading PostgreSQL", for the 2.54–2.59 the
 images ship). The data directory keeps its path, so `pg1-path` does not
 change. The runbook and `apply`'s report say the same.
+
+**Where images come from.** Before each hop, `apply` asks the registry for every
+image the plan still has to run, by digest, the `pg_upgrade` images included, so
+a missing one shows up before anything stops. If an image is not there, `apply`
+stops. If the registry does not answer, `apply` also stops, says that the image
+may well be fine, and lists what can be done:
+
+- try again once the registry answers;
+- `--image-registry HOST/PATH` (or `$TSUPGRADE_IMAGE_REGISTRY`) runs the images
+  from `HOST/PATH/<image>:<tag>@<digest>`, any registry, no change to the plan.
+  The digest stays, so the mirror must serve the very image that was verified.
+  A copy of every platform keeps it (`skopeo copy --all`); a `docker pull` and
+  `docker push` of one platform does not, and the check refuses it. It reaches
+  the registry anonymously, so a private mirror does not answer it and needs
+  the next option;
+- `--use-cached-images` goes on without the registry, only if each unanswered
+  image is on every node by digest and the StatefulSet's `imagePullPolicy` will
+  not force a pull. `Always` does, even for a cached image (measured), and
+  `apply` prints the `kubectl patch` that changes it rather than changing it.
+
+The nodes' image lists can lag by a minute or so and show at most 50 images by
+default, so a cached image can look absent, which stops the run, and a removed
+one can look present until the list catches up. A pod that later moves to a node
+without the image will not start until the registry answers. `plan
+--image-registry` names the mirror in the runbook and the script; the plan file
+keeps the verified route either way.
 
 **Going back from a copy.** `tsupgrade rollback --report report.json
 --discard-writes-since-upgrade` undoes the last major upgrade in an `apply`

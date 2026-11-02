@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence
@@ -54,6 +55,7 @@ from .images import (
     DEFAULT_REPOSITORY,
     RegistryError,
     build_catalog,
+    registry_problem,
     default_catalog_path,
     fetch_image_labels,
     fetch_tags,
@@ -596,10 +598,10 @@ def cmd_plan(args: argparse.Namespace) -> int:
     elif fmt == "script":
         # Bytes, so it stays LF on Windows: bash will not run a CRLF script.
         sys.stdout.flush()
-        sys.stdout.buffer.write((render_script(plan) + "\n").encode("utf-8"))
+        sys.stdout.buffer.write((render_script(plan, args.image_registry) + "\n").encode("utf-8"))
         sys.stdout.flush()
     else:
-        print(render_runbook(plan))
+        print(render_runbook(plan, args.image_registry))
     return EXIT_OK
 
 
@@ -655,7 +657,14 @@ def cmd_apply(args: argparse.Namespace) -> int:
         timeout=args.timeout,
         rollout_timeout=args.rollout_timeout,
         pg_upgrade_timeout=args.pg_upgrade_timeout,
+        image_registry=args.image_registry,
+        use_cached_images=args.use_cached_images,
+        notify=lambda message: print("note: " + message, file=sys.stderr),
     )
+    problem = registry_problem(args.image_registry) if args.image_registry else None
+    if problem:
+        print("error: " + problem, file=sys.stderr)
+        return EXIT_ERROR
     if plan.get("mode") == "verification" and args.acknowledge_verification_run:
         print(
             "VERIFICATION RUN: applying a plan built without an established "
@@ -678,6 +687,15 @@ def cmd_apply(args: argparse.Namespace) -> int:
     else:
         print(render_apply(report))
     return EXIT_OK if report["result"] == "pass" else EXIT_CHECK_FAILED
+
+
+def _add_image_registry(parser: argparse.ArgumentParser, what: str) -> None:
+    parser.add_argument(
+        "--image-registry", default=os.environ.get("TSUPGRADE_IMAGE_REGISTRY"), dest="image_registry",
+        metavar="HOST/PATH",
+        help="{0}, as HOST/PATH/<image>:<tag>@<digest> (default: $TSUPGRADE_IMAGE_REGISTRY, "
+        "else where the plan says)".format(what),
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -880,6 +898,8 @@ def build_parser() -> argparse.ArgumentParser:
         "cluster is unusable once the new one has started)",
     )
     plan.add_argument("--output", default=None, help="also write the plan as JSON here")
+    _add_image_registry(plan, "name this registry's images in the runbook and the script; the "
+                              "plan file keeps the verified route")
     plan.add_argument(
         "--registry-timeout", type=float, default=15.0, dest="registry_timeout"
     )
@@ -925,6 +945,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="seconds to wait for a running pg_upgrade pod; 0 (the default) waits as long as "
         "it runs. apply stops waiting, the upgrade does not stop; a pod that never starts "
         "fails after --rollout-timeout",
+    )
+    _add_image_registry(apply, "run the plan's images from this registry")
+    apply.add_argument(
+        "--use-cached-images", action="store_true", dest="use_cached_images",
+        help="when a registry does not answer, go on if every image is on every node by digest "
+        "and the pull policy will not force a pull; otherwise apply still stops",
     )
     apply.add_argument("--report", default=None, help="also write the report as JSON here")
     apply.add_argument("--json", action="store_true")
