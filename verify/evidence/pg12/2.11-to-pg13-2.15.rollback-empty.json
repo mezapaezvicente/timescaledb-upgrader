@@ -28,15 +28,15 @@
     "reached": "2.11.2"
   },
   "upgrader": {
-    "commit": "e71e3649352b89687716083463dae928748a3b95",
+    "commit": "e2e3c13344fd4246561de8f948c4a0d5bd5730ec",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg12/2.11-to-pg13-2.15.rollback-empty.log",
-  "recorded_at": "2026-10-31T15:34:35Z",
+  "recorded_at": "2026-11-02T14:41:57Z",
   "stage": "done",
-  "started_at": "2026-10-31T15:29:59Z",
-  "finished_at": "2026-10-31T15:34:35Z",
+  "started_at": "2026-11-02T14:37:19Z",
+  "finished_at": "2026-11-02T14:41:57Z",
   "source_pg_version": "12.22",
   "replicas": 2,
   "pods": [
@@ -104,12 +104,12 @@
     "to_pg": 12,
     "lost": "every write made since the upgrade is lost: the old data directory is the cluster as it was when pg_upgrade ran, extension updates included",
     "output": [
-      "going back from PostgreSQL 13 (system identifier 7702855416635031576) to 12: every write made since the upgrade is lost: the old data directory is the cluster as it was when pg_upgrade ran, extension updates included",
+      "going back from PostgreSQL 13 (system identifier 7703584030161289240) to 12: every write made since the upgrade is lost: the old data directory is the cluster as it was when pg_upgrade ran, extension updates included",
       "scaled statefulset/tsdb to 0",
-      "PostgreSQL 13's data directory is now /home/postgres/pgdata/data.rolled-back-pg13-7702855416635031576; PostgreSQL 12's is back at /home/postgres/pgdata/data",
+      "PostgreSQL 13's data directory is now /home/postgres/pgdata/data.rolled-back-pg13-7703584030161289240; PostgreSQL 12's is back at /home/postgres/pgdata/data",
       "deleted pgdata-tsdb-1",
       "reset Patroni's state for scope tsdb: endpoints/tsdb, endpoints/tsdb-config",
-      "back: primary tsdb-0 on PostgreSQL 12, system identifier 7702854705661722650 (the old cluster's)"
+      "back: primary tsdb-0 on PostgreSQL 12, system identifier 7703583317049511962 (the old cluster's)"
     ],
     "result": "pass"
   }

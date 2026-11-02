@@ -44,15 +44,15 @@
     "reached": "2.30.1"
   },
   "upgrader": {
-    "commit": "bdb8c59def84e1ac6756e4c0e8993fc869930c51",
+    "commit": "e2e3c13344fd4246561de8f948c4a0d5bd5730ec",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg12/2.11-to-pg17-2.30.link-seeded.log",
-  "recorded_at": "2026-10-31T09:47:12Z",
+  "recorded_at": "2026-11-02T11:29:23Z",
   "stage": "done",
-  "started_at": "2026-10-31T09:40:59Z",
-  "finished_at": "2026-10-31T09:47:12Z",
+  "started_at": "2026-11-02T11:23:02Z",
+  "finished_at": "2026-11-02T11:29:23Z",
   "source_pg_version": "12.22",
   "replicas": 2,
   "pods": [
@@ -83,7 +83,7 @@
     },
     "jobs": {
       "status": "pass",
-      "detail": "2 jobs registered, seeded 2; fx_job_ok 1 runs, fx_job_fail 2 failures"
+      "detail": "2 jobs registered, seeded 2; fx_job_ok 1 runs, fx_job_fail 1 failures"
     },
     "still_compressed": {
       "status": "pass",

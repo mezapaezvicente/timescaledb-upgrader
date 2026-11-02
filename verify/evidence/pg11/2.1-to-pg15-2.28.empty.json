@@ -44,15 +44,15 @@
     "reached": "2.28.3"
   },
   "upgrader": {
-    "commit": "9313496de87111b596508b9eda11324500084687",
+    "commit": "e2e3c13344fd4246561de8f948c4a0d5bd5730ec",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg11/2.1-to-pg15-2.28.empty.log",
-  "recorded_at": "2026-10-31T13:09:25Z",
+  "recorded_at": "2026-11-02T12:16:11Z",
   "stage": "done",
-  "started_at": "2026-10-31T13:03:11Z",
-  "finished_at": "2026-10-31T13:09:25Z",
+  "started_at": "2026-11-02T12:09:57Z",
+  "finished_at": "2026-11-02T12:16:11Z",
   "source_pg_version": "11.11",
   "replicas": 2,
   "pods": [
