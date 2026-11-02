@@ -355,7 +355,8 @@ def _check_time_bucket_ng(runner: Runner, database: str, details: List[str]) -> 
 # Catalog columns only, and no hypertable_size(): it failed at 2.1.1 (measured:
 # hypertable_detailed_size(regclass) does not exist). Checked on 2.1.1 (pg11,
 # pg13) and 2.15.3. One column, split on chr(31), so that no name can be taken
-# for a separator.
+# for a separator, and closed by a last field: kubectl output gets stripped, chr(31)
+# is whitespace to Python, and empty last fields would go with it (measured).
 _OLD_CAGG_REPORT = (
     "SELECT concat_ws(chr(31), "
     "c.user_view_schema || '.' || c.user_view_name, "
@@ -375,7 +376,8 @@ _OLD_CAGG_REPORT = (
     "SELECT CASE e.grantee WHEN 0 THEN 'PUBLIC' ELSE g.rolname END AS grantee_name, e.privilege_type "
     "FROM pg_class v, aclexplode(v.relacl) e LEFT JOIN pg_roles g ON g.oid = e.grantee "
     "WHERE v.oid = to_regclass(format('%I.%I', c.user_view_schema, c.user_view_name)) "
-    "AND e.grantee <> v.relowner) a)) "
+    "AND e.grantee <> v.relowner) a), "
+    "'end') "
     "FROM _timescaledb_catalog.continuous_agg c "
     "JOIN _timescaledb_catalog.hypertable m ON m.id = c.mat_hypertable_id "
     "JOIN _timescaledb_catalog.hypertable r ON r.id = c.raw_hypertable_id"
@@ -416,7 +418,7 @@ def old_caggs(runner: Runner, database: str, source_ts: object) -> Optional[List
         if not line.strip():
             continue
         parts = line.split(chr(31))
-        if len(parts) != 7:
+        if len(parts) != 8:
             return None
         found.append(OldCagg(
             database, parts[0], parts[1], int(parts[2]), int(parts[3]), int(parts[4]),

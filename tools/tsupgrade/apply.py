@@ -635,26 +635,34 @@ def _plan_cagg_migration(
     if crossing is None:
         return
     primary = next((i for i in instances if i.role == "primary" and not i.error), None)
-    if primary is None:
-        return  # the first preflight says so, and the gate still stops that hop
+    unread: List[str] = [] if primary else ["no primary could be queried"]
 
     def runner(database: str, sql: str) -> Tuple[int, str, str]:
         return cluster.psql(primary.pod, database, sql)
 
     found: List[OldCagg] = []
     bucket: List[str] = []
-    for database in databases:
+    for database in databases if primary else ():
         version = primary.extensions.get(database)
         caggs = old_caggs(runner, database, version)
         ng = time_bucket_ng_caggs(runner, database)
         if caggs is None or ng is None:
-            if opts.notify:
-                opts.notify("could not establish whether {0} holds continuous aggregates that "
-                            "hop {1} would refuse; the gate there still checks".format(database, crossing.hop))
+            unread.append("cannot read the continuous aggregates of {0}".format(database))
             continue
         found.extend(caggs)
         if ng:
             bucket.append("  {0}: {1}".format(database, ng))
+    if unread:
+        # Not going on to find out at that hop, after every pg_upgrade before it.
+        raise ApplyRefused([
+            "This comes from a read-only check. Nothing has been changed.",
+            "",
+            "Hop {0} of this plan updates to {1}, and the update to 2.25 refuses continuous "
+            "aggregates in the old format. Whether this database holds any could not be "
+            "established:".format(crossing.hop, crossing.to),
+        ] + ["  " + line for line in unread] + [
+            "Run apply again once the database can be read.",
+        ], plain=True)
     if not found and not bucket:
         return
 
