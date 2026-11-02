@@ -36,6 +36,7 @@ class FakeKube:
     """Just enough kubectl for apply, with the cluster's state behind it."""
 
     def __init__(self, image: str, server: str, dbs: Dict[str, str], replicas: int = 0):
+        self.old_caggs = ""
         self.template = image
         self.server = server
         self.ext = dict(dbs)
@@ -102,6 +103,12 @@ class FakeKube:
             return 0, self.ext.get(db, ""), ""
         if sql == "SELECT 1":
             return 0, "1", ""
+        if "information_schema.columns" in sql:  # the check for old aggregates
+            return 0, "t", ""
+        if "time_bucket_ng" in sql:
+            return 0, "", ""
+        if "FROM _timescaledb_catalog.continuous_agg" in sql:
+            return 0, self.old_caggs, ""
         if sql == "SHOW server_version":
             return 0, self.server + " (Ubuntu)", ""
         if sql.startswith("ALTER EXTENSION"):
@@ -313,6 +320,42 @@ def test_pod_deletion_does_not_block_on_graceful_shutdown():
     _run(_plan(source_ts="2.12.2", candidates=[bridge]), kube)
     deletes = [c for c in calls if c[0] == "delete"]
     assert deletes and all("--wait=false" in c for c in deletes)
+
+
+def test_old_aggregates_stop_the_run_before_any_write():
+    """The stop comes from reading alone: no preflight step, no pod, no ALTER."""
+    kube = FakeKube(PG15_18, "15.18", {"verify": "2.20.3"})
+    kube.old_caggs = chr(31).join(["public.ca", "public.t", "1024", "1", "0", "", ""])
+    with pytest.raises(ApplyRefused) as refused:
+        _run(_plan(), kube)
+    assert kube.writes == [] and refused.value.plain
+    assert "read-only check" in " ".join(refused.value.reasons)
+
+
+def test_agreeing_migrates_in_the_order_the_stop_said():
+    kube = FakeKube(PG15_18, "15.18", {"verify": "2.20.3"})
+    kube.old_caggs = chr(31).join(["public.ca", "public.t", "1024", "1", "0", "", ""])
+    calls = []
+    original = kube.exec
+
+    def exec_(pod, container, argv):
+        sql = argv[-1]
+        if sql.startswith("CALL cagg_migrate"):
+            kube.old_caggs = ""
+            calls.append(sql)
+            kube.writes.append("cagg_migrate")
+            return 0, "", ""
+        if "aclexplode" in sql and sql.startswith("SELECT format") or "pg_get_userbyid" in sql:
+            return 0, "", ""
+        return original(pod, container, argv)
+
+    kube.exec = exec_
+    report = _run(_plan(), kube, migrate_caggs=True)
+    assert report["result"] == "pass", report.get("failure")
+    assert calls == ["CALL cagg_migrate('public.ca', override => true, drop_old => true)"]
+    order = [w for w in kube.writes if w == "cagg_migrate" or w.startswith("verify@") and "ALTER" in w]
+    assert order[0] == "cagg_migrate"
+    assert [s["action"] for s in report["steps"]].count("migrate_caggs") == 1
 
 
 def test_a_failing_preflight_stops_before_any_write():

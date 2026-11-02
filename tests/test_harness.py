@@ -8,6 +8,7 @@ is exercised by running it.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -290,6 +291,72 @@ def test_a_run_after_a_major_change_gets_a_fresh_namespace(monkeypatch):
     assert cluster.used is False
 
 
+CROSS = harness.resolve(_row("12", "2.11", "2.15", target_pg="13"), harness.load_contents())
+
+
+def test_a_run_goes_on_from_cached_images_unless_it_has_to_stop():
+    """A registry that does not answer is the network, not the row's result."""
+    normal = harness.apply_arguments(CROSS, "p", "r", "ctx")
+    assert "--use-cached-images" in normal and "--image-registry" not in normal
+    mirror = harness.apply_arguments(harness.with_mirror(CROSS), "p", "r", "ctx")
+    assert "--use-cached-images" in mirror
+    assert mirror[mirror.index("--image-registry") + 1] == harness.MIRROR
+    refused = harness.apply_arguments(harness.with_mirror(CROSS, refused=True), "p", "r", "ctx")
+    assert "--use-cached-images" not in refused and "--image-registry" in refused
+
+
+def test_the_mirror_cannot_ever_answer():
+    assert harness.MIRROR.split("/")[0].endswith(".invalid")
+
+
+def test_mirror_runs_name_their_records_and_never_a_rows():
+    run = harness.with_mirror(CROSS)
+    assert (run.mode("seeded"), run.end) == ("mirror-seeded", CROSS.target)
+    refused = harness.with_mirror(CROSS, refused=True)
+    assert (refused.mode("empty"), refused.end) == ("mirror-refused-empty", CROSS.source)
+    assert isinstance(harness.with_mirror(RUN), harness.Unrunnable)
+    assert isinstance(harness.with_mirror(harness.with_link(CROSS)), harness.Unrunnable)
+
+
+SAID = ["This does not mean an image is missing.", "Running without the registry is possible",
+        "--image-registry <host/path>", "--use-cached-images"]
+STOPPED = {"result": "fail", "failure": {"hop": 1, "action": "preflight", "summary":
+                                         "preflight failed: route_images", "error": SAID}}
+
+
+def test_a_run_that_had_to_stop_passes_only_if_it_stopped_as_it_should():
+    run = harness.with_mirror(CROSS, refused=True)
+    args = (run, "empty", 3, "")
+    assert harness.judge(*args, STOPPED, run.source, None, pg_version=run.start_pg)[0] is True
+    # It ran.
+    assert harness.judge(*args, {"result": "pass"}, run.source, None, pg_version=run.start_pg)[0] is False
+    # It stopped later, or on something else.
+    later = {"failure": dict(STOPPED["failure"], hop=2)}
+    assert harness.judge(*args, later, run.source, None, pg_version=run.start_pg)[0] is False
+    other = {"failure": dict(STOPPED["failure"], summary="preflight failed: gates")}
+    assert harness.judge(*args, other, run.source, None, pg_version=run.start_pg)[0] is False
+    # It did not say what can be done.
+    mute = {"failure": dict(STOPPED["failure"], error=SAID[:1])}
+    assert harness.judge(*args, mute, run.source, None, pg_version=run.start_pg)[0] is False
+    # It changed something.
+    assert harness.judge(*args, STOPPED, run.source, None, pg_version="13.22")[0] is False
+    assert harness.judge(*args, STOPPED, "2.15.3", None, pg_version=run.start_pg)[0] is False
+
+
+def test_the_node_listing_is_waited_for(monkeypatch):
+    monkeypatch.setenv("HARNESS_BASH", "bash")
+    cluster = harness.Cluster("tsdb-verify", 2, PG15)
+    answers = [[], ["docker.io/timescale/timescaledb-ha@sha256:aa"]]
+    monkeypatch.setattr(harness.time, "sleep", lambda s: None)
+    monkeypatch.setattr(cluster, "kubectl", lambda *a, **k: (0, json.dumps(
+        {"items": [{"status": {"images": [{"names": answers.pop(0)}]}}]}), ""))
+    cluster.await_listed(["timescale/timescaledb-ha:t@sha256:aa"])
+    assert answers == []
+    monkeypatch.setattr(cluster, "kubectl", lambda *a, **k: (1, "", "down"))
+    with pytest.raises(harness.HarnessError, match="does not list"):
+        cluster.await_listed(["timescale/timescaledb-ha:t@sha256:aa"], timeout=-1)
+
+
 def test_resume_skips_only_clean_valid_records(tmp_path):
     from tsupgrade.evidence import build_record, record_path, write_record
 
@@ -504,3 +571,22 @@ def test_a_rollback_run_is_judged_on_the_rollback_and_the_source():
     assert failed[0] is False and failed[3] == "rollback" and "swap failed" in failed[1]
     still_new = harness.judge(run, "empty", 0, "", report, run.target, None, back={"result": "pass"})
     assert still_new[0] is False and "not {0}".format(run.source) in still_new[1]
+
+
+def test_a_route_runs_migrating_old_aggregates_unless_it_has_to_stop():
+    assert "--migrate-caggs" in harness.apply_arguments(CROSS, "p", "r", "ctx")
+    run = harness.with_caggs_refused(CROSS)
+    assert "--migrate-caggs" not in harness.apply_arguments(run, "p", "r", "ctx")
+    assert (run.mode("seeded"), run.end) == ("caggs-refused-seeded", CROSS.source)
+    assert isinstance(harness.with_caggs_refused(harness.with_link(CROSS)), harness.Unrunnable)
+
+
+def test_a_cagg_refusal_passes_only_if_it_stopped_and_said_what_it_found():
+    run = harness.with_caggs_refused(CROSS)
+    said = ("refused: nothing was written\nThis comes from a read-only check. Nothing has been changed.\n"
+            "  verify: public.fx_hourly\n    built on public.fx_metrics\nrun apply again with --migrate-caggs")
+    args = (run, "empty", 3)
+    assert harness.judge(*args, said, None, run.source, None, pg_version=run.start_pg)[0] is True
+    assert harness.judge(*args, "refused", None, run.source, None, pg_version=run.start_pg)[0] is False
+    assert harness.judge(*args, said, {"result": "fail"}, run.source, None, pg_version=run.start_pg)[0] is False
+    assert harness.judge(*args, said, None, run.source, None, pg_version="13.22")[0] is False

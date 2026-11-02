@@ -344,7 +344,7 @@ nobody has established is `unknown`, not approval.
 Registry auth failures and timeouts are **failures**, not unknowns, and every
 request carries an explicit timeout so nothing hangs a maintenance window. A
 registry that will not answer is never recorded as a registry that has no such
-image.
+image. Under `apply` the one way past it is the operator's choice, below.
 
 ---
 
@@ -503,6 +503,57 @@ match it. Take a full backup before. Afterwards, with pgBackRest, run
 full backup (pgBackRest's "Upgrading PostgreSQL", for the 2.54–2.59 the
 images ship). The data directory keeps its path, so `pg1-path` does not
 change. The runbook and `apply`'s report say the same.
+
+**Where images come from.** Before its first hop, `apply` asks the registry for
+every image the plan has to run, by digest, the `pg_upgrade` images included, so
+a missing one shows up before anything stops. It asks once: a digest does not
+change, so an outage at a later hop does not stop a run whose images were
+confirmed. If an image is not there, `apply` stops. If the registry does not answer, `apply` also stops, says that the image
+may well be fine, and lists what can be done:
+
+- try again once the registry answers;
+- `--image-registry HOST/PATH` (or `$TSUPGRADE_IMAGE_REGISTRY`) runs the images
+  from `HOST/PATH/<image>:<tag>@<digest>`, any registry, no change to the plan.
+  The digest stays, so the mirror must serve the very image that was verified.
+  A copy of every platform keeps it (`skopeo copy --all`); a `docker pull` and
+  `docker push` of one platform does not, and the check refuses it. It reaches
+  the registry anonymously, so a private mirror does not answer it and needs
+  the next option;
+- `--use-cached-images` goes on without the registry, only if each unanswered
+  image is on every node by digest and the StatefulSet's `imagePullPolicy` will
+  not force a pull. `Always` does, even for a cached image (measured), and
+  `apply` prints the `kubectl patch` that changes it rather than changing it.
+
+The nodes' image lists can lag by a minute or so and show at most 50 images by
+default, so a cached image can look absent, which stops the run, and a removed
+one can look present until the list catches up. A pod that later moves to a node
+without the image will not start until the registry answers. `plan
+--image-registry` names the mirror in the runbook and the script; the plan file
+keeps the verified route either way.
+
+**Old continuous aggregates.** An aggregate from before 2.7 cannot cross the 2.25
+update, which also removes `cagg_migrate`, the only way to convert it. If a plan
+reaches 2.25 with one, `apply` stops before changing anything, says this came from
+a read-only check, and shows each aggregate: its database and name, what it is
+built on, its size and chunks, its jobs, the views on it and its grants. At a
+terminal it asks y/n; `--migrate-caggs` is the same yes for scripts; without either
+it stops. Agreeing does not run anything yet: an old database cannot migrate (2.1.1
+has no `cagg_migrate`), so `apply` does it at the first stop on the route from 2.14
+to 2.24, with:
+
+```sql
+CALL cagg_migrate('<aggregate>', override => true, drop_old => true);
+```
+
+Without those two options the old aggregate stays and 2.25 still refuses, and a
+second call fails with `plan already exists` (measured), so a plain `CALL
+cagg_migrate('<aggregate>')`, which is what TimescaleDB's own hint says, is a trap.
+The call drops the old aggregate for good, so have a backup. It also drops grants
+without a word, so `apply` puts them back, with the owner, and runs the refresh the
+call asks for. A refresh policy is kept under a new job id. Some cases stop even
+with the flag: a view on the aggregate (the call fails partway, leaves `<name>_old`
+behind still blocking 2.25, and cannot be retried, so drop the view first), an
+aggregate on `time_bucket_ng`, and a route with no stop from 2.14 to 2.24.
 
 **Going back from a copy.** `tsupgrade rollback --report report.json
 --discard-writes-since-upgrade` undoes the last major upgrade in an `apply`

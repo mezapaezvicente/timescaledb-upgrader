@@ -27,7 +27,10 @@ from .versions import InvalidVersion, parse_version
 __all__ = [
     "DEFAULT_REPOSITORY",
     "manifest_exists",
+    "mirrored",
+    "node_image_name",
     "parse_image_reference",
+    "registry_problem",
     "RegistryError",
     "ImageCatalog",
     "parse_release_tag",
@@ -332,8 +335,42 @@ def _parse_auth_challenge(header: str) -> Dict[str, str]:
     return fields
 
 
+def mirrored(reference: str, registry: Optional[str]) -> str:
+    """``reference`` on another registry, with its image name, tag and digest.
+
+    ``registry`` is what comes before the image name, a host and any path:
+    ``registry.example.com/dockerhub/timescale`` gives
+    ``registry.example.com/dockerhub/timescale/timescaledb-ha:<tag>@<digest>``.
+    The digest stays, so the mirror has to serve the very image that was
+    verified, or the pull fails.
+    """
+    if not registry:
+        return reference
+    return "{0}/{1}".format(registry.rstrip("/"), reference.rsplit("/", 1)[-1])
+
+
+def registry_problem(registry: str) -> Optional[str]:
+    """Why ``registry`` cannot be used as ``--image-registry``, if it cannot."""
+    if "://" in registry or "@" in registry:
+        return "--image-registry takes a host and path, without a scheme or digest: {0}".format(registry)
+    head = registry.split("/", 1)[0]
+    if not ("." in head or ":" in head or head == "localhost"):
+        return "--image-registry must start with a registry host: {0}".format(registry)
+    return None
+
+
+def node_image_name(reference: str) -> str:
+    """How a Kubernetes node lists ``reference``: ``host/repo@digest``, or
+    ``host/repo:tag`` without a digest, with Docker Hub as ``docker.io``."""
+    name, _, digest = str(reference).strip().partition("@")
+    registry, repository, tag = parse_image_reference(name)
+    host = "docker.io" if registry == "registry-1.docker.io" else registry
+    return "{0}/{1}@{2}".format(host, repository, digest) if digest else "{0}/{1}:{2}".format(host, repository, tag)
+
+
 def manifest_exists(reference: str, timeout: float = 15.0) -> Tuple[bool, str]:
-    """Whether the registry serves a manifest for ``reference``.
+    """Whether the registry serves a manifest for ``reference``, by its digest
+    when it has one.
 
     Returns ``(exists, detail)``. A missing tag is a normal ``False``; anything
     else -- a refused token, a network failure, a timeout -- raises
@@ -343,7 +380,9 @@ def manifest_exists(reference: str, timeout: float = 15.0) -> Tuple[bool, str]:
     Every request carries an explicit timeout, so this fails loudly instead of
     hanging a maintenance window.
     """
-    registry, repository, tag = parse_image_reference(reference)
+    name, _, digest = str(reference).strip().partition("@")
+    registry, repository, tag = parse_image_reference(name)
+    tag = digest or tag
     url = "https://{0}/v2/{1}/manifests/{2}".format(registry, repository, tag)
     headers = {"Accept": _MANIFEST_ACCEPT, "User-Agent": _USER_AGENT}
 

@@ -160,7 +160,7 @@ A verdict covers TimescaleDB and the route its records ran: the test databases h
 1. roll out pg12.22-ts2.11.2 and update to 2.11.2
 1. pg_upgrade PostgreSQL 12 -> 13 at 2.11.2 with pg13.12-ts2.11.2-all (copy, or --link), then start PostgreSQL 13 on pg13.22-ts2.15.3 and re-clone the replicas
 1. roll out pg13.22-ts2.15.3 and update to 2.15.3
-1. after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25
+1. after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays
 1. vacuumdb --all --analyze-in-stages
 
 ### pg11/ts2.1 -> pg14/ts2.19
@@ -171,7 +171,7 @@ A verdict covers TimescaleDB and the route its records ran: the test databases h
 1. roll out pg13.22-ts2.15.3 and update to 2.15.3
 1. pg_upgrade PostgreSQL 13 -> 14 at 2.15.3 with pg14.19-ts2.19.3-all (copy, or --link), then start PostgreSQL 14 on pg14.19-ts2.19.3 and re-clone the replicas
 1. roll out pg14.19-ts2.19.3 and update to 2.19.3
-1. after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25
+1. after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays
 1. vacuumdb --all --analyze-in-stages
 
 ### pg12/ts1.7 -> pg12/ts2.11
@@ -241,27 +241,27 @@ A verdict covers TimescaleDB and the route its records ran: the test databases h
 
 ### pg13/ts2.1 -> pg13/ts2.15
 
-1. after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25
+1. after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays
 
 ### pg13/ts2.2 -> pg13/ts2.15
 
-1. after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25
+1. after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays
 
 ### pg13/ts2.3 -> pg13/ts2.15
 
-1. after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25
+1. after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays
 
 ### pg13/ts2.4 -> pg13/ts2.15
 
-1. after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25
+1. after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays
 
 ### pg13/ts2.5 -> pg13/ts2.15
 
-1. after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25
+1. after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays
 
 ### pg13/ts2.6 -> pg13/ts2.15
 
-1. after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25
+1. after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays
 
 ### pg13/ts2.15 -> pg14/ts2.19
 
@@ -305,11 +305,11 @@ A verdict covers TimescaleDB and the route its records ran: the test databases h
 
 ### pg14/ts2.5 -> pg14/ts2.19
 
-1. after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25
+1. after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays
 
 ### pg14/ts2.6 -> pg14/ts2.19
 
-1. after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25
+1. after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays
 
 ### pg14/ts2.19 -> pg15/ts2.28
 

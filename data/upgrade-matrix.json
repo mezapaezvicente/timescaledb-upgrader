@@ -87,7 +87,7 @@
         "roll out pg12.22-ts2.11.2 and update to 2.11.2",
         "pg_upgrade PostgreSQL 12 -> 13 at 2.11.2 with pg13.12-ts2.11.2-all (copy, or --link), then start PostgreSQL 13 on pg13.22-ts2.15.3 and re-clone the replicas",
         "roll out pg13.22-ts2.15.3 and update to 2.15.3",
-        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25",
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays",
         "vacuumdb --all --analyze-in-stages"
       ],
       "verified": true,
@@ -113,7 +113,7 @@
         "roll out pg13.22-ts2.15.3 and update to 2.15.3",
         "pg_upgrade PostgreSQL 13 -> 14 at 2.15.3 with pg14.19-ts2.19.3-all (copy, or --link), then start PostgreSQL 14 on pg14.19-ts2.19.3 and re-clone the replicas",
         "roll out pg14.19-ts2.19.3 and update to 2.19.3",
-        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25",
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays",
         "vacuumdb --all --analyze-in-stages"
       ],
       "verified": true,
@@ -548,7 +548,7 @@
       "verdict": "in_place",
       "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
       "steps": [
-        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays"
       ],
       "verified": true,
       "evidence": {
@@ -570,7 +570,7 @@
       "verdict": "in_place",
       "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
       "steps": [
-        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays"
       ],
       "verified": true,
       "evidence": {
@@ -592,7 +592,7 @@
       "verdict": "in_place",
       "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
       "steps": [
-        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays"
       ],
       "verified": true,
       "evidence": {
@@ -614,7 +614,7 @@
       "verdict": "in_place",
       "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
       "steps": [
-        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays"
       ],
       "verified": true,
       "evidence": {
@@ -636,7 +636,7 @@
       "verdict": "in_place",
       "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
       "steps": [
-        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays"
       ],
       "verified": true,
       "evidence": {
@@ -658,7 +658,7 @@
       "verdict": "in_place",
       "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
       "steps": [
-        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays"
       ],
       "verified": true,
       "evidence": {
@@ -949,7 +949,7 @@
       "verdict": "in_place",
       "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
       "steps": [
-        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays"
       ],
       "verified": true,
       "evidence": {
@@ -971,7 +971,7 @@
       "verdict": "in_place",
       "reason": "The upgrade completes and the data is intact (840 materialized rows, 0 differing buckets, writes and refresh work), but a continuous aggregate created before 2.7 (non-finalized) can no longer be altered from 2.14.0 (2.13 on PG15): `Continuous Aggregates with partials is not supported anymore`, so the seeded checks could not switch it to materialized_only. Migrate such aggregates with cagg_migrate() below 2.25, which removes both the old format and cagg_migrate().",
       "steps": [
-        "after the upgrade, run `CALL cagg_migrate('<aggregate>')` on every continuous aggregate created before 2.7 (measured on 2.14.2); it must happen below 2.25"
+        "after the upgrade, run `CALL cagg_migrate('<aggregate>', override => true, drop_old => true)` on every continuous aggregate created before 2.7, dropping any view on it first and restoring its grants after (measured on 2.14.2 and 2.15.3); it must happen below 2.25, and without those options the old aggregate stays"
       ],
       "verified": true,
       "evidence": {

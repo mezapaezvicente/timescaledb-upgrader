@@ -20,6 +20,7 @@ __all__ = [
     "CycleSessions",
     "EnsureImage",
     "MajorUpgrade",
+    "MigrateCaggs",
     "PgUpgradeCheck",
     "Preflight",
     "Step",
@@ -96,6 +97,17 @@ class MajorUpgrade:
     digest: Optional[str] = None
     run_digest: Optional[str] = None
     action: str = "major_upgrade"
+
+
+@dataclass(frozen=True)
+class MigrateCaggs:
+    """Added by ``apply`` when the operator agrees; no plan file carries it,
+    since it depends on what the database holds. ``expect`` is the release it
+    runs at."""
+
+    hop: int
+    expect: str
+    action: str = "migrate_caggs"
 
 
 @dataclass(frozen=True)

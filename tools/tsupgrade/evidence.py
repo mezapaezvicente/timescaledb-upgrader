@@ -21,7 +21,16 @@ a harness can add what turns out to matter without a schema change:
                     or ``rollback-seeded`` when a copy-mode major change was
                     then undone with ``tsupgrade rollback``: evidence for the
                     rollback, never a row's verdict. ``versions.target`` is
-                    then the source, where the run must end
+                    then the source, where the run must end. ``mirror-empty``
+                    or ``mirror-seeded`` when a major change ran with
+                    ``--image-registry`` and ``--use-cached-images`` against a
+                    registry that cannot answer; ``mirror-refused-empty`` or
+                    ``mirror-refused-seeded`` when the same run without
+                    ``--use-cached-images`` stopped before changing anything,
+                    which is its pass. Evidence for those flags, never a row's
+                    verdict. ``caggs-refused-seeded`` when a route reaching 2.25
+                    without ``--migrate-caggs`` stopped before changing
+                    anything, which is its pass; never a row's verdict
 ``images``          every image the run used, in order, each ``{reference,
                     digest}`` -- a two-image row lists both
 ``pg_version``      the exact server version the extension ran on
@@ -98,7 +107,8 @@ VERDICT_CODE = (
 
 EVIDENCE_FORMAT = 1
 MODES = ("empty", "seeded", "history-empty", "history-seeded", "link-empty", "link-seeded",
-         "rollback-empty", "rollback-seeded")
+         "rollback-empty", "rollback-seeded", "mirror-empty", "mirror-seeded",
+         "mirror-refused-empty", "mirror-refused-seeded", "caggs-refused-seeded")
 CONTROLS = ("direct",)
 RESULTS = ("pass", "fail")
 
@@ -282,6 +292,7 @@ def validate_record(doc: Any) -> List[str]:
         problems.append("a passing run must reach its target version")
 
     if (result == "pass" and isinstance(transition, dict) and "control" not in doc
+            and not str(doc.get("mode")).startswith(("mirror-refused-", "caggs-refused-"))
             and transition.get("source_pg") != transition.get("target_pg")):
         problems.extend(_major_upgrade_problems(doc))
 

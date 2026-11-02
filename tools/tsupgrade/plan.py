@@ -69,7 +69,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .drift import BridgeHop, ImageProfile, plan_chain
-from .images import RegistryError, parse_image_reference, parse_release_tag
+from .images import RegistryError, mirrored, parse_image_reference, parse_release_tag
 from .majors import MajorHop, Profiles, find_route, tag_major
 from .matrix import Matrix, MatrixEntry, MatrixError
 from .support import pg_minor_refusal, pg_minor_rules_for, update_hazard
@@ -616,7 +616,7 @@ def build_plan(
     }
 
 
-def render_runbook(plan: Dict[str, Any]) -> str:
+def render_runbook(plan: Dict[str, Any], image_registry: Optional[str] = None) -> str:
     """The plan as an operator reads it. Same content as the JSON, nothing more."""
     lines: List[str] = []
     verification = plan["mode"] == VERIFICATION
@@ -669,7 +669,7 @@ def render_runbook(plan: Dict[str, Any]) -> str:
                     else "the data directory's size free again, for the copy"))
         elif action == "ensure_image":
             lines.append("{0}. make sure every instance runs {1} (roll it out if not)".format(
-                prefix, pinned(step["image"], step.get("digest"))))
+                prefix, mirrored(pinned(step["image"], step.get("digest")), image_registry)))
         elif action == "update_extension":
             lines.append("{0}. update the extension {1} -> {2}:".format(
                 prefix, step["from"], step["to"]))
@@ -688,7 +688,7 @@ def render_runbook(plan: Dict[str, Any]) -> str:
                          "at TimescaleDB {5}:".format(
                              prefix, step["from_pg"], step["to_pg"],
                              "--link" if step["link"] else "copy",
-                             pinned(step["image"], step.get("digest")), step["ts"]))
+                             mirrored(pinned(step["image"], step.get("digest")), image_registry), step["ts"]))
             lines.append("         - stop the cluster; the leader's data directory is upgraded")
             lines.append("         - {0}".format(
                 "the old data directory is unusable afterwards (hard links)" if step["link"]
@@ -701,7 +701,7 @@ def render_runbook(plan: Dict[str, Any]) -> str:
                          "the WAL archive do not match the new system identifier "
                          "(pgBackRest: stanza-upgrade, then a full backup)")
             lines.append("         - restart every instance on {0}".format(
-                pinned(step["run_image"], step.get("run_digest"))))
+                mirrored(pinned(step["run_image"], step.get("run_digest")), image_registry)))
             lines.append("         - do not run the update_extensions.sql pg_upgrade may write: "
                          "its bare ALTER EXTENSION timescaledb UPDATE goes straight to the "
                          "image's default release, past any stop this plan makes")
@@ -744,7 +744,7 @@ check_version() {
 """
 
 
-def render_script(plan: Dict[str, Any]) -> str:
+def render_script(plan: Dict[str, Any], image_registry: Optional[str] = None) -> str:
     """The plan as a commented shell script: the same steps as the runbook,
     with the SQL ones done and the deployment's ones paused on."""
     src, tgt = plan["source"], plan["target"]
@@ -772,7 +772,7 @@ def render_script(plan: Dict[str, Any]) -> str:
                       "#   tsupgrade preflight --target-image {0} --target-ts {1}".format(
                           step["image"], step["target_ts"])]
         elif action == "ensure_image":
-            image = pinned(step["image"], step.get("digest"))
+            image = mirrored(pinned(step["image"], step.get("digest")), image_registry)
             lines += ["say {0}".format(_shell_quote("hop {0}: every instance on {1}".format(hop, image))),
                       "pause {0} {1}".format(
                           _shell_quote("Roll every instance onto " + image + ", replicas first and the "
@@ -794,8 +794,8 @@ def render_script(plan: Dict[str, Any]) -> str:
         elif action == "verify_version":
             lines.append("check_version {0}".format(_shell_quote(step["expect"])))
         elif action == "major_upgrade":
-            both = pinned(step["image"], step.get("digest"))
-            run = pinned(step["run_image"], step.get("run_digest"))
+            both = mirrored(pinned(step["image"], step.get("digest")), image_registry)
+            run = mirrored(pinned(step["run_image"], step.get("run_digest")), image_registry)
             lines += [
                 "say {0}".format(_shell_quote("hop {0}: PostgreSQL {1} -> {2} at TimescaleDB {3}".format(
                     hop, step["from_pg"], step["to_pg"], step["ts"]))),
