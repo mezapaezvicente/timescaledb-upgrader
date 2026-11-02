@@ -637,6 +637,15 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     return EXIT_OK if result["result"] == "pass" else EXIT_CHECK_FAILED
 
 
+def _ask_to_migrate(message: str) -> bool:
+    """Ask at the terminal; anything but yes, or no answer at all, is no."""
+    print(message, file=sys.stderr)
+    try:
+        return input("Migrate them as described? [y/N] ").strip().lower() in ("y", "yes")
+    except EOFError:
+        return False
+
+
 def cmd_apply(args: argparse.Namespace) -> int:
     """Execute a plan file against the cluster in the current context."""
     try:
@@ -660,6 +669,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
         image_registry=args.image_registry,
         use_cached_images=args.use_cached_images,
         notify=lambda message: print("note: " + message, file=sys.stderr),
+        migrate_caggs=args.migrate_caggs,
+        confirm=_ask_to_migrate if sys.stdin.isatty() and not args.json else None,
     )
     problem = registry_problem(args.image_registry) if args.image_registry else None
     if problem:
@@ -676,7 +687,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
     except ApplyRefused as exc:
         print("refused: nothing was written", file=sys.stderr)
         for reason in exc.reasons:
-            print("  - {0}".format(reason), file=sys.stderr)
+            print(reason if exc.plain else "  - {0}".format(reason), file=sys.stderr)
         return EXIT_CHECK_FAILED
 
     if args.report:
@@ -951,6 +962,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--use-cached-images", action="store_true", dest="use_cached_images",
         help="when a registry does not answer, go on if every image is on every node by digest "
         "and the pull policy will not force a pull; otherwise apply still stops",
+    )
+    apply.add_argument(
+        "--migrate-caggs", action="store_true", dest="migrate_caggs",
+        help="if the plan reaches 2.25 with old-format continuous aggregates, migrate them on "
+        "the way, replacing each and dropping the old one, instead of stopping or asking",
     )
     apply.add_argument("--report", default=None, help="also write the report as JSON here")
     apply.add_argument("--json", action="store_true")

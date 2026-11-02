@@ -84,16 +84,19 @@ restart. Either way the rollout waits for a primary to be back before going on.
 from __future__ import annotations
 
 import json
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from .gates import OldCagg, old_caggs, reaches_old_cagg_removal, time_bucket_ng_caggs
 from .images import mirrored
 from .plan import PLAN_FORMAT, VERIFICATION, pinned
 from .steps import (
     EnsureImage,
     MajorUpgrade,
+    MigrateCaggs,
     Preflight,
     UpdateExtension,
     VerifyVersion,
@@ -132,7 +135,9 @@ FAILED = "failed"
 class ApplyRefused(Exception):
     """Nothing was written: the plan, the options or the cluster disqualify it."""
 
-    def __init__(self, reasons: Sequence[str]) -> None:
+    def __init__(self, reasons: Sequence[str], plain: bool = False) -> None:
+        # plain: the reasons are one message, to print as it stands.
+        self.plain = plain
         self.reasons = list(reasons)
         super().__init__("; ".join(self.reasons))
 
@@ -168,6 +173,10 @@ class ApplyOptions:
     image_registry: Optional[str] = None
     # Go on when a registry does not answer, if the images can run without it.
     use_cached_images: bool = False
+    # Migrate old continuous aggregates if the plan needs it; else ``confirm``
+    # is asked, and with neither apply stops before changing anything.
+    migrate_caggs: bool = False
+    confirm: Optional[Callable[[str], bool]] = None
     # Called as soon as something is worth telling the operator, since a run
     # can take hours and the report comes at the end.
     notify: Optional[Callable[[str], None]] = None
@@ -455,8 +464,6 @@ def _step_preflight(
             route_checked=not first,
             use_cached_images=opts.use_cached_images,
             statefulset=opts.statefulset,
-            later_updates=tuple((s.hop, s.to) for s in later
-                                if isinstance(s, UpdateExtension) and s.hop > step.hop),
         )
     )
     lines = ["{0}: {1} - {2}".format(r.name, r.status, r.summary) for r in results]
@@ -574,6 +581,183 @@ def _step_update(
     return _Outcome("updated {0} database(s) to {1}".format(len(databases), step.to), [
         "{0}: {1}".format(db, step.sql) for db in output
     ])
+
+
+# Below 2.14 cagg_migrate has not been run here, and from 2.25 it is gone.
+_MIGRATE_FROM, _MIGRATE_BELOW = (2, 14), (2, 25)
+_REFRESH_AFTER = re.compile(
+    r'executing this statement: "(CALL [\w.]*refresh_continuous_aggregate\(\'[^\']*\', '
+    r"(?:CAST\('[^']*' AS [a-z ]+\)|NULL), (?:CAST\('[^']*' AS [a-z ]+\)|NULL)\);)\"")
+# What cagg_migrate drops without a word (measured: the grants; the owner is
+# the role that ran it).
+_GRANTS_SQL = (
+    "SELECT format('GRANT %s ON %s TO %s', e.privilege_type, v.oid::regclass, "
+    "CASE e.grantee WHEN 0 THEN 'PUBLIC' ELSE quote_ident(g.rolname) END) "
+    "FROM pg_class v, aclexplode(v.relacl) e LEFT JOIN pg_roles g ON g.oid = e.grantee "
+    "WHERE v.oid = to_regclass({0}) AND e.grantee <> v.relowner"
+)
+_OWNER_SQL = "SELECT pg_get_userbyid(relowner) FROM pg_class WHERE oid = to_regclass({0})"
+
+
+def _in_migration_window(version: str) -> bool:
+    key = parse_version(version)
+    return _MIGRATE_FROM <= key[:2] < _MIGRATE_BELOW
+
+
+def _size(size: int) -> str:
+    value, unit = float(size), "bytes"
+    for unit in ("bytes", "KiB", "MiB", "GiB", "TiB"):
+        if value < 1024 or unit == "TiB":
+            break
+        value /= 1024
+    return "{0:.0f} {1}".format(value, unit) if unit == "bytes" else "{0:.1f} {1}".format(value, unit)
+
+
+def _describe_cagg(cagg: OldCagg) -> List[str]:
+    return [
+        "  {0}: {1}".format(cagg.database, cagg.name),
+        "    built on {0}; {1} in {2} chunk(s); {3} refresh or other job(s)".format(
+            cagg.built_on, _size(cagg.size_bytes), cagg.chunks, cagg.jobs),
+        "    views that depend on it: {0}".format(", ".join(cagg.dependents) or "none"),
+        "    grants: {0}".format(", ".join(cagg.grants) or "none"),
+    ]
+
+
+def _plan_cagg_migration(
+    steps: List[Any], plan: Dict[str, Any], cluster: _Cluster, instances: Sequence[Instance],
+    databases: Sequence[str], opts: ApplyOptions,
+) -> None:
+    """Before anything changes: does this route reach the 2.25 refusal with
+    aggregates it will refuse? If so stop, and say what they are, unless the
+    operator agrees to migrate them; then add the step. Read-only until then."""
+    index, crossing = next(((i, s) for i, s in enumerate(steps) if isinstance(s, UpdateExtension)
+                            and reaches_old_cagg_removal(s.to)), (None, None))
+    if crossing is None:
+        return
+    primary = next((i for i in instances if i.role == "primary" and not i.error), None)
+    if primary is None:
+        return  # the first preflight says so, and the gate still stops that hop
+
+    def runner(database: str, sql: str) -> Tuple[int, str, str]:
+        return cluster.psql(primary.pod, database, sql)
+
+    found: List[OldCagg] = []
+    bucket: List[str] = []
+    for database in databases:
+        version = primary.extensions.get(database)
+        caggs = old_caggs(runner, database, version)
+        ng = time_bucket_ng_caggs(runner, database)
+        if caggs is None or ng is None:
+            if opts.notify:
+                opts.notify("could not establish whether {0} holds continuous aggregates that "
+                            "hop {1} would refuse; the gate there still checks".format(database, crossing.hop))
+            continue
+        found.extend(caggs)
+        if ng:
+            bucket.append("  {0}: {1}".format(database, ng))
+    if not found and not bucket:
+        return
+
+    source = str(plan["source"]["ts"])
+    stop: Optional[int] = 1 if _in_migration_window(source) else None
+    release = source
+    if stop is None:
+        for i, step in enumerate(steps[:index]):
+            if isinstance(step, VerifyVersion) and _in_migration_window(step.expect):
+                stop, release = i + 1, step.expect
+                break
+    hop = steps[stop - 1].hop if stop else None
+
+    lines = [
+        "This comes from a read-only check. Nothing has been changed.",
+        "",
+        "Hop {0} of this plan updates to {1}. The update to 2.25 refuses continuous aggregates "
+        "in the old format, and it removes cagg_migrate, the only way to convert them, so "
+        "they have to be migrated before that hop.".format(crossing.hop, crossing.to),
+    ]
+    if found:
+        lines += ["", "Old-format continuous aggregates:"]
+        for cagg in found:
+            lines += _describe_cagg(cagg)
+    blocked: List[str] = []
+    if bucket:
+        blocked += ["Built on time_bucket_ng, which 2.25 also refuses and migrating is not known "
+                    "to fix; rebuild these without it first:"] + bucket
+    views = sorted({v for cagg in found for v in cagg.dependents})
+    if views:
+        blocked += ["Views depend on these aggregates. cagg_migrate fails partway with them there "
+                    "(measured), leaving the old aggregate behind, still blocking 2.25, and it "
+                    "cannot be retried. Drop them first and recreate them afterwards: "
+                    + ", ".join(views)]
+    if found and stop is None:
+        blocked.append("This route stops at no release from 2.14 to 2.24, where cagg_migrate is "
+                       "known to work. Plan to such a release first, migrate, and plan on from there.")
+    if blocked:
+        raise ApplyRefused(lines + [""] + blocked, plain=True)
+
+    lines += [
+        "",
+        "If you agree, apply runs this at hop {0}, when the database reaches {1}:".format(hop, release),
+        "  CALL cagg_migrate('<aggregate>', override => true, drop_old => true)",
+        "It rebuilds each aggregate under its own name and drops the old one, which cannot be "
+        "undone, so have a backup. It needs about the size above free again, and takes as long "
+        "as rebuilding that data. apply then runs the refresh it asks for and puts back the "
+        "grants and owner, which it loses. A refresh policy is kept under a new job id.",
+    ]
+    if not opts.migrate_caggs and not (opts.confirm and opts.confirm("\n".join(lines))):
+        raise ApplyRefused(lines + ["", "To go on: run apply again with --migrate-caggs, or answer "
+                                    "y at its prompt. Or plan to a target below 2.25."], plain=True)
+    steps.insert(stop, MigrateCaggs(hop=hop, expect=release))
+
+
+def _step_migrate_caggs(step: MigrateCaggs, cluster: _Cluster, databases: Sequence[str]) -> _Outcome:
+    primary = cluster.primary()
+    if primary is None:
+        raise _StepFailed("no ready primary to run cagg_migrate on")
+    # Rebuilding an aggregate takes as long as its data does.
+    kube = cluster.kube
+    if isinstance(kube, Kube):
+        kube = Kube(kube.context, kube.namespace, 7 * 24 * 3600.0)
+
+    def run(database: str, sql: str) -> Tuple[int, str, str]:
+        return kube.exec(primary, cluster.opts.container, [
+            "psql", "-U", cluster.opts.psql_user, "-d", database, "-X", "-qtAF", "|",
+            "-v", "ON_ERROR_STOP=1", "-c", sql])
+
+    output: List[str] = []
+    migrated = 0
+    for database in databases:
+        caggs = old_caggs(lambda d, q: run(d, q), database, step.expect)
+        if caggs is None:
+            raise _StepFailed("cannot read the continuous aggregates of {0}".format(database), output)
+        for cagg in caggs:
+            quoted = _literal(cagg.name)
+            _, grants, _ = run(database, _GRANTS_SQL.format(quoted))
+            _, owner, _ = run(database, _OWNER_SQL.format(quoted))
+            rc, out, err = run(database, "CALL cagg_migrate({0}, override => true, drop_old => true)".format(quoted))
+            if rc != 0:
+                raise _StepFailed("cagg_migrate failed for {0} in {1}".format(cagg.name, database), output + [
+                    line for line in (err or out).splitlines() if line.strip()] + [
+                    "it may be half done: look for {0}_new and {0}_old, and at "
+                    "_timescaledb_catalog.continuous_agg_migrate_plan".format(cagg.name)])
+            output.append("{0}: migrated {1}".format(database, cagg.name))
+            refresh = _REFRESH_AFTER.search(err or "")
+            followups = [refresh.group(1)] if refresh else []
+            if owner.strip():
+                followups.append("ALTER MATERIALIZED VIEW {0} OWNER TO {1}".format(cagg.name, owner.strip()))
+            followups.extend(g for g in grants.splitlines() if g.strip())
+            for sql in followups:
+                rc, out, err = run(database, sql)
+                if rc != 0:
+                    raise _StepFailed("after migrating {0} in {1}: {2}".format(cagg.name, database, sql),
+                                      output + [line for line in (err or out).splitlines() if line.strip()])
+                output.append("{0}: {1}".format(database, sql))
+            migrated += 1
+        left = old_caggs(lambda d, q: run(d, q), database, step.expect)
+        if left:
+            raise _StepFailed("{0} still holds old-format aggregates: {1}".format(
+                database, ", ".join(c.name for c in left)), output)
+    return _Outcome("migrated {0} continuous aggregate(s) at {1}".format(migrated, step.expect), output)
 
 
 def _step_cycle(cluster: _Cluster, databases: Sequence[str]) -> _Outcome:
@@ -1210,6 +1394,8 @@ def apply_plan(
         raise ApplyRefused(reasons)
 
     cluster = _Cluster(kube, opts, sleep, clock)
+    steps, _ = parse_steps(plan["steps"])  # check_plan has already refused a bad one
+    _plan_cagg_migration(steps, plan, cluster, instances, databases, opts)
     preflight = preflight or run_preflight
     report: Dict[str, Any] = {
         "apply_format": APPLY_FORMAT,
@@ -1232,9 +1418,9 @@ def apply_plan(
         "cycle_sessions": lambda step: _step_cycle(cluster, databases),
         "verify_version": lambda step: _step_verify(step, cluster, databases),
         "major_upgrade": lambda step: _step_major_upgrade(step, cluster),
+        "migrate_caggs": lambda step: _step_migrate_caggs(step, cluster, databases),
         "analyze": lambda step: _step_analyze(cluster, databases),
     }
-    steps, _ = parse_steps(plan["steps"])  # check_plan has already refused a bad one
     for step in steps:
         action, hop = step.action, step.hop
         try:

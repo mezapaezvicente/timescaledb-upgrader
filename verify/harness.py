@@ -62,6 +62,12 @@ whole upgrade from it (records ``mirror-empty``, ``mirror-seeded``);
 if ``apply`` stops at its first preflight, says what can be done, and changes
 nothing (``mirror-refused-empty``, ``mirror-refused-seeded``). No row cites them.
 
+Every run also passes ``--migrate-caggs``, so a route that reaches 2.25 with the
+old-format aggregate of a pre-2.7 seed migrates it on the way, and the checks
+judge the result. ``--caggs-refused`` is the same without it, and passes only if
+``apply`` stops before changing anything and names the aggregate
+(``caggs-refused-seeded``). No row cites it.
+
 Failures are recorded and the run goes on. A failure to stage or seed is the
 harness's or the environment's, not the row's, so it gets no record -- it is
 reported and logged only.
@@ -149,6 +155,7 @@ class Run:
     rollback: bool = False            # then tsupgrade rollback; ends at the source
     mirror: bool = False              # from MIRROR, which cannot answer, on cached images
     refused: bool = False             # the same without --use-cached-images: must stop
+    caggs_refused: bool = False       # without --migrate-caggs: must stop, nothing changed
 
     @property
     def major(self) -> int:
@@ -162,6 +169,8 @@ class Run:
             return "rollback-" + base
         if self.refused:
             return "mirror-refused-" + base
+        if self.caggs_refused:
+            return "caggs-refused-" + base
         if self.mirror:
             return "mirror-" + base
         return "history-" + base if self.history else base
@@ -170,7 +179,7 @@ class Run:
     def end(self) -> str:
         """The release the run must end at: the target, or after a rollback
         the source again, or the source still if it had to stop."""
-        return self.source if self.rollback or self.refused else self.target
+        return self.source if self.rollback or self.refused or self.caggs_refused else self.target
 
     @property
     def cross(self) -> bool:
@@ -322,6 +331,13 @@ def with_mirror(run: Run, refused: bool = False) -> Union[Run, Unrunnable]:
     return replace(run, mirror=True, refused=refused)
 
 
+def with_caggs_refused(run: Run) -> Union[Run, Unrunnable]:
+    """The same route without --migrate-caggs: it has to stop before anything."""
+    if not run.cross or run.link or run.rollback or run.mirror or run.history or run.control:
+        return Unrunnable(run.entry, "--caggs-refused is for a copy-mode major change alone")
+    return replace(run, caggs_refused=True)
+
+
 def with_rollback(run: Run) -> Union[Run, Unrunnable]:
     """The same copy-mode major change, then back with tsupgrade rollback."""
     if not run.cross:
@@ -430,6 +446,24 @@ def judge_refusal(report: Optional[Dict[str, Any]], pg_version: Optional[str],
     return None
 
 
+def judge_cagg_refusal(apply_stderr: str, report: Optional[Dict[str, Any]],
+                       pg_version: Optional[str], run: Run) -> Optional[Tuple[bool, str, str, str]]:
+    """A run that had to stop for old aggregates: None if it did, as it should.
+    It must stop before writing, say so, and name what it found."""
+    if report is not None:
+        return (False, "apply got past the check for old continuous aggregates",
+                str(report.get("result")), "apply")
+    wanted = ["read-only check", "Nothing has been changed", "public.fx_hourly", "--migrate-caggs",
+              "built on public.fx_metrics"]
+    missing = [w for w in wanted if w not in apply_stderr]
+    if missing:
+        return (False, "apply stopped without saying what it found", ", ".join(missing), "apply")
+    if pg_version != run.start_pg:
+        return (False, "apply stopped but PostgreSQL changed",
+                "{0}, was {1}".format(pg_version, run.start_pg), "verify")
+    return None
+
+
 def judge(
     run: Run,
     mode: str,
@@ -447,8 +481,9 @@ def judge(
     A failed check quotes its own line and whatever the server said while
     check.sql ran: the check line says what was wrong, the server says why.
     """
-    if run.refused:
-        refusal = judge_refusal(report, pg_version, run)
+    if run.caggs_refused or run.refused:
+        refusal = (judge_cagg_refusal(apply_stderr, report, pg_version, run) if run.caggs_refused
+                   else judge_refusal(report, pg_version, run))
         if refusal:
             return refusal
         report = {"result": "pass"}
@@ -598,6 +633,8 @@ def apply_arguments(run: Run, plan_path: Path, report_path: Path, context: str) 
         args += ["--image-registry", MIRROR]
     if not run.refused:
         args.append("--use-cached-images")
+    if not run.caggs_refused:
+        args.append("--migrate-caggs")
     return args
 
 
@@ -1011,7 +1048,7 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         route = record_route(run, plan, contents)
         if route is not None:
             extra["route"] = route
-        if run.cross and not run.refused:
+        if run.cross and not run.refused and not run.caggs_refused:
             extra["major_upgrades"] = major_upgrades(report)
         if run.mirror:
             extra["image_registry"] = MIRROR
@@ -1146,6 +1183,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "cached images; evidence for those flags, never a row's verdict")
     ap.add_argument("--mirror-refused", action="store_true", dest="mirror_refused",
                     help="the same without --use-cached-images: passes only if apply stops first")
+    ap.add_argument("--caggs-refused", action="store_true", dest="caggs_refused",
+                    help="without --migrate-caggs: passes only if apply stops before changing anything")
     ap.add_argument("--control", choices=CONTROLS,
                     help="negative control: one ALTER EXTENSION instead of plan/apply "
                          "(needs --history)")
@@ -1164,6 +1203,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         resolved = [with_rollback(r) if isinstance(r, Run) else r for r in resolved]
     if args.mirror or args.mirror_refused:
         resolved = [with_mirror(r, args.mirror_refused) if isinstance(r, Run) else r for r in resolved]
+    if args.caggs_refused:
+        resolved = [with_caggs_refused(r) if isinstance(r, Run) else r for r in resolved]
     if args.history:
         resolved = [with_history(r, args.history, contents) if isinstance(r, Run) else r
                     for r in resolved]
@@ -1180,7 +1221,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "  (created at {0})".format(run.history) if run.history else "",
             "  CONTROL {0}".format(run.control) if run.control else "",
             "  --link" if run.link else "  then rollback" if run.rollback
-            else "  must stop" if run.refused else "  from " + MIRROR if run.mirror else ""))
+            else "  must stop" if run.refused or run.caggs_refused else "  from " + MIRROR if run.mirror else ""))
     for skip in skipped:
         e = skip.entry
         print("{0:<18} skipped: {1}".format(

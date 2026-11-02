@@ -531,12 +531,29 @@ without the image will not start until the registry answers. `plan
 --image-registry` names the mirror in the runbook and the script; the plan file
 keeps the verified route either way.
 
-**Told at the start about the 2.25 refusal.** A continuous aggregate from before
-2.7 cannot cross the 2.25 update, and on an old database `cagg_migrate` does not
-exist yet (2.1.1 has none, 2.15.3 has it), so a long route cannot clear it first.
-From the first hop `apply` says which aggregates the later hop will refuse, on
-stderr as soon as it knows, and goes on: the gate still stops that hop, where
-they can be migrated.
+**Old continuous aggregates.** An aggregate from before 2.7 cannot cross the 2.25
+update, which also removes `cagg_migrate`, the only way to convert it. If a plan
+reaches 2.25 with one, `apply` stops before changing anything, says this came from
+a read-only check, and shows each aggregate: its database and name, what it is
+built on, its size and chunks, its jobs, the views on it and its grants. At a
+terminal it asks y/n; `--migrate-caggs` is the same yes for scripts; without either
+it stops. Agreeing does not run anything yet: an old database cannot migrate (2.1.1
+has no `cagg_migrate`), so `apply` does it at the first stop on the route from 2.14
+to 2.24, with:
+
+```sql
+CALL cagg_migrate('<aggregate>', override => true, drop_old => true);
+```
+
+Without those two options the old aggregate stays and 2.25 still refuses, and a
+second call fails with `plan already exists` (measured), so a plain `CALL
+cagg_migrate('<aggregate>')`, which is what TimescaleDB's own hint says, is a trap.
+The call drops the old aggregate for good, so have a backup. It also drops grants
+without a word, so `apply` puts them back, with the owner, and runs the refresh the
+call asks for. A refresh policy is kept under a new job id. Some cases stop even
+with the flag: a view on the aggregate (the call fails partway, leaves `<name>_old`
+behind still blocking 2.25, and cannot be retried, so drop the view first), an
+aggregate on `time_bucket_ng`, and a route with no stop from 2.14 to 2.24.
 
 **Going back from a copy.** `tsupgrade rollback --report report.json
 --discard-writes-since-upgrade` undoes the last major upgrade in an `apply`

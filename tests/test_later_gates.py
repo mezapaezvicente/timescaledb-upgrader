@@ -1,14 +1,12 @@
-"""Tests for looking ahead at the 2.25 refusal of old continuous aggregates.
+"""Tests for the 2.25 gate on old databases.
 
 What would hurt if wrong: reporting all clear on a database from before 2.7,
-whose catalog has no ``finalized`` column, or stopping a hop on an aggregate
-that release cannot migrate yet.
+whose catalog has no ``finalized`` column.
 """
 
 from __future__ import annotations
 
 from tsupgrade.gates import BLOCKED, CLEAR, INDETERMINATE, check_old_caggs
-from tsupgrade.preflight import PASS, UNKNOWN, Instance, PreflightOptions, check_later_gates
 
 
 def _runner(finalized_column, aggregates="public.fx_hourly", broken=False):
@@ -47,56 +45,3 @@ def test_past_the_cutoff_the_missing_column_still_means_clear():
 
 def test_a_version_that_says_nothing_is_not_clear():
     assert check_old_caggs(_runner(False), "verify", "unknown", "2.27.2").status == INDETERMINATE
-
-
-class Kube:
-    def __init__(self, run):
-        self.run = run
-
-    def psql(self, pod, container, database, user, sql):
-        return self.run(database, sql)
-
-
-def _check(run, target="2.15.3", later=((6, "2.27.2"), (7, "2.28.3")), version="2.1.1"):
-    return check_later_gates(
-        Kube(run), PreflightOptions(target_image="x", later_updates=tuple(later)),
-        [Instance(pod="tsdb-0", extensions={"verify": version}),
-         Instance(pod="tsdb-1", extensions={"verify": version})], target)
-
-
-def test_an_old_aggregate_is_told_about_at_the_start_and_does_not_stop_the_hop():
-    result = _check(_runner(False), target="2.1.1")
-    assert result.status == UNKNOWN
-    assert "public.fx_hourly" in result.notice
-    assert "Hop 6 of this plan updates to 2.27.2" in result.notice
-    assert "cagg_migrate()" in result.notice
-
-
-def test_each_database_is_asked_once_replicas_hold_the_same_data():
-    calls = []
-    run = _runner(False)
-
-    def counted(database, sql):
-        calls.append(sql)
-        return run(database, sql)
-
-    _check(counted, target="2.1.1")
-    assert sum("FROM _timescaledb_catalog.continuous_agg" in c and "JOIN" not in c for c in calls) == 1
-
-
-def test_nothing_old_is_a_pass_with_nothing_to_read():
-    result = _check(_runner(True, aggregates=""), version="2.11.2")
-    assert result.status == PASS and result.notice is None
-
-
-def test_a_failed_question_is_unknown_not_clear():
-    result = _check(_runner(True, broken=True), version="2.11.2")
-    assert result.status == UNKNOWN and result.notice is None
-
-
-def test_no_later_update_reaches_2_25_so_nothing_is_asked():
-    assert _check(_runner(False), later=[(4, "2.15.3")]) is None
-
-
-def test_this_hop_reaching_2_25_is_the_gates_check_not_this_one():
-    assert _check(_runner(False), target="2.27.2") is None

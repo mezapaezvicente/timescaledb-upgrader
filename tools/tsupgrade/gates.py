@@ -58,8 +58,11 @@ from typing import Callable, List, Optional, Sequence, Tuple
 from .versions import InvalidVersion, parse_version
 
 __all__ = [
+    "OldCagg",
     "check_old_caggs",
+    "old_caggs",
     "reaches_old_cagg_removal",
+    "time_bucket_ng_caggs",
     "GateResult",
     "CLEAR",
     "BLOCKED",
@@ -349,6 +352,90 @@ def _check_time_bucket_ng(runner: Runner, database: str, details: List[str]) -> 
     return BLOCKED
 
 
+# Catalog columns only, and no hypertable_size(): it failed at 2.1.1 (measured:
+# hypertable_detailed_size(regclass) does not exist). Checked on 2.1.1 (pg11,
+# pg13) and 2.15.3. One column, split on chr(31), so that no name can be taken
+# for a separator.
+_OLD_CAGG_REPORT = (
+    "SELECT concat_ws(chr(31), "
+    "c.user_view_schema || '.' || c.user_view_name, "
+    "r.schema_name || '.' || r.table_name, "
+    "(SELECT coalesce(sum(pg_total_relation_size(to_regclass(format('%I.%I', ch.schema_name, ch.table_name)))), 0) "
+    "FROM _timescaledb_catalog.chunk ch WHERE ch.hypertable_id = m.id), "
+    "(SELECT count(*) FROM _timescaledb_catalog.chunk ch WHERE ch.hypertable_id = m.id), "
+    "(SELECT count(*) FROM _timescaledb_config.bgw_job j WHERE j.hypertable_id = m.id), "
+    "(SELECT coalesce(string_agg(DISTINCT n.nspname || '.' || k.relname, ', '), '') "
+    "FROM pg_depend d "
+    "JOIN pg_rewrite w ON d.objid = w.oid AND d.classid = 'pg_rewrite'::regclass "
+    "JOIN pg_class k ON k.oid = w.ev_class "
+    "JOIN pg_namespace n ON n.oid = k.relnamespace "
+    "WHERE d.refobjid = to_regclass(format('%I.%I', c.user_view_schema, c.user_view_name)) "
+    "AND k.oid <> d.refobjid AND n.nspname NOT LIKE '\\_timescaledb%'), "
+    "(SELECT coalesce(string_agg(a.grantee_name || ':' || a.privilege_type, ', '), '') FROM ("
+    "SELECT CASE e.grantee WHEN 0 THEN 'PUBLIC' ELSE g.rolname END AS grantee_name, e.privilege_type "
+    "FROM pg_class v, aclexplode(v.relacl) e LEFT JOIN pg_roles g ON g.oid = e.grantee "
+    "WHERE v.oid = to_regclass(format('%I.%I', c.user_view_schema, c.user_view_name)) "
+    "AND e.grantee <> v.relowner) a)) "
+    "FROM _timescaledb_catalog.continuous_agg c "
+    "JOIN _timescaledb_catalog.hypertable m ON m.id = c.mat_hypertable_id "
+    "JOIN _timescaledb_catalog.hypertable r ON r.id = c.raw_hypertable_id"
+)
+
+
+@dataclass(frozen=True)
+class OldCagg:
+    """An old-format continuous aggregate, as the operator has to judge it."""
+
+    database: str
+    name: str
+    built_on: str
+    size_bytes: int
+    chunks: int
+    jobs: int
+    dependents: Tuple[str, ...] = ()
+    grants: Tuple[str, ...] = ()
+
+
+def old_caggs(runner: Runner, database: str, source_ts: object) -> Optional[List[OldCagg]]:
+    """Every old-format aggregate in ``database``; None if it cannot be
+    established. Read-only. Past 2.25 the format, and so the answer, is gone."""
+    has_column = _column_exists(runner, database, "continuous_agg", "finalized")
+    if has_column is None:
+        return None
+    if not has_column:
+        past = _at_or_above(source_ts, (2, 25))
+        if past is None:
+            return None
+        if past:
+            return []
+    rc, out, _ = runner(database, _OLD_CAGG_REPORT + (" WHERE c.finalized IS FALSE" if has_column else ""))
+    if rc != 0:
+        return None
+    found: List[OldCagg] = []
+    for line in out.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split(chr(31))
+        if len(parts) != 7:
+            return None
+        found.append(OldCagg(
+            database, parts[0], parts[1], int(parts[2]), int(parts[3]), int(parts[4]),
+            tuple(x for x in parts[5].split(", ") if x), tuple(x for x in parts[6].split(", ") if x)))
+    return found
+
+
+def time_bucket_ng_caggs(runner: Runner, database: str) -> Optional[str]:
+    """The aggregates built on ``time_bucket_ng``, which 2.25 also refuses and
+    ``cagg_migrate`` is not known to fix; None if it cannot be established."""
+    details: List[str] = []
+    status = _check_time_bucket_ng(runner, database, details)
+    if status == INDETERMINATE:
+        return None
+    if status != BLOCKED:
+        return ""
+    return details[-1].split(" : ", 1)[1]
+
+
 def reaches_old_cagg_removal(target_ts: object) -> bool:
     """Whether an update to ``target_ts`` meets the 2.25 refusal."""
     return bool(_at_or_above(target_ts, (2, 25)))
@@ -389,9 +476,10 @@ def check_old_caggs(
 
     if status == BLOCKED:
         details.append(
-            "Run the cagg_migrate procedure on each BEFORE updating. The 2.25 "
-            "update drops cagg_migrate itself, so afterwards the only remaining "
-            "fix is restoring a backup."
+            "Run CALL cagg_migrate('<aggregate>', override => true, drop_old => "
+            "true) on each BEFORE updating: without those options the old one "
+            "stays, and this still blocks. The 2.25 update drops cagg_migrate "
+            "itself, so afterwards the only remaining fix is restoring a backup."
         )
 
     summary = {

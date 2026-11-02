@@ -571,3 +571,22 @@ def test_a_rollback_run_is_judged_on_the_rollback_and_the_source():
     assert failed[0] is False and failed[3] == "rollback" and "swap failed" in failed[1]
     still_new = harness.judge(run, "empty", 0, "", report, run.target, None, back={"result": "pass"})
     assert still_new[0] is False and "not {0}".format(run.source) in still_new[1]
+
+
+def test_a_route_runs_migrating_old_aggregates_unless_it_has_to_stop():
+    assert "--migrate-caggs" in harness.apply_arguments(CROSS, "p", "r", "ctx")
+    run = harness.with_caggs_refused(CROSS)
+    assert "--migrate-caggs" not in harness.apply_arguments(run, "p", "r", "ctx")
+    assert (run.mode("seeded"), run.end) == ("caggs-refused-seeded", CROSS.source)
+    assert isinstance(harness.with_caggs_refused(harness.with_link(CROSS)), harness.Unrunnable)
+
+
+def test_a_cagg_refusal_passes_only_if_it_stopped_and_said_what_it_found():
+    run = harness.with_caggs_refused(CROSS)
+    said = ("refused: nothing was written\nThis comes from a read-only check. Nothing has been changed.\n"
+            "  verify: public.fx_hourly\n    built on public.fx_metrics\nrun apply again with --migrate-caggs")
+    args = (run, "empty", 3)
+    assert harness.judge(*args, said, None, run.source, None, pg_version=run.start_pg)[0] is True
+    assert harness.judge(*args, "refused", None, run.source, None, pg_version=run.start_pg)[0] is False
+    assert harness.judge(*args, said, {"result": "fail"}, run.source, None, pg_version=run.start_pg)[0] is False
+    assert harness.judge(*args, said, None, run.source, None, pg_version="13.22")[0] is False

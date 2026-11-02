@@ -135,6 +135,12 @@ python verify/harness.py --pg 12 --from 2.11 --to-pg 13 --mirror
 python verify/harness.py --pg 12 --from 2.11 --to-pg 13 --mirror-refused
 ```
 
+**Old continuous aggregates.** Every run also passes `--migrate-caggs`: a route
+that reaches 2.25 with the old-format aggregate of a pre-2.7 seed migrates it on
+the way, and the fixture checks judge the result. `--caggs-refused --mode seeded`
+is the same without the flag, and passes only if `apply` stops before changing
+anything and names the aggregate (`caggs-refused-seeded`). No row cites it.
+
 **What is not a row result.** If staging or seeding fails, that is the harness
 or the environment, not the transition. It writes no record; it prints
 `ERROR`, logs it, and moves on. `verify/out/runs.jsonl` has one line per row
