@@ -58,6 +58,8 @@ from typing import Callable, List, Optional, Sequence, Tuple
 from .versions import InvalidVersion, parse_version
 
 __all__ = [
+    "check_old_caggs",
+    "reaches_old_cagg_removal",
     "GateResult",
     "CLEAR",
     "BLOCKED",
@@ -246,23 +248,37 @@ CAGG_SOURCE = (
 )
 
 
-def _check_unfinalized(runner: Runner, database: str, details: List[str]) -> str:
-    """Sub-check one: aggregates still in the pre-2.10 non-finalized format."""
+def _check_unfinalized(runner: Runner, database: str, source_ts: object, details: List[str]) -> str:
+    """Sub-check one: aggregates still in the pre-2.10 non-finalized format.
+
+    The ``finalized`` column is missing at both ends: dropped by 2.25, and not
+    there yet on a database from before 2.7 (measured: none in 2.1.1's install
+    script), where every aggregate is in the old format.
+    """
     has_column = _column_exists(runner, database, "continuous_agg", "finalized")
     if has_column is None:
         details.append("old format : could not probe for continuous_agg.finalized")
         return INDETERMINATE
     if not has_column:
-        details.append(
-            "old format : continuous_agg has no finalized column, so this "
-            "database is already past the 2.25 cutoff"
-        )
-        return CLEAR
+        past = _at_or_above(source_ts, (2, 25))
+        if past is None:
+            details.append(
+                "old format : no finalized column, and version {0} says nothing "
+                "about why".format(source_ts)
+            )
+            return INDETERMINATE
+        if past:
+            details.append(
+                "old format : continuous_agg has no finalized column, so this "
+                "database is already past the 2.25 cutoff"
+            )
+            return CLEAR
 
     rc, out, err = runner(
         database,
         "SELECT coalesce(string_agg(user_view_schema || '.' || user_view_name, ', '), '') "
-        "FROM _timescaledb_catalog.continuous_agg WHERE finalized IS FALSE",
+        "FROM _timescaledb_catalog.continuous_agg"
+        + (" WHERE finalized IS FALSE" if has_column else ""),
     )
     if rc != 0:
         details.append(
@@ -333,6 +349,11 @@ def _check_time_bucket_ng(runner: Runner, database: str, details: List[str]) -> 
     return BLOCKED
 
 
+def reaches_old_cagg_removal(target_ts: object) -> bool:
+    """Whether an update to ``target_ts`` meets the 2.25 refusal."""
+    return bool(_at_or_above(target_ts, (2, 25)))
+
+
 def check_old_caggs(
     runner: Runner, database: str, source_ts: object, target_ts: object
 ) -> GateResult:
@@ -361,7 +382,7 @@ def check_old_caggs(
         )
 
     statuses = [
-        _check_unfinalized(runner, database, details),
+        _check_unfinalized(runner, database, source_ts, details),
         _check_time_bucket_ng(runner, database, details),
     ]
     status = _worst(statuses)

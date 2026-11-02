@@ -37,7 +37,7 @@ from .drift import INDETERMINATE as DRIFT_INDETERMINATE
 from .drift import classify, installable_from_listings
 from .gates import BLOCKED, CLEAR, NOT_APPLICABLE, SESSION_RULES
 from .gates import INDETERMINATE as GATE_INDETERMINATE
-from .gates import run_gates
+from .gates import check_old_caggs, reaches_old_cagg_removal, run_gates
 from .matrix import Matrix, MatrixError, load_matrix
 from .support import (
     ABI_BROKEN,
@@ -63,6 +63,7 @@ __all__ = [
     "check_pg_minor_floor",
     "check_drift",
     "check_gates",
+    "check_later_gates",
     "check_route_images",
     "RouteImage",
     "installable_on_instance",
@@ -133,6 +134,8 @@ class PreflightOptions:
     # From apply: every image the plan still has to run, checked by digest in
     # place of the target image, and the StatefulSet that runs them.
     route_images: Tuple[RouteImage, ...] = ()
+    # The updates later in the plan, as ``(hop, release)``.
+    later_updates: Tuple[Tuple[int, str], ...] = ()
     use_cached_images: bool = False
     statefulset: Optional[str] = None
 
@@ -1554,6 +1557,59 @@ def check_gates(
     )
 
 
+def check_later_gates(
+    kube: "Kube",
+    opts: PreflightOptions,
+    instances: Sequence[Instance],
+    target_ts: Optional[str],
+) -> Optional[CheckResult]:
+    """Will a later hop be refused for what this database holds?
+
+    Only the 2.25 refusal is looked ahead for: nothing but ``cagg_migrate``
+    clears it, and the update it stops comes after every ``pg_upgrade`` before
+    it. It does not stop this hop, since a release may be too old to have
+    ``cagg_migrate`` at all (2.1.1 has none, 2.15.3 has it); the operator gets
+    told now, and the gate still stops the hop that needs stopping. None when
+    no later update reaches 2.25, or this hop already does and ``gates`` covers it.
+    """
+    crossing = next(((hop, ts) for hop, ts in opts.later_updates if reaches_old_cagg_removal(ts)), None)
+    if crossing is None or reaches_old_cagg_removal(target_ts):
+        return None
+    hop, release = crossing
+    name, title = "later_gates", "Update-script gates later in this plan"
+    details: List[str] = []
+    blocked: List[str] = []
+    unsure = False
+    seen = set()
+    for inst in [i for i in instances if not i.error]:
+
+        def runner(database: str, sql: str, _pod: str = inst.pod):
+            return kube.psql(_pod, opts.container, database, opts.psql_user, sql)
+
+        for database, version in sorted(inst.extensions.items()):
+            if version is None or database in seen:
+                continue
+            seen.add(database)
+            gate = check_old_caggs(runner, database, version, release)
+            details.append("{0}/{1} : {2}".format(inst.pod, database, gate.summary))
+            if gate.status == BLOCKED:
+                blocked.extend("{0}: {1}".format(database, line) for line in gate.details if " : " in line
+                               and not line.endswith(" : none"))
+            elif gate.status != CLEAR:
+                unsure = True
+    if blocked:
+        return CheckResult(
+            name, title, UNKNOWN,
+            "hop {0} updates to {1} and will be refused".format(hop, release), details + blocked,
+            notice="{0}. Hop {1} of this plan updates to {2}, and the 2.25 update refuses these "
+                   "continuous aggregates, so apply will stop before that hop, after the hops "
+                   "ahead of it have run. Migrate them with cagg_migrate() below 2.25: now, if "
+                   "this release has it, or when apply stops.".format("; ".join(blocked), hop, release))
+    if unsure or not seen:
+        return CheckResult(name, title, UNKNOWN, "could not establish what hop {0} would meet".format(hop), details)
+    return CheckResult(name, title, PASS, "nothing hop {0} would refuse".format(hop), details)
+
+
 def check_matrix(
     opts: PreflightOptions,
     instances: Sequence[Instance],
@@ -1699,6 +1755,9 @@ def run_preflight(opts: PreflightOptions) -> List[CheckResult]:
     results.append(check_permissions(kube, opts, instances))
     results.append(check_drift(kube, opts, instances))
     results.append(check_gates(kube, opts, instances, target_ts))
+    later = check_later_gates(kube, opts, instances, target_ts)
+    if later:
+        results.append(later)
     results.append(check_matrix(opts, instances, target_pg, target_ts))
 
     return results

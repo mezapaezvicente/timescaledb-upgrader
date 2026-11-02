@@ -453,6 +453,8 @@ def _step_preflight(
             route_images=_route_images(later, opts),
             use_cached_images=opts.use_cached_images,
             statefulset=opts.statefulset,
+            later_updates=tuple((s.hop, s.to) for s in later
+                                if isinstance(s, UpdateExtension) and s.hop > step.hop),
         )
     )
     lines = ["{0}: {1} - {2}".format(r.name, r.status, r.summary) for r in results]

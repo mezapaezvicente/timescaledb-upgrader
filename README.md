@@ -530,6 +530,13 @@ without the image will not start until the registry answers. `plan
 --image-registry` names the mirror in the runbook and the script; the plan file
 keeps the verified route either way.
 
+**Told at the start about the 2.25 refusal.** A continuous aggregate from before
+2.7 cannot cross the 2.25 update, and on an old database `cagg_migrate` does not
+exist yet (2.1.1 has none, 2.15.3 has it), so a long route cannot clear it first.
+From the first hop `apply` says which aggregates the later hop will refuse, on
+stderr as soon as it knows, and goes on: the gate still stops that hop, where
+they can be migrated.
+
 **Going back from a copy.** `tsupgrade rollback --report report.json
 --discard-writes-since-upgrade` undoes the last major upgrade in an `apply`
 report. It stops the cluster, puts `<data>.pg<old>` back in place (the new
