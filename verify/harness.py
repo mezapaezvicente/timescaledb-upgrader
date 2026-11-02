@@ -53,6 +53,15 @@ back from the last major upgrade, and the version and the fixture checks are
 judged against the *source*. Its records are ``rollback-empty`` and
 ``rollback-seeded``, and no matrix row cites them.
 
+Every run passes ``apply --use-cached-images``: the images are side-loaded, so
+a registry that does not answer is the network, not the row's result. The flags
+themselves get their own runs, with no download and no registry: ``--mirror``
+names the loaded images on ``MIRROR``, a host that cannot resolve, and runs the
+whole upgrade from it (records ``mirror-empty``, ``mirror-seeded``);
+``--mirror-refused`` is the same without ``--use-cached-images``, and passes only
+if ``apply`` stops at its first preflight, says what can be done, and changes
+nothing (``mirror-refused-empty``, ``mirror-refused-seeded``). No row cites them.
+
 Failures are recorded and the run goes on. A failure to stage or seed is the
 harness's or the environment's, not the row's, so it gets no record -- it is
 reported and logged only.
@@ -89,6 +98,7 @@ from tsupgrade.evidence import (  # noqa: E402
     EvidenceError, build_record, evidence_key, load_record, record_path, staleness,
     upgrader_revision, write_record)
 from tsupgrade.matrix import MatrixEntry, default_matrix_path, load_matrix, route_problems  # noqa: E402
+from tsupgrade.images import mirrored, node_image_name  # noqa: E402
 from tsupgrade.plan import pinned, route_of  # noqa: E402
 from tsupgrade.preflight import patroni_role  # noqa: E402
 from tsupgrade.versions import InvalidVersion, parse_version  # noqa: E402
@@ -137,6 +147,8 @@ class Run:
     control: Optional[str] = None     # "direct": one ALTER instead of plan/apply
     link: bool = False                # pg_upgrade --link on a major change
     rollback: bool = False            # then tsupgrade rollback; ends at the source
+    mirror: bool = False              # from MIRROR, which cannot answer, on cached images
+    refused: bool = False             # the same without --use-cached-images: must stop
 
     @property
     def major(self) -> int:
@@ -148,13 +160,17 @@ class Run:
             return "link-" + base
         if self.rollback:
             return "rollback-" + base
+        if self.refused:
+            return "mirror-refused-" + base
+        if self.mirror:
+            return "mirror-" + base
         return "history-" + base if self.history else base
 
     @property
     def end(self) -> str:
         """The release the run must end at: the target, or after a rollback
-        the source again."""
-        return self.source if self.rollback else self.target
+        the source again, or the source still if it had to stop."""
+        return self.source if self.rollback or self.refused else self.target
 
     @property
     def cross(self) -> bool:
@@ -297,6 +313,15 @@ def with_link(run: Run) -> Union[Run, Unrunnable]:
     return replace(run, link=True)
 
 
+def with_mirror(run: Run, refused: bool = False) -> Union[Run, Unrunnable]:
+    """The same copy-mode major change, from a registry that cannot answer."""
+    if not run.cross:
+        return Unrunnable(run.entry, "--mirror only applies to a PostgreSQL major change")
+    if run.link or run.rollback or run.history or run.control:
+        return Unrunnable(run.entry, "--mirror is for a copy, without --history or --control")
+    return replace(run, mirror=True, refused=refused)
+
+
 def with_rollback(run: Run) -> Union[Run, Unrunnable]:
     """The same copy-mode major change, then back with tsupgrade rollback."""
     if not run.cross:
@@ -384,6 +409,27 @@ def error_lines(lines: Sequence[str], limit: int = 12) -> str:
     return "\n".join((picked or [l for l in lines if l.strip()])[:limit])
 
 
+def judge_refusal(report: Optional[Dict[str, Any]], pg_version: Optional[str],
+                  run: Run) -> Optional[Tuple[bool, str, str, str]]:
+    """A run that had to stop: None if it did, as it should. It must stop at its
+    first preflight, say what can be done, and leave the PostgreSQL it started on."""
+    failure = (report or {}).get("failure") or {}
+    said = "\n".join(failure.get("error") or [])
+    wanted = ["does not mean an image is missing", "Running without the registry is possible",
+              "--image-registry", "--use-cached-images"]
+    if (failure.get("action") != "preflight" or failure.get("hop") != 1
+            or "route_images" not in str(failure.get("summary"))):
+        return (False, "apply did not stop at its first preflight on the images",
+                str(failure.get("summary") or (report or {}).get("result")), "apply")
+    missing = [w for w in wanted if w not in said]
+    if missing:
+        return (False, "apply stopped without saying what can be done", ", ".join(missing), "apply")
+    if pg_version != run.start_pg:
+        return (False, "apply stopped but PostgreSQL changed",
+                "{0}, was {1}".format(pg_version, run.start_pg), "verify")
+    return None
+
+
 def judge(
     run: Run,
     mode: str,
@@ -394,12 +440,18 @@ def judge(
     checks: Optional[Dict[str, Tuple[str, str]]],
     check_stderr: str = "",
     back: Optional[Dict[str, Any]] = None,
+    pg_version: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], Optional[str], str]:
     """(passed, explanation, error, stage). ``stage`` is where it stopped.
 
     A failed check quotes its own line and whatever the server said while
     check.sql ran: the check line says what was wrong, the server says why.
     """
+    if run.refused:
+        refusal = judge_refusal(report, pg_version, run)
+        if refusal:
+            return refusal
+        report = {"result": "pass"}
     if report is None:
         lines = apply_stderr.splitlines()
         if any(l.startswith("refused") for l in lines):
@@ -536,6 +588,19 @@ def pin(reference: str, contents: ImageContents) -> str:
     return pinned(reference, (contents.entry(reference) or {}).get("digest"))
 
 
+def apply_arguments(run: Run, plan_path: Path, report_path: Path, context: str) -> List[str]:
+    """``tsupgrade apply`` for a run. The images are side-loaded, so a registry
+    that does not answer says nothing about the row."""
+    args = ["apply", str(plan_path), "--acknowledge-verification-run",
+            "--context", context, "--namespace", NAMESPACE, "--selector", SELECTOR,
+            "--database", DATABASE, "--report", str(report_path)]
+    if run.mirror:
+        args += ["--image-registry", MIRROR]
+    if not run.refused:
+        args.append("--use-cached-images")
+    return args
+
+
 def containerd_name(reference: str) -> str:
     """How containerd names an image: registry and ``library/`` spelled out."""
     head, slash, tail = reference.partition("/")
@@ -571,6 +636,10 @@ def docker_digest(reference: str) -> Optional[str]:
 def local_digest(reference: str, contents: ImageContents) -> Optional[str]:
     """The repository digest of the local image -- what was loaded into kind."""
     return docker_digest(reference) or (contents.entry(reference) or {}).get("digest")
+
+
+# A name that can never resolve (RFC 2606), so the mirror cannot answer.
+MIRROR = "mirror.invalid/timescale"
 
 
 class Cluster:
@@ -646,6 +715,32 @@ class Cluster:
             self._load(tag, log)
         if digest:
             self._alias(tag, digest, log)
+
+    def name_on_mirror(self, image: str, contents: ImageContents, log: Log) -> None:
+        """Name a loaded image on ``MIRROR``, so it runs from there unpulled."""
+        reference = pin(image, contents)
+        _, _, digest = reference.partition("@")
+        name = node_image_name(mirrored(reference, MIRROR))
+        rc, _, err = _run(["docker", "exec", self.name + "-control-plane", "ctr",
+                           "--namespace=k8s.io", "images", "tag", "--force",
+                           containerd_name(image), name], log=log)
+        if rc != 0 or not digest:
+            raise HarnessError("cannot name {0} on {1}: {2}".format(image, MIRROR, err or "no digest"))
+
+    def await_listed(self, references: Sequence[str], timeout: float = 300) -> None:
+        """Wait until the node lists these images: its list lags (measured),
+        and a registry outage meanwhile would look like an image not there."""
+        wanted = {node_image_name(r) for r in references}
+        deadline = time.monotonic() + timeout
+        while True:
+            rc, out, _ = self.kubectl("get", "nodes", "-o", "json")
+            names = {n for node in (json.loads(out).get("items") or [] if rc == 0 else [])
+                     for i in node.get("status", {}).get("images") or [] for n in i.get("names") or []}
+            if rc == 0 and wanted <= names:
+                return
+            if time.monotonic() > deadline:
+                raise HarnessError("the node does not list {0}".format(", ".join(sorted(wanted - names))))
+            time.sleep(5)
 
     def _alias(self, tag: str, digest: str, log: Log) -> None:
         """Name the loaded tag by its registry digest, so a pinned reference
@@ -856,6 +951,10 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         cluster.ensure(pin(run.start_image, contents), log)
         for image in images:
             cluster.load(pin(image, contents), log)
+            if run.mirror:
+                cluster.name_on_mirror(image, contents, log)
+        cluster.await_listed([mirrored(pin(image, contents), MIRROR if run.mirror else None)
+                              for image in images])
         cluster.used = run.cross
         baseline = stage(cluster, run, base, log)
     except HarnessError as exc:
@@ -872,10 +971,7 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         report_path = out_dir / (stem + ".report.json")
         if report_path.exists():
             report_path.unlink()
-        apply_rc, _, apply_err = tsupgrade(
-            ["apply", str(plan_path), "--acknowledge-verification-run",
-             "--context", cluster.context, "--namespace", NAMESPACE, "--selector", SELECTOR,
-             "--database", DATABASE, "--report", str(report_path)], log)
+        apply_rc, _, apply_err = tsupgrade(apply_arguments(run, plan_path, report_path, cluster.context), log)
         report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else None
         if run.rollback and report and report.get("result") == "pass":
             log.section("rollback")
@@ -900,7 +996,7 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
                                   log=log)
         checks = parse_checks(out)
     passed, explanation, error, stopped = judge(
-        run, base, apply_rc, apply_err, report, reached, checks, check_err, back)
+        run, base, apply_rc, apply_err, report, reached, checks, check_err, back, pg_version)
     if run.control and report is None:
         explanation = "the direct update {0} -> {1} failed".format(run.source, run.target)
 
@@ -915,8 +1011,10 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         route = record_route(run, plan, contents)
         if route is not None:
             extra["route"] = route
-        if run.cross:
+        if run.cross and not run.refused:
             extra["major_upgrades"] = major_upgrades(report)
+        if run.mirror:
+            extra["image_registry"] = MIRROR
         if run.rollback:
             extra["forward"] = {"target": run.target, "apply_exit": apply_rc}
             extra["rollback"] = back
@@ -1043,6 +1141,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--rollback", action="store_true",
                     help="on a copy-mode major change, then tsupgrade rollback; evidence for "
                          "rollback, judged against the source, never a row's verdict")
+    ap.add_argument("--mirror", action="store_true",
+                    help="on a copy-mode major change, run from a registry that cannot answer, on "
+                         "cached images; evidence for those flags, never a row's verdict")
+    ap.add_argument("--mirror-refused", action="store_true", dest="mirror_refused",
+                    help="the same without --use-cached-images: passes only if apply stops first")
     ap.add_argument("--control", choices=CONTROLS,
                     help="negative control: one ALTER EXTENSION instead of plan/apply "
                          "(needs --history)")
@@ -1059,6 +1162,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         resolved = [with_link(r) if isinstance(r, Run) else r for r in resolved]
     if args.rollback:
         resolved = [with_rollback(r) if isinstance(r, Run) else r for r in resolved]
+    if args.mirror or args.mirror_refused:
+        resolved = [with_mirror(r, args.mirror_refused) if isinstance(r, Run) else r for r in resolved]
     if args.history:
         resolved = [with_history(r, args.history, contents) if isinstance(r, Run) else r
                     for r in resolved]
@@ -1074,7 +1179,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             else " then " + run.target_image.split(":")[-1],
             "  (created at {0})".format(run.history) if run.history else "",
             "  CONTROL {0}".format(run.control) if run.control else "",
-            "  --link" if run.link else "  then rollback" if run.rollback else ""))
+            "  --link" if run.link else "  then rollback" if run.rollback
+            else "  must stop" if run.refused else "  from " + MIRROR if run.mirror else ""))
     for skip in skipped:
         e = skip.entry
         print("{0:<18} skipped: {1}".format(

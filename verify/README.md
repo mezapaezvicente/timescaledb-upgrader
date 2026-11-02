@@ -117,6 +117,24 @@ decides a run (`evidence.VERDICT_CODE`: `plan`, `apply`, `steps`, `majors`,
 not `rollback`, which runs only after a route has finished). The check is
 skipped until the first `v*` tag. `--resume` uses the same rule.
 
+**Registries.** Every run passes `apply --use-cached-images`: the images are
+side-loaded, so a registry that does not answer is the network, not the row's
+result. The node's image list lags, so the harness first waits until it shows
+every image the run needs. `--image-registry` and `--use-cached-images` get their
+own evidence with no download and no registry. `--mirror` names the loaded images
+on `mirror.invalid`, a host that can never resolve, and runs the whole upgrade
+from there (`mirror-empty`, `mirror-seeded`). `--mirror-refused` is the same run
+without `--use-cached-images`, and passes only if `apply` stops at its first
+preflight, says what can be done and leaves the cluster where it was
+(`mirror-refused-empty`, `mirror-refused-seeded`). No row cites these. A real pull
+through a real mirror is not among them: a registry that answers is stubbed in
+`tests/test_image_sources.py`.
+
+```sh
+python verify/harness.py --pg 12 --from 2.11 --to-pg 13 --mirror
+python verify/harness.py --pg 12 --from 2.11 --to-pg 13 --mirror-refused
+```
+
 **What is not a row result.** If staging or seeding fails, that is the harness
 or the environment, not the transition. It writes no record; it prints
 `ERROR`, logs it, and moves on. `verify/out/runs.jsonl` has one line per row
