@@ -19,6 +19,10 @@ The gates
                         removed in 2.25. The update that removes them also drops
                         ``cagg_migrate``, so this cannot be fixed afterwards --
                         migrate first or restore a backup.
+``time_bucket_ng``      Continuous aggregates built on ``time_bucket_ng`` stop
+                        every update past 2.14: the 2.14 to 2.15 script tries to
+                        convert them and fails (measured, 2.15.0 to 2.28.3).
+                        They have to be rebuilt on ``time_bucket`` first.
 ``information_views``   User views built on ``timescaledb_information`` block the
                         update with a stock dependency error, whenever its script
                         drops the views. That depends on both versions: from
@@ -37,10 +41,14 @@ Column                                               Absent when
 ===================================================  =======================
 ``continuous_agg.finalized``                         at 2.25 and later
 ``hypertable.replication_factor``                    at 2.14 and later
-``continuous_aggs_bucket_function.bucket_func``      before ~2.14 (the older
+``continuous_aggs_bucket_function.bucket_func``      before 2.15 (the older
                                                      schema uses ``name`` and
                                                      ``experimental`` instead)
 ===================================================  =======================
+
+The ``time_bucket_ng`` gate reads neither: before 2.15 a fixed-width bucket
+without a timezone has no row in that catalog at all (measured), so it reads
+the query each aggregate was defined with instead.
 
 A missing column that the *upgrade removed* means the database is already past
 that cutoff, so the gate is **vacuously satisfied**. A missing column because
@@ -60,8 +68,10 @@ from .versions import InvalidVersion, parse_version
 __all__ = [
     "OldCagg",
     "check_old_caggs",
+    "check_time_bucket_ng",
     "old_caggs",
     "reaches_old_cagg_removal",
+    "reaches_time_bucket_ng_failure",
     "time_bucket_ng_caggs",
     "GateResult",
     "CLEAR",
@@ -297,61 +307,6 @@ def _check_unfinalized(runner: Runner, database: str, source_ts: object, details
     return BLOCKED
 
 
-def _check_time_bucket_ng(runner: Runner, database: str, details: List[str]) -> str:
-    """Sub-check two: aggregates built on ``time_bucket_ng``, also removed at 2.25.
-
-    Independent of the format check -- a fully finalized aggregate still blocks
-    the update if its bucket function is ``time_bucket_ng``.
-
-    The catalog that records this was itself reshaped. Current releases store a
-    ``bucket_func`` regprocedure; releases around 2.13 and earlier store
-    ``name`` plus an ``experimental`` flag. Asking the wrong one raises
-    ``column ... does not exist``, which would leave this gate indeterminate on
-    exactly the old databases it is meant to protect, so both shapes are
-    supported.
-    """
-    table = "continuous_aggs_bucket_function"
-    modern = _column_exists(runner, database, table, "bucket_func")
-    if modern is None:
-        details.append("time_bucket_ng : could not probe the bucket-function catalog")
-        return INDETERMINATE
-
-    if modern:
-        predicate = "bf.bucket_func::text LIKE '%time_bucket_ng%'"
-    else:
-        legacy = _column_exists(runner, database, table, "name")
-        if legacy is None:
-            details.append("time_bucket_ng : could not probe the bucket-function catalog")
-            return INDETERMINATE
-        if not legacy:
-            # Neither shape present: no such catalog, so nothing can be using it.
-            details.append("time_bucket_ng : no bucket-function catalog; none possible")
-            return CLEAR
-        predicate = "bf.name LIKE '%time_bucket_ng%'"
-
-    rc, out, err = runner(
-        database,
-        "SELECT coalesce(string_agg(cagg.user_view_schema || '.' || "
-        "cagg.user_view_name, ', '), '') "
-        "FROM _timescaledb_catalog.continuous_agg cagg "
-        "JOIN _timescaledb_catalog.{0} bf "
-        "ON cagg.mat_hypertable_id = bf.mat_hypertable_id "
-        "WHERE {1}".format(table, predicate),
-    )
-    if rc != 0:
-        details.append(
-            "time_bucket_ng : query failed: {0}".format((err or out).splitlines()[:1])
-        )
-        return INDETERMINATE
-
-    offenders = out.strip()
-    if not offenders:
-        details.append("time_bucket_ng : none")
-        return CLEAR
-    details.append("time_bucket_ng : {0}".format(offenders))
-    return BLOCKED
-
-
 # Catalog columns only, and no hypertable_size(): it failed at 2.1.1 (measured:
 # hypertable_detailed_size(regclass) does not exist). Checked on 2.1.1 (pg11,
 # pg13) and 2.15.3. One column, split on chr(31), so that no name can be taken
@@ -386,7 +341,8 @@ _OLD_CAGG_REPORT = (
 
 @dataclass(frozen=True)
 class OldCagg:
-    """An old-format continuous aggregate, as the operator has to judge it."""
+    """A continuous aggregate the update would refuse, as the operator has to
+    judge it: an old-format one, or one built on ``time_bucket_ng``."""
 
     database: str
     name: str
@@ -398,19 +354,8 @@ class OldCagg:
     grants: Tuple[str, ...] = ()
 
 
-def old_caggs(runner: Runner, database: str, source_ts: object) -> Optional[List[OldCagg]]:
-    """Every old-format aggregate in ``database``; None if it cannot be
-    established. Read-only. Past 2.25 the format, and so the answer, is gone."""
-    has_column = _column_exists(runner, database, "continuous_agg", "finalized")
-    if has_column is None:
-        return None
-    if not has_column:
-        past = _at_or_above(source_ts, (2, 25))
-        if past is None:
-            return None
-        if past:
-            return []
-    rc, out, _ = runner(database, _OLD_CAGG_REPORT + (" WHERE c.finalized IS FALSE" if has_column else ""))
+def _cagg_report(runner: Runner, database: str, where: str) -> Optional[List[OldCagg]]:
+    rc, out, _ = runner(database, _OLD_CAGG_REPORT + where)
     if rc != 0:
         return None
     found: List[OldCagg] = []
@@ -426,16 +371,19 @@ def old_caggs(runner: Runner, database: str, source_ts: object) -> Optional[List
     return found
 
 
-def time_bucket_ng_caggs(runner: Runner, database: str) -> Optional[str]:
-    """The aggregates built on ``time_bucket_ng``, which 2.25 also refuses and
-    ``cagg_migrate`` is not known to fix; None if it cannot be established."""
-    details: List[str] = []
-    status = _check_time_bucket_ng(runner, database, details)
-    if status == INDETERMINATE:
+def old_caggs(runner: Runner, database: str, source_ts: object) -> Optional[List[OldCagg]]:
+    """Every old-format aggregate in ``database``; None if it cannot be
+    established. Read-only. Past 2.25 the format, and so the answer, is gone."""
+    has_column = _column_exists(runner, database, "continuous_agg", "finalized")
+    if has_column is None:
         return None
-    if status != BLOCKED:
-        return ""
-    return details[-1].split(" : ", 1)[1]
+    if not has_column:
+        past = _at_or_above(source_ts, (2, 25))
+        if past is None:
+            return None
+        if past:
+            return []
+    return _cagg_report(runner, database, " WHERE c.finalized IS FALSE" if has_column else "")
 
 
 def reaches_old_cagg_removal(target_ts: object) -> bool:
@@ -446,16 +394,17 @@ def reaches_old_cagg_removal(target_ts: object) -> bool:
 def check_old_caggs(
     runner: Runner, database: str, source_ts: object, target_ts: object
 ) -> GateResult:
-    """Continuous aggregates that 2.25 refuses to carry forward.
+    """Continuous aggregates in the pre-2.10 format, which 2.25 refuses to
+    carry forward.
 
-    Two independent blockers ship in ``2.24.0--2.25.0.sql``: aggregates still in
-    the pre-2.10 format, and aggregates built on ``time_bucket_ng``. Either one
-    aborts the update on its own, so both are checked.
+    The trap: the same script drops ``cagg_migrate`` and its whole supporting
+    cast. It cannot be repaired after the fact -- migrate before updating, or
+    restore a backup. That makes a preflight answer here worth considerably
+    more than usual.
 
-    The trap is shared: the same script drops ``cagg_migrate`` and its whole
-    supporting cast. Neither problem can be repaired after the fact -- migrate
-    before updating, or restore a backup. That makes a preflight answer here
-    worth considerably more than usual.
+    ``2.24.0--2.25.0.sql`` also refuses aggregates built on ``time_bucket_ng``,
+    but no database holding one gets that far: every update past 2.14 already
+    fails on them. That is :func:`check_time_bucket_ng`.
     """
     title = "Continuous aggregates blocked at 2.25"
     details: List[str] = []
@@ -470,11 +419,7 @@ def check_old_caggs(
             CAGG_SOURCE,
         )
 
-    statuses = [
-        _check_unfinalized(runner, database, source_ts, details),
-        _check_time_bucket_ng(runner, database, details),
-    ]
-    status = _worst(statuses)
+    status = _check_unfinalized(runner, database, source_ts, details)
 
     if status == BLOCKED:
         details.append(
@@ -490,6 +435,94 @@ def check_old_caggs(
         CLEAR: "no blocking continuous aggregates",
     }.get(status, status)
     return GateResult("old_caggs", title, status, summary, details, CAGG_SOURCE)
+
+
+# ---------------------------------------------------------------------------
+# 4e. Aggregates on time_bucket_ng: no update past 2.14
+# ---------------------------------------------------------------------------
+
+# Upstream's fix, closed unmerged; the failure it describes is the one measured.
+NG_SOURCE = "https://github.com/timescale/timescaledb/pull/7763"
+
+# Measured: created from 2.4.0 to 2.14.2, refused from 2.15.0; and a database
+# holding one fails every update past 2.14 (2.15.0 to 2.24.0 with "tried
+# calling catalog_get when extension isn't loaded", 2.25.0 and 2.28.3 with
+# "time_bucket function not found in CAgg definition"), rolled back each time.
+NG_LAST = (2, 14)
+
+# The query each aggregate was defined with, which names its bucket function
+# on every release from 2.1 (measured). continuous_aggs_bucket_function does
+# not: before 2.15 a fixed width without a timezone has no row there.
+_NG_WHERE = (
+    " WHERE pg_get_viewdef(to_regclass(format('%I.%I', c.direct_view_schema, "
+    "c.direct_view_name))) LIKE '%time_bucket_ng%'"
+)
+
+
+def time_bucket_ng_caggs(runner: Runner, database: str) -> Optional[List[OldCagg]]:
+    """Every aggregate in ``database`` built on ``time_bucket_ng``; None if it
+    cannot be established. Read-only."""
+    return _cagg_report(runner, database, _NG_WHERE)
+
+
+def reaches_time_bucket_ng_failure(target_ts: object) -> bool:
+    """Whether an update to ``target_ts`` fails on ``time_bucket_ng`` aggregates."""
+    key = _key(target_ts)
+    return key is not None and key[:2] > NG_LAST
+
+
+def check_time_bucket_ng(
+    runner: Runner, database: str, source_ts: object, target_ts: object
+) -> GateResult:
+    """Continuous aggregates built on ``time_bucket_ng``, which no update past
+    2.14 gets through.
+
+    The 2.14 to 2.15 script converts them with
+    ``_timescaledb_functions.cagg_migrate_to_time_bucket``, a C function of
+    the new library that cannot run inside the update, so the update fails;
+    the call stays in every script up to 2.24, and 2.25 removed it along with
+    ``time_bucket_ng``. ``cagg_migrate`` refuses them ("does not require any
+    migration"), whatever the 2.25 script's hint says. What works, measured, is
+    rebuilding each on ``time_bucket`` at 2.14 or below, which apply does.
+
+    A database at 2.15 or later cannot hold one: they cannot be created there,
+    and no database with one gets there.
+    """
+    title = "Continuous aggregates on time_bucket_ng (no update past 2.14)"
+    details: List[str] = []
+    below = _at_or_below(source_ts, NG_LAST)
+    if below is False or not reaches_time_bucket_ng_failure(target_ts):
+        return GateResult(
+            "time_bucket_ng",
+            title,
+            NOT_APPLICABLE,
+            "ts{0} -> ts{1} does not update a database at 2.14 or below past 2.14".format(
+                source_ts, target_ts),
+            details,
+            NG_SOURCE,
+        )
+
+    found = time_bucket_ng_caggs(runner, database)
+    if found is None:
+        return GateResult("time_bucket_ng", title, INDETERMINATE,
+                          "could not read the continuous aggregate definitions", details, NG_SOURCE)
+    if not found:
+        return GateResult("time_bucket_ng", title, CLEAR,
+                          "no continuous aggregates on time_bucket_ng", details, NG_SOURCE)
+    details.append("time_bucket_ng : {0}".format(", ".join(c.name for c in found)))
+    details.append(
+        "Every update past 2.14 fails while these exist, and cagg_migrate refuses "
+        "them. Rebuild each on time_bucket at a release from 2.8 to 2.14 first: "
+        "tsupgrade apply does it with --migrate-caggs."
+    )
+    return GateResult(
+        "time_bucket_ng",
+        title,
+        BLOCKED,
+        "{0} continuous aggregate(s) on time_bucket_ng; the update will fail".format(len(found)),
+        details,
+        NG_SOURCE,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -719,5 +752,6 @@ def run_gates(
     return [
         check_multinode(runner, database, source_ts, target_ts),
         check_old_caggs(runner, database, source_ts, target_ts),
+        check_time_bucket_ng(runner, database, source_ts, target_ts),
         check_information_views(runner, database, source_ts, target_ts),
     ]

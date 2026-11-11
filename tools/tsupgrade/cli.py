@@ -967,7 +967,8 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument(
         "--migrate-caggs", action="store_true", dest="migrate_caggs",
         help="if the plan reaches 2.25 with old-format continuous aggregates, migrate them on "
-        "the way, replacing each and dropping the old one, instead of stopping or asking",
+        "the way, and if it goes past 2.14 with aggregates on time_bucket_ng, rebuild them on "
+        "time_bucket first; each replaces the old one and drops it. Without it apply stops or asks",
     )
     apply.add_argument("--report", default=None, help="also write the report as JSON here")
     apply.add_argument("--json", action="store_true")

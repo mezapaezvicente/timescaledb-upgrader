@@ -1,0 +1,37 @@
+# Which update scripts carry the time_bucket_ng conversion that fails inside the update
+# (CALL _timescaledb_functions.cagg_migrate_to_time_bucket), per image and PostgreSQL major.
+# Measured 2026-11-11 from every timescaledb--A--B.sql in the 19 images of data/image-contents.json:
+# the first line with the call. Every script that has it targets 2.15.0 to 2.24.0, none 2.25 or later.
+# Columns: tag, major, scripts with the call, first and last target, sha256 of the sorted script:line list.
+# test_ng_tripwire_container.py derives it again from each local image; a difference means re-measure.
+pg11.11-ts2.1.1-p0	11	0	-	-	e3b0c44298fc1c14
+pg12.6-ts2.0.1-p0	11	0	-	-	e3b0c44298fc1c14
+pg12.6-ts2.0.1-p0	12	0	-	-	e3b0c44298fc1c14
+pg12.6-ts2.1.1-p2	11	0	-	-	e3b0c44298fc1c14
+pg12.6-ts2.1.1-p2	12	0	-	-	e3b0c44298fc1c14
+pg12.22-ts2.11.2	12	0	-	-	e3b0c44298fc1c14
+pg12.22-ts2.11.2-all	12	0	-	-	e3b0c44298fc1c14
+pg13.12-ts2.11.2-all	12	0	-	-	e3b0c44298fc1c14
+pg13.12-ts2.11.2-all	13	0	-	-	e3b0c44298fc1c14
+pg13.22-ts2.15.3	13	152	2.15.0	2.15.3	6a5e47bd92c40f23
+pg14.19-ts2.19.3	14	500	2.15.0	2.19.3	f5160a349298211a
+pg14.19-ts2.19.3-all	13	152	2.15.0	2.15.3	6a5e47bd92c40f23
+pg14.19-ts2.19.3-all	14	500	2.15.0	2.19.3	f5160a349298211a
+pg15.13-ts2.19.3-all	13	152	2.15.0	2.15.3	6a5e47bd92c40f23
+pg15.13-ts2.19.3-all	14	500	2.15.0	2.19.3	f5160a349298211a
+pg15.13-ts2.19.3-all	15	500	2.15.0	2.19.3	f5160a349298211a
+pg15.13-ts2.20.3	15	576	2.15.0	2.20.3	417a940598147ab1
+pg15.18-ts2.28.3	15	766	2.15.0	2.24.0	c1674d1658a37ae6
+pg15.18-ts2.28.3-all	15	766	2.15.0	2.24.0	c1674d1658a37ae6
+pg16.15-ts2.30.1	16	766	2.15.0	2.24.0	c1674d1658a37ae6
+pg16.15-ts2.30.1-all	15	766	2.15.0	2.24.0	c1674d1658a37ae6
+pg16.15-ts2.30.1-all	16	766	2.15.0	2.24.0	c1674d1658a37ae6
+pg17.11-ts2.30.1	17	556	2.17.0	2.24.0	4e54fc8e7588946f
+pg17.11-ts2.30.1-all	15	766	2.15.0	2.24.0	c1674d1658a37ae6
+pg17.11-ts2.30.1-all	16	766	2.15.0	2.24.0	c1674d1658a37ae6
+pg17.11-ts2.30.1-all	17	556	2.17.0	2.24.0	4e54fc8e7588946f
+pg18.6-ts2.30.1	18	57	2.23.0	2.24.0	0165c8a2a123a0f5
+pg18.6-ts2.30.1-all	15	766	2.15.0	2.24.0	c1674d1658a37ae6
+pg18.6-ts2.30.1-all	16	766	2.15.0	2.24.0	c1674d1658a37ae6
+pg18.6-ts2.30.1-all	17	556	2.17.0	2.24.0	4e54fc8e7588946f
+pg18.6-ts2.30.1-all	18	57	2.23.0	2.24.0	0165c8a2a123a0f5

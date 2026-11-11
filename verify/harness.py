@@ -68,6 +68,16 @@ judge the result. ``--caggs-refused`` is the same without it, and passes only if
 ``apply`` stops before changing anything and names the aggregate
 (``caggs-refused-seeded``). No row cites it.
 
+``--ng`` adds aggregates on ``time_bucket_ng`` (``fixture/ng.sql``) to the staged
+database, empty or seeded, at a source from 2.8 to 2.14. No update past 2.14
+gets through one, so ``apply`` has to rebuild them on ``time_bucket`` before
+anything else; ``fixture/ng_check.sql`` then judges that every row, policy,
+owner, grant and comment survived and that refresh still works (records
+``ng-empty``, ``ng-seeded``). ``--ng-refused`` is the same without
+``--migrate-caggs``, and passes only if ``apply`` stops before changing
+anything, names them and says how it would rebuild them, and leaves them as
+they were (``ng-refused-empty``, ``ng-refused-seeded``). No row cites them.
+
 Failures are recorded and the run goes on. A failure to stage or seed is the
 harness's or the environment's, not the row's, so it gets no record -- it is
 reported and logged only.
@@ -119,6 +129,7 @@ CHECKS = (
     "version", "rows", "still_compressed", "cagg_survived",
     "cagg_matches", "write_and_refresh", "decompress", "jobs",
 )
+NG_CHECKS = ("ng_rows", "ng_bucket", "ng_kept", "ng_refresh")
 MODES = ("empty", "seeded")
 CONTROLS = ("direct",)
 FIXTURE = REPO / "verify" / "fixture"
@@ -156,6 +167,8 @@ class Run:
     mirror: bool = False              # from MIRROR, which cannot answer, on cached images
     refused: bool = False             # the same without --use-cached-images: must stop
     caggs_refused: bool = False       # without --migrate-caggs: must stop, nothing changed
+    ng: bool = False                  # aggregates on time_bucket_ng too: apply rebuilds them
+    ng_refused: bool = False          # the same without --migrate-caggs: must stop, nothing changed
 
     @property
     def major(self) -> int:
@@ -171,6 +184,10 @@ class Run:
             return "mirror-refused-" + base
         if self.caggs_refused:
             return "caggs-refused-" + base
+        if self.ng_refused:
+            return "ng-refused-" + base
+        if self.ng:
+            return "ng-" + base
         if self.mirror:
             return "mirror-" + base
         return "history-" + base if self.history else base
@@ -179,7 +196,8 @@ class Run:
     def end(self) -> str:
         """The release the run must end at: the target, or after a rollback
         the source again, or the source still if it had to stop."""
-        return self.source if self.rollback or self.refused or self.caggs_refused else self.target
+        return (self.source if self.rollback or self.refused or self.caggs_refused or self.ng_refused
+                else self.target)
 
     @property
     def cross(self) -> bool:
@@ -338,6 +356,17 @@ def with_caggs_refused(run: Run) -> Union[Run, Unrunnable]:
     return replace(run, caggs_refused=True)
 
 
+def with_ng(run: Run, refused: bool = False) -> Union[Run, Unrunnable]:
+    """The same row with aggregates on time_bucket_ng in the database: apply
+    has to rebuild them, or, refused, stop before anything."""
+    if run.link or run.rollback or run.mirror or run.history or run.control or run.caggs_refused:
+        return Unrunnable(run.entry, "--ng is not combined with the other variants")
+    if not (2, 8) <= _key(run.source)[:2] <= (2, 14):
+        return Unrunnable(run.entry, "--ng needs a source from 2.8 to 2.14, where the aggregates can "
+                                     "exist and the rebuild works; this one is {0}".format(run.source))
+    return replace(run, ng=True, ng_refused=refused)
+
+
 def with_rollback(run: Run) -> Union[Run, Unrunnable]:
     """The same copy-mode major change, then back with tsupgrade rollback."""
     if not run.cross:
@@ -464,6 +493,25 @@ def judge_cagg_refusal(apply_stderr: str, report: Optional[Dict[str, Any]],
     return None
 
 
+def judge_ng_refusal(apply_stderr: str, report: Optional[Dict[str, Any]],
+                     pg_version: Optional[str], run: Run) -> Optional[Tuple[bool, str, str, str]]:
+    """A run that had to stop for aggregates on time_bucket_ng: None if it did,
+    as it should. It must stop before writing, name them and say how it
+    would rebuild them."""
+    if report is not None:
+        return (False, "apply got past the check for aggregates on time_bucket_ng",
+                str(report.get("result")), "apply")
+    wanted = ["read-only check", "Nothing has been changed", "public.fx_ng_month", "public.fx_ng_week",
+              "public.fx_ng_day", "rebuilt on: time_bucket(", "--migrate-caggs", "below 2.15"]
+    missing = [w for w in wanted if w not in apply_stderr]
+    if missing:
+        return (False, "apply stopped without saying what it found", ", ".join(missing), "apply")
+    if pg_version != run.start_pg:
+        return (False, "apply stopped but PostgreSQL changed",
+                "{0}, was {1}".format(pg_version, run.start_pg), "verify")
+    return None
+
+
 def judge(
     run: Run,
     mode: str,
@@ -481,8 +529,9 @@ def judge(
     A failed check quotes its own line and whatever the server said while
     check.sql ran: the check line says what was wrong, the server says why.
     """
-    if run.caggs_refused or run.refused:
+    if run.caggs_refused or run.refused or run.ng_refused:
         refusal = (judge_cagg_refusal(apply_stderr, report, pg_version, run) if run.caggs_refused
+                   else judge_ng_refusal(apply_stderr, report, pg_version, run) if run.ng_refused
                    else judge_refusal(report, pg_version, run))
         if refusal:
             return refusal
@@ -518,6 +567,16 @@ def judge(
             server = [l for l in check_stderr.splitlines() if ERROR_LINE.search(l)]
             return (False, "fixture checks failed after the {0}: ".format(
                 "rollback" if run.rollback else "upgrade") + ", ".join(bad),
+                    "\n".join(detail + server[:8]), "check")
+    if run.ng:
+        checks = checks or {}
+        wanted = [c for c in NG_CHECKS if c != "ng_refresh" or not run.ng_refused]
+        bad = [c for c in wanted if checks.get(c, ("missing",))[0] != "pass"]
+        if bad:
+            detail = ["check|{0}|{1}|{2}".format(c, *checks[c]) if c in checks
+                      else "check|{0}|missing|printed nothing (errored)".format(c) for c in bad]
+            server = [l for l in check_stderr.splitlines() if ERROR_LINE.search(l)]
+            return (False, "time_bucket_ng checks failed: " + ", ".join(bad),
                     "\n".join(detail + server[:8]), "check")
     return (True, None, None, "done")
 
@@ -633,7 +692,7 @@ def apply_arguments(run: Run, plan_path: Path, report_path: Path, context: str) 
         args += ["--image-registry", MIRROR]
     if not run.refused:
         args.append("--use-cached-images")
-    if not run.caggs_refused:
+    if not run.caggs_refused and not run.ng_refused:
         args.append("--migrate-caggs")
     return args
 
@@ -938,6 +997,15 @@ def stage(cluster: Cluster, run: Run, mode: str, log: Log) -> Optional[str]:
                 created, error_lines(err.splitlines(), 3)))
         lines = [l for l in out.splitlines() if l.strip()]
         baseline = lines[-1] if lines else None
+    if run.ng:
+        log.section("time_bucket_ng aggregates")
+        rc, out, err = cluster.psql(DATABASE, "-qtA", "-f", "-", stdin=(FIXTURE / "ng.sql").read_text(
+            encoding="utf-8"), log=log)
+        if rc != 0:
+            raise HarnessError("adding the time_bucket_ng aggregates at {0} failed: {1}".format(
+                created, error_lines(err.splitlines(), 3)))
+        lines = [l for l in out.splitlines() if l.strip()]
+        baseline = "; ".join(b for b in (baseline, lines[-1] if lines else None) if b) or None
     if run.history:
         log.section("history: update {0} -> {1}".format(run.history, run.source))
         rc, _, err = cluster.psql(DATABASE, "-q", sql=(
@@ -1032,6 +1100,13 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
                                   "-f", "-", stdin=(FIXTURE / "check.sql").read_text(encoding="utf-8"),
                                   log=log)
         checks = parse_checks(out)
+    if run.ng and reached is not None:
+        rebuilt = "false" if run.ng_refused else "true"
+        log.section("ng_check.sql, rebuilt={0}".format(rebuilt))
+        rc, out, ng_err = cluster.psql(DATABASE, "-qtA", "-F", "|", "-v", "rebuilt=" + rebuilt, "-f", "-",
+                                       stdin=(FIXTURE / "ng_check.sql").read_text(encoding="utf-8"), log=log)
+        checks = dict(checks or {}, **parse_checks(out))
+        check_err += ng_err
     passed, explanation, error, stopped = judge(
         run, base, apply_rc, apply_err, report, reached, checks, check_err, back, pg_version)
     if run.control and report is None:
@@ -1048,7 +1123,7 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         route = record_route(run, plan, contents)
         if route is not None:
             extra["route"] = route
-        if run.cross and not run.refused and not run.caggs_refused:
+        if run.cross and not run.refused and not run.caggs_refused and not run.ng_refused:
             extra["major_upgrades"] = major_upgrades(report)
         if run.mirror:
             extra["image_registry"] = MIRROR
@@ -1185,6 +1260,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     help="the same without --use-cached-images: passes only if apply stops first")
     ap.add_argument("--caggs-refused", action="store_true", dest="caggs_refused",
                     help="without --migrate-caggs: passes only if apply stops before changing anything")
+    ap.add_argument("--ng", action="store_true",
+                    help="add aggregates on time_bucket_ng; apply must rebuild them (source 2.8 to 2.14)")
+    ap.add_argument("--ng-refused", action="store_true", dest="ng_refused",
+                    help="the same without --migrate-caggs: passes only if apply stops before changing anything")
     ap.add_argument("--control", choices=CONTROLS,
                     help="negative control: one ALTER EXTENSION instead of plan/apply "
                          "(needs --history)")
@@ -1205,6 +1284,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         resolved = [with_mirror(r, args.mirror_refused) if isinstance(r, Run) else r for r in resolved]
     if args.caggs_refused:
         resolved = [with_caggs_refused(r) if isinstance(r, Run) else r for r in resolved]
+    if args.ng or args.ng_refused:
+        resolved = [with_ng(r, args.ng_refused) if isinstance(r, Run) else r for r in resolved]
     if args.history:
         resolved = [with_history(r, args.history, contents) if isinstance(r, Run) else r
                     for r in resolved]
@@ -1221,7 +1302,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "  (created at {0})".format(run.history) if run.history else "",
             "  CONTROL {0}".format(run.control) if run.control else "",
             "  --link" if run.link else "  then rollback" if run.rollback
-            else "  must stop" if run.refused or run.caggs_refused else "  from " + MIRROR if run.mirror else ""))
+            else "  must stop" if run.refused or run.caggs_refused or run.ng_refused
+            else "  from " + MIRROR if run.mirror else "  with time_bucket_ng" if run.ng else ""))
     for skip in skipped:
         e = skip.entry
         print("{0:<18} skipped: {1}".format(

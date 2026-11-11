@@ -23,6 +23,7 @@ __all__ = [
     "MigrateCaggs",
     "PgUpgradeCheck",
     "Preflight",
+    "RebuildNgCaggs",
     "Step",
     "UpdateExtension",
     "VerifyVersion",
@@ -108,6 +109,17 @@ class MigrateCaggs:
     hop: int
     expect: str
     action: str = "migrate_caggs"
+
+
+@dataclass(frozen=True)
+class RebuildNgCaggs:
+    """Added by ``apply`` when the operator agrees, like :class:`MigrateCaggs`:
+    rebuild the aggregates on ``time_bucket_ng`` on ``time_bucket``, at
+    release ``expect``."""
+
+    hop: int
+    expect: str
+    action: str = "rebuild_ng_caggs"
 
 
 @dataclass(frozen=True)
