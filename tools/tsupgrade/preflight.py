@@ -139,6 +139,8 @@ class PreflightOptions:
     route_checked: bool = False
     use_cached_images: bool = False
     statefulset: Optional[str] = None
+    # What tsupgrade.discover found, said in "Cluster and namespace".
+    discovered: Tuple[str, ...] = ()
 
 
 # Older Patroni labels the leader `master` whatever the configuration asks
@@ -291,6 +293,7 @@ def check_context(kube: Kube, opts: PreflightOptions) -> CheckResult:
             "note            : overriding the current context ({0})".format(current)
         )
     details.append("namespace       : {0}".format(opts.namespace))
+    details.extend(opts.discovered)
 
     try:
         cluster = kube.json(["config", "view", "--minify"], namespaced=False)

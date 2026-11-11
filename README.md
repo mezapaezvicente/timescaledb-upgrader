@@ -63,11 +63,16 @@ no tool at all.
 | Your deployment | `preflight`, `plan` | `plan --format script` | `apply`, `rollback` |
 |---|---|---|---|
 | A Patroni StatefulSet on a `timescaledb-ha` image, `OnDelete`, data on one volume claim (as in [`deploy/`](deploy/)) | yes | yes | yes |
-| The archived `timescaledb-single` chart | yes, with `--selector` | yes | **not yet** (below) |
+| The archived `timescaledb-single` chart | yes | yes | **not yet** (below) |
 | An operator (CloudNativePG, StackGres, Zalando…) | `plan`; preflight not tried | yes | no: the operator would fight `apply` for the pods |
 
-`apply` needs `--statefulset`, `--selector` and `--container` when yours are
-not `tsdb`, `application=patroni` and `timescaledb`.
+`preflight`, `apply` and `rollback` take `--selector`, `--statefulset` and
+`--container`. Without them they use `application=patroni`, `tsdb` and
+`timescaledb`, and when that selector finds no pod, they read the names from
+Patroni's own pod spec: the pods whose container sets `PATRONI_SCOPE`, the
+selector from `PATRONI_KUBERNETES_LABELS`, the StatefulSet that owns them, and
+that container. More than one Patroni cluster in the namespace is refused,
+with the list. Preflight's "Cluster and namespace" check says what it found.
 
 **The archived chart.** Read from the `timescaledb-single` StatefulSet template
 and `values.yaml` on the archived repository's `main` branch; not run against
@@ -82,8 +87,9 @@ this tool:
 - WAL is on a second volume by default. The `pg_upgrade` and rollback pods
   now mount every claim, and the new cluster's WAL stays on the WAL volume;
   measured in a container, not yet on the chart;
-- Patroni's labels are `app`, `cluster-name` and `release`, so pass
-  `--selector`;
+- Patroni's labels are `app`, `cluster-name` and `release`; the names are
+  discovered from Patroni's settings (above), checked with the chart's labels
+  in unit tests only;
 - after any `apply`, the chart's values still name the old image, and the next
   `helm upgrade` would put it back. Preflight says when Helm manages the
   StatefulSet, and the runbook, the script and `apply`'s report end with the
@@ -120,7 +126,7 @@ It answers, for the cluster you are actually pointed at:
 
 | Check | What it establishes |
 |---|---|
-| Cluster and namespace | Echoes back the context, API server, Kubernetes version and namespace, so you can confirm you are where you think you are. |
+| Cluster and namespace | Echoes back the context, API server, Kubernetes version and namespace, so you can confirm you are where you think you are, and any selector, StatefulSet and container discovered from Patroni's settings. |
 | Helm ownership | Whether Helm manages the StatefulSet (`app.kubernetes.io/managed-by: Helm`, or a `meta.helm.sh/release-name` annotation); if so, the image to put in the chart's values. Never a failure. |
 | Target image exists | Queries the target's registry for the manifest. Under `apply`, every image the plan still has to run, by digest. |
 | Target image on nodes | Whether the image is already cached on each node. |

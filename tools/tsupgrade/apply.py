@@ -186,6 +186,8 @@ class ApplyOptions:
     # is asked, and with neither apply stops before changing anything.
     migrate_caggs: bool = False
     confirm: Optional[Callable[[str], bool]] = None
+    # What tsupgrade.discover found when the names were not given.
+    discovered: Tuple[str, ...] = ()
     # Called as soon as something is worth telling the operator, since a run
     # can take hours and the report comes at the end.
     notify: Optional[Callable[[str], None]] = None
@@ -589,6 +591,7 @@ def _step_preflight(
             route_checked=not first,
             use_cached_images=opts.use_cached_images,
             statefulset=opts.statefulset,
+            discovered=opts.discovered,
         )
     )
     lines = ["{0}: {1} - {2}".format(r.name, r.status, r.summary) for r in results]
@@ -1650,6 +1653,8 @@ def apply_plan(
     }
     if data_how:
         report["data_directory"] = {"path": opts.data_dir, "from": data_how}
+    if opts.discovered:
+        report["discovered"] = list(opts.discovered)
     failure: Optional[Dict[str, Any]] = None
 
     run: Dict[str, Callable[[Any], _Outcome]] = {
@@ -1722,6 +1727,7 @@ def render_report(report: Dict[str, Any]) -> str:
     lines.append("source    : pg{0} / ts{1}".format(src.get("pg"), src.get("ts")))
     lines.append("target    : pg{0} / ts{1}  ({2})".format(tgt.get("pg"), tgt.get("ts"), tgt.get("image")))
     lines.append("databases : {0}".format(", ".join(report.get("databases") or []) or "none"))
+    lines.extend(report.get("discovered") or [])
     data = report.get("data_directory")
     if data:
         lines.append("data dir  : {0} ({1})".format(data.get("path"), data.get("from")))
