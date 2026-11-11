@@ -43,9 +43,11 @@ def _route():
         Preflight(hop=2, image="i:12"),
         UpdateExtension(hop=2, to="2.11.2", sql="x"),
         VerifyVersion(hop=2, expect="2.11.2"),
+        MajorUpgrade(hop=3, image="i:13a", from_pg=12, to_pg=13, ts="2.11.2", run_image="i:13", link=False),
         Preflight(hop=4, image="i:13"),
         UpdateExtension(hop=4, to="2.15.3", sql="x"),
         VerifyVersion(hop=4, expect="2.15.3"),
+        MajorUpgrade(hop=5, image="i:15a", from_pg=13, to_pg=15, ts="2.15.3", run_image="i:15", link=False),
         Preflight(hop=6, image="i:15"),
         EnsureImage(hop=6, image="i:15"),
         UpdateExtension(hop=6, to="2.27.2", sql="x"),
@@ -96,7 +98,10 @@ def test_it_stops_before_anything_and_says_what_it_found_and_where_from():
     for shown in ("verify: public.fx_hourly", "built on public.fx_metrics", "304.0 KiB", "2 chunk(s)",
                   "1 refresh or other job(s)", "views that depend on it: none", "reader:SELECT"):
         assert shown in text
-    assert "Hop 6 of this plan updates to 2.27.2" in text and "--migrate-caggs" in text
+    assert text.startswith("apply did not start: ")
+    assert "this plan updates TimescaleDB to 2.27.2 on PostgreSQL 15" in text and "--migrate-caggs" in text
+    assert text.endswith("This came from a read-only check. Nothing has been changed.")
+    assert "hop" not in text.lower()
 
 
 def test_everything_it_asks_before_stopping_is_read_only():
@@ -112,7 +117,8 @@ def test_it_says_what_agreeing_means_before_asking():
     _decide(_route(), confirm=lambda text: asked.append(text) or True)
     text = asked[0]
     assert "override => true, drop_old => true" in text and "cannot be undone" in text
-    assert "at hop 4, when the database reaches 2.15.3" in text
+    assert "when TimescaleDB reaches 2.15.3 on PostgreSQL 13" in text
+    assert text.endswith("Nothing has been changed.") and "hop" not in text.lower()
     assert "backup" in text and "grants" in text
 
 
@@ -152,7 +158,7 @@ def test_a_source_already_in_the_window_migrates_after_the_first_preflight():
 def test_what_would_fail_stops_even_with_the_flag(cluster, said):
     """Measured with a view: the call fails partway and cannot be retried."""
     text = _refusal(cluster=cluster, migrate_caggs=True)
-    assert said in text and "read-only check" in text
+    assert said in text and text.endswith("This came from a read-only check. Nothing has been changed.")
 
 
 def test_a_dependent_view_comes_with_what_to_run_for_it():
@@ -179,7 +185,7 @@ def test_the_commands_reach_the_cluster_apply_reached():
 
 def test_a_route_with_no_stop_in_the_window_stops_even_with_the_flag():
     steps = [Preflight(hop=1, image="i"), UpdateExtension(hop=1, to="2.27.2", sql="x")]
-    assert "no release from 2.14 to 2.24" in _refusal(steps, migrate_caggs=True)
+    assert "never stops at a TimescaleDB release from 2.14 to 2.24" in _refusal(steps, migrate_caggs=True)
 
 
 def test_nothing_old_changes_nothing():
@@ -188,7 +194,8 @@ def test_nothing_old_changes_nothing():
 
 
 def test_a_route_below_2_25_is_not_stopped_and_not_even_asked():
-    steps = _route()[:9]
+    steps = _route()[:10]
+    assert steps[-1] == VerifyVersion(hop=4, expect="2.15.3")
     cluster = Cluster()
     assert _decide(list(steps), cluster) == steps and cluster.sql == []
 
@@ -198,9 +205,10 @@ def test_a_question_that_fails_stops_it_before_anything():
     cluster = Cluster()
     cluster.psql = lambda *a: (1, "", "psql: error: connection lost" + chr(10) + "more")
     text = _refusal(cluster=cluster, migrate_caggs=True)
-    assert "Nothing has been changed" in text and "apply did not start" in text
-    assert "  verify: psql: error: connection lost" + chr(10) in text
-    assert "to hop 6, after 1 pg_upgrade, when" in text and "psql -U postgres" in text
+    assert text.startswith("apply did not start: it could not check every database")
+    assert "  verify: psql: error: connection lost" + chr(10) in text and "psql -U postgres" in text
+    assert "after upgrading PostgreSQL from 11 to 15" in text and "hop" not in text.lower()
+    assert text.endswith("This came from a read-only check. Nothing has been changed.")
 
 
 def test_no_primary_stops_it_before_anything():

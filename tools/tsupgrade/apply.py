@@ -630,6 +630,8 @@ def _quoted_name(name: str) -> str:
 
 
 # Measured in tests/test_cagg_migrate_container.py: save, drop, migrate, load.
+NL = chr(10)
+
 _VIEW_DOCS = [
     "  https://www.postgresql.org/docs/current/app-pgdump.html",
     "  https://www.postgresql.org/docs/current/sql-dropview.html",
@@ -648,12 +650,8 @@ def _view_guidance(cluster: _Cluster, pod: str, found: Sequence[OldCagg],
             shlex.quote(w) for w in words)
 
     lines = [
-        "Views depend on these aggregates. With one in place, cagg_migrate fails partway "
-        "(measured): it leaves the old aggregate behind as <name>_old, still blocking 2.25, "
-        "and it cannot be run again. So apply stops even with --migrate-caggs.",
-        "",
-        "To go on, save each view to a file on this machine and drop it, run apply, and "
-        "recreate the view from its file once apply has finished:",
+        "Views depend on them, and cagg_migrate fails partway with a view in place, leaving the "
+        "old aggregate behind. Save and drop each view, run apply, then recreate it from its file:",
     ]
     for cagg in found:
         for view in cagg.dependents:
@@ -670,20 +668,26 @@ def _view_guidance(cluster: _Cluster, pod: str, found: Sequence[OldCagg],
                                           "-t", exact) + " > " + shlex.quote(saved),
                 "    drop:     " + in_pod("psql", "-U", user, "-d", cagg.database, "-c",
                                           "DROP {0} {1}".format(what, exact)),
-                "    recreate: " + in_pod("psql", "-U", user, "-d", cagg.database, "-v",
-                                          "ON_ERROR_STOP=1") + " < " + shlex.quote(saved),
+                "    recreate, after apply: " + in_pod("psql", "-U", user, "-d", cagg.database, "-v",
+                                                       "ON_ERROR_STOP=1") + " < " + shlex.quote(saved),
             ]
             if materialized:
-                lines.append("    then:     " + in_pod("psql", "-U", user, "-d", cagg.database, "-c",
-                                                      "REFRESH MATERIALIZED VIEW " + exact))
+                lines.append("    then refresh it: " + in_pod("psql", "-U", user, "-d", cagg.database, "-c",
+                                                             "REFRESH MATERIALIZED VIEW " + exact))
     lines += [
-        "The file keeps the view's definition, owner, grants and comment, and a pg_dump file "
-        "loads into a newer PostgreSQL, so it can be recreated on the new major. Recreate it "
-        "on whichever instance is the primary then. Anything that reads the view fails until "
-        "it is back. If another view depends on one of these, DROP refuses: save and drop "
-        "that one first, and recreate it last (DROP ... CASCADE would drop it unsaved).",
+        "The file keeps the view's definition, owner, grants and comment. A view on another "
+        "view is dropped first and recreated last.",
     ] + _VIEW_DOCS
     return lines
+
+
+def _on_pg(steps: Sequence[Any], index: int, plan: Dict[str, Any]) -> str:
+    """" on PostgreSQL N" at that point of the plan, or nothing if unknown."""
+    majors = [s for s in steps[:index] if isinstance(s, MajorUpgrade)]
+    if majors:
+        return " on PostgreSQL {0}".format(majors[-1].to_pg)
+    source = str((plan.get("source") or {}).get("pg") or "")
+    return " on PostgreSQL {0}".format(source.split(".")[0]) if source else ""
 
 
 def _plan_cagg_migration(
@@ -723,24 +727,23 @@ def _plan_cagg_migration(
         found.extend(caggs)
         if ng:
             bucket.append("  {0}: {1}".format(database, ng))
+    footer = ["", "This came from a read-only check. Nothing has been changed."]
+    target = "this plan updates TimescaleDB to {0}{1}".format(crossing.to, _on_pg(steps, index, plan))
     if unread:
         # Not going on to find out at that hop, after every pg_upgrade before it.
-        majors = sum(1 for s in steps[:index] if isinstance(s, MajorUpgrade))
+        majors = [s for s in steps[:index] if isinstance(s, MajorUpgrade)]
+        later = (" Finding them only then would be after upgrading PostgreSQL from {0} to {1}.".format(
+            majors[0].from_pg, majors[-1].to_pg) if majors else "")
         raise ApplyRefused([
-            "This comes from a read-only check. Nothing has been changed.",
-            "",
-            "apply did not start. Hop {0} of this plan updates to {1}, and the update to 2.25 "
-            "refuses continuous aggregates in the old format. So before changing anything, apply "
-            "looks for them in every database, to stop or migrate them in time. It could not "
-            "finish looking:".format(crossing.hop, crossing.to),
+            "apply did not start: it could not check every database for continuous aggregates "
+            "in the old format.",
         ] + ["  " + line for line in unread] + [
-            "",
-            "Going on would leave that question to hop {0}, after {1}, when the database has "
-            "already been changed.".format(crossing.hop, "{0} pg_upgrade{1}".format(
-                majors, "" if majors == 1 else "s") if majors else "the updates before it"),
             "Check that the primary is running and that `psql -U {0}` can read "
             "_timescaledb_catalog in each database, then run apply again.".format(cluster.opts.psql_user),
-        ], plain=True)
+            "",
+            "Why it checks first: {0}, and TimescaleDB 2.25 and later refuse those "
+            "aggregates.{1}".format(target, later),
+        ] + footer, plain=True)
     if not found and not bucket:
         return
 
@@ -755,40 +758,38 @@ def _plan_cagg_migration(
     hop = steps[stop - 1].hop if stop else None
 
     lines = [
-        "This comes from a read-only check. Nothing has been changed.",
-        "",
-        "Hop {0} of this plan updates to {1}. The update to 2.25 refuses continuous aggregates "
-        "in the old format, and it removes cagg_migrate, the only way to convert them, so "
-        "they have to be migrated before that hop.".format(crossing.hop, crossing.to),
+        "apply did not start: TimescaleDB 2.25 and later refuse some continuous aggregates "
+        "here, and {0}.".format(target),
     ]
     if found:
-        lines += ["", "Old-format continuous aggregates:"]
+        lines += ["", "In the old format:"]
         for cagg in found:
             lines += _describe_cagg(cagg)
     blocked: List[str] = []
     if bucket:
-        blocked += ["Built on time_bucket_ng, which 2.25 also refuses and migrating is not known "
-                    "to fix; rebuild these without it first:"] + bucket
+        blocked += ["Built on time_bucket_ng, which no known migration fixes; rebuild these "
+                    "without it first:"] + bucket
     if any(cagg.dependents for cagg in found):
         blocked += _view_guidance(cluster, primary.pod, found, runner)
     if found and stop is None:
-        blocked.append("This route stops at no release from 2.14 to 2.24, where cagg_migrate is "
-                       "known to work. Plan to such a release first, migrate, and plan on from there.")
+        blocked.append("This plan never stops at a TimescaleDB release from 2.14 to 2.24, where "
+                       "cagg_migrate is known to work. Plan to one first, migrate, then plan on.")
     if blocked:
-        raise ApplyRefused(lines + [""] + blocked, plain=True)
+        raise ApplyRefused(lines + [""] + blocked + footer, plain=True)
 
     lines += [
         "",
-        "If you agree, apply runs this at hop {0}, when the database reaches {1}:".format(hop, release),
+        "They have to be migrated before 2.25, which also removes cagg_migrate. If you agree, "
+        "apply does it partway through the plan, when TimescaleDB reaches {0}{1}:".format(
+            release, _on_pg(steps, stop, plan)),
         "  CALL cagg_migrate('<aggregate>', override => true, drop_old => true)",
-        "It rebuilds each aggregate under its own name and drops the old one, which cannot be "
-        "undone, so have a backup. It needs about the size above free again, and takes as long "
-        "as rebuilding that data. apply then runs the refresh it asks for and puts back the "
-        "grants and owner, which it loses. A refresh policy is kept under a new job id.",
+        "This drops the old aggregate and cannot be undone, so have a backup. It needs about "
+        "the size above free again and takes as long as rebuilding that data. apply then puts "
+        "back the grants and owner the call removes.",
     ]
-    if not opts.migrate_caggs and not (opts.confirm and opts.confirm("\n".join(lines))):
+    if not opts.migrate_caggs and not (opts.confirm and opts.confirm(NL.join(lines + footer))):
         raise ApplyRefused(lines + ["", "To go on: run apply again with --migrate-caggs, or answer "
-                                    "y at its prompt. Or plan to a target below 2.25."], plain=True)
+                                    "y at its prompt. Or plan to a target below 2.25."] + footer, plain=True)
     steps.insert(stop, MigrateCaggs(hop=hop, expect=release))
 
 

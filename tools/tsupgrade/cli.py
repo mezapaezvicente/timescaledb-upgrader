@@ -685,7 +685,8 @@ def cmd_apply(args: argparse.Namespace) -> int:
     try:
         report = apply_plan(plan, opts)
     except ApplyRefused as exc:
-        print("refused: nothing was written", file=sys.stderr)
+        if not exc.plain:
+            print("refused: nothing was written", file=sys.stderr)
         for reason in exc.reasons:
             print(reason if exc.plain else "  - {0}".format(reason), file=sys.stderr)
         return EXIT_CHECK_FAILED
