@@ -447,7 +447,10 @@ second call fails with `plan already exists` (measured), so a plain `CALL
 cagg_migrate('<aggregate>')`, which is what TimescaleDB's own hint says, is a trap.
 The call drops the old aggregate for good, so have a backup. It also drops grants
 without a word, so `apply` puts them back, with the owner, and runs the refresh the
-call asks for. A refresh policy is kept under a new job id. Some cases stop even
+call asks for. A refresh policy is kept, with its own offsets and schedule, under a
+new job id. Compression on the aggregate and its compression policy are kept too,
+but chunks that were compressed come back uncompressed until the policy runs, so
+the aggregate takes its uncompressed size on disk meanwhile. Some cases stop even
 with the flag: a view on the aggregate, an aggregate on `time_bucket_ng`, and a
 route with no stop from 2.14 to 2.24.
 
@@ -515,8 +518,11 @@ aggregate on the way (see [Old continuous aggregates](#old-continuous-aggregates
 - That WAL archiving fails until `stanza-upgrade` has run is inferred from
   pgBackRest checking the system identifier, not observed. The rest of the
   backup advice is from pgBackRest's user guide.
-- The old-aggregate migration was run on one aggregate per database, through
-  2.15.3 on PostgreSQL 13 and, in a container, with a grant to restore. A
+- The old-aggregate migration was run through 2.15.3 on PostgreSQL 13, on one
+  aggregate per database on kind, and in a container also with two aggregates
+  in one database, a grant to restore, compression with its policy, and a
+  refresh policy with its own settings. An aggregate on an old-format
+  aggregate cannot exist (both 2.1.1 and 2.15.3 refuse to create one). A
   dependent view or a `time_bucket_ng` aggregate stops the run instead.
 - A major upgrade with tablespaces is refused before anything stops.
 - WAL on its own volume, and the data directory at the chart's path, were run
