@@ -414,8 +414,8 @@ cagg_migrate('<aggregate>')`, which is what TimescaleDB's own hint says, is a tr
 The call drops the old aggregate for good, so have a backup. It also drops grants
 without a word, so `apply` puts them back, with the owner, and runs the refresh the
 call asks for. A refresh policy is kept under a new job id. Some cases stop even
-with the flag: a view on the aggregate, an aggregate on `time_bucket_ng`, and a
-route with no stop from 2.14 to 2.24.
+with the flag: a view on the aggregate, and a route with no stop from 2.14 to
+2.24. Aggregates on `time_bucket_ng` have their own section, below.
 
 A view on the aggregate makes the call fail partway: it leaves `<name>_old` behind,
 still blocking 2.25, and cannot be retried. So `apply` names each view and the
@@ -429,6 +429,51 @@ output loading into newer PostgreSQL, which its documentation states.
 If the check cannot read a database, or finds no primary, `apply` stops at the
 start too, says why with psql's own error, and that nothing has been changed:
 finding out at the 2.25 hop would be after the pg_upgrades before it.
+
+### Aggregates on `time_bucket_ng`
+
+A database with a continuous aggregate built on `time_bucket_ng` cannot be
+updated past 2.14. The 2.14 to 2.15 update tries to convert it and fails ("tried
+calling catalog_get when extension isn't loaded"), and so does every update to
+2.15.0-2.24.0; 2.25.0 and later fail in a catalog rewrite instead. Each one rolls
+back, so nothing breaks, but nothing moves either. `cagg_migrate` refuses these
+aggregates ("does not require any migration"), whatever the 2.25 update's hint
+says, and upstream's fix (#7763) was closed unmerged. All of that was measured on
+the images this tool uses, not taken from the documentation. Such aggregates can
+be created from 2.4.0 to 2.14.2.
+
+If a plan goes past 2.14 with one, `apply` stops before changing anything, the
+same way, and shows each one with the `time_bucket` form it would be rebuilt on.
+With y or `--migrate-caggs` it rebuilds each, at the source or at the first stop
+on the route from 2.8 to 2.14, before any update past 2.14:
+
+1. it builds the same aggregate on `time_bucket` beside the old one;
+2. it keeps it only if `time_bucket_ng` and `time_bucket` put every point of a
+   dense series from 2001 to 2041 in the same bucket, and the two aggregates'
+   queries return the same rows on your live data (averages within 1e-9);
+3. it materializes it over the range the old one had materialized;
+4. in one transaction it drops the old one, gives the new one its name, and puts
+   back the refresh policy, owner, grants, comment and real-time setting.
+
+Translating the definition is not enough. `time_bucket_ng` ignores some origins
+that `time_bucket` honours, and the two start weeks on different days, so `apply`
+tries the literal form, then without the origin, then with `time_bucket_ng`'s own
+origin, and keeps the first one the comparison proves. The rebuild drops the old
+aggregate for good, so have a backup. It needs about the aggregate's size free
+again and takes as long as rebuilding that data.
+
+It stops, leaving the aggregate as it was, when:
+
+- no `time_bucket` form buckets the same way. At 2.14 and below an aggregate
+  takes an origin only with a timezone, so a weekly bucket on `timestamp` or
+  `date` has no equivalent. Recreate it yourself, knowing its weeks will start
+  on another day, or drop it;
+- the aggregate holds rows the raw data no longer has, because a retention policy
+  dropped them. A rebuild would lose them, so copy them to a table first;
+- it has an index of its own, a job other than its refresh policy, or
+  compression: drop them, run `apply` again, and recreate them afterwards;
+- a view depends on it (the same commands as above), or the route never stops
+  from 2.8 to 2.14.
 
 ---
 
@@ -478,7 +523,13 @@ aggregate on the way (see [Old continuous aggregates](#old-continuous-aggregates
   backup advice is from pgBackRest's user guide.
 - The old-aggregate migration was run on one aggregate per database, through
   2.15.3 on PostgreSQL 13 and, in a container, with a grant to restore. A
-  dependent view or a `time_bucket_ng` aggregate stops the run instead.
+  dependent view stops the run instead.
+- The `time_bucket_ng` rebuild was run in a container at 2.8.0, 2.12.2 and 2.14.2
+  on PostgreSQL 13, on the shapes `time_bucket_ng` takes in an aggregate (day,
+  week and month; with and without a timezone and an origin; on `timestamptz`,
+  `timestamp` and `date`), and through the harness on PostgreSQL 15 from 2.12.2
+  and 2.14.2 to 2.28.3. It compares the live data in full, which on a large
+  aggregate is as slow as the rebuild itself.
 - The disk check before a `pg_upgrade` measures the data directory with `du`
   under preflight's exec timeout; on a very large database it reports
   `unknown`, not a failure.

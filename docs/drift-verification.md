@@ -138,7 +138,7 @@ removes:
 |---|---|---|
 | `continuous_agg.finalized` | 2.25 and later | `column "finalized" does not exist` |
 | `hypertable.replication_factor` | **2.14 and later** | `column "replication_factor" does not exist` |
-| `continuous_aggs_bucket_function.bucket_func` | **before ~2.14** | `column bf.bucket_func does not exist` |
+| `continuous_aggs_bucket_function.bucket_func` | **before 2.15** (measured at 2.14.2, 2026-11-11) | `column bf.bucket_func does not exist` |
 
 Measured:
 
@@ -148,10 +148,13 @@ Measured:
 | `d_mid` | 2.20.3 | present | absent | present |
 | `d_aligned` | 2.30.1 | **absent** | absent | present |
 
-The third one bites hardest: without it the `time_bucket_ng` gate goes
-indeterminate on exactly the old databases it exists to protect, since a 2.13
-database upgrading to 2.30 passes straight through the 2.25 block. Both catalog
-shapes are therefore supported.
+The third one bit hardest, and probing was not enough. The gate first read both
+shapes of that catalog, but before 2.15 a fixed-width bucket without a timezone
+(`time_bucket_ng('1 day', ts)` on `timestamp`) has **no row there at all**
+(measured 2026-11-11 at 2.12.2 and 2.14.2), so the gate reported clear on a
+database whose update then failed. It now reads the query each aggregate was
+defined with (`pg_get_viewdef` of its direct view, whose columns exist from 2.1
+to 2.15), which names the function for every shape.
 
 A column the upgrade *removed* means the database is already past that cutoff,
 so the gate is **vacuously satisfied**. A column that does not exist *yet* means
@@ -160,12 +163,23 @@ the same question has to be asked a different way. Neither is a failure.
 ### Second blocker at 2.25
 
 `2.24.0--2.25.0.sql` carries two independent `RAISE EXCEPTION` blocks, not one:
-non-finalized aggregates, **and** aggregates built on `time_bucket_ng`. Either
-aborts the update alone, so both are checked. The `time_bucket_ng` detection
-query is read from the shipped SQL rather than executed against a positive case
-— creating such an aggregate is already refused at 2.13.0 (*"continuous
-aggregate view must include a valid time bucket function"*), so no positive
-fixture could be built on this image.
+non-finalized aggregates, **and** aggregates built on `time_bucket_ng`. The
+second is never reached, measured 2026-11-11: a database holding an aggregate on
+`time_bucket_ng` fails every update past 2.14. The 2.14 to 2.15 script converts
+them with `_timescaledb_functions.cagg_migrate_to_time_bucket`, a C function of
+the new library that cannot run inside the update ("tried calling catalog_get
+when extension isn't loaded"), and the call stays in every script up to 2.24.0;
+updates to 2.25.0 and 2.28.3 fail earlier, in the catalog rewrite ("time_bucket
+function not found in CAgg definition"). Upstream's fix, #7763, was closed
+unmerged. So `time_bucket_ng` is a gate of its own, at 2.15, and `apply`
+rebuilds such aggregates on `time_bucket` (`tools/tsupgrade/ngrebuild.py`).
+
+An earlier version of this page said such aggregates could not be created at
+2.13.0. That error (*"continuous aggregate view must include a valid time bucket
+function"*) was for `timestamptz` without a timezone argument, which is refused
+on every release. With a timezone, or on `timestamp` or `date`, they can be
+created from 2.4.0 to 2.14.2 and are refused from 2.15.0 (measured on every
+release in between).
 
 ## Sources re-fetched, not recalled
 
@@ -262,11 +276,11 @@ checks the column reference `bf.bucket_func`.
 
 ### Two claims the suite deliberately does not make
 
-- **`time_bucket_ng` has no positive fixture.** Creating such an aggregate is
-  already refused at 2.13.0 (*"continuous aggregate view must include a valid
-  time bucket function"*), so no positive case could be built on this image.
-  The detection query is read from the shipped SQL — graded [R], not [E] — and
-  the tests cover the dual-schema *dispatch*, not a real blocked upgrade.
+- **`time_bucket_ng` had no positive fixture** until 2026-11-11, on a misread
+  refusal (above). It has one now, graded [E]:
+  `tests/test_ng_rebuild_container.py` creates the aggregates at 2.6.1, 2.8.0
+  and 2.12.2, shows the gate finding them and the update to 2.15.3 failing,
+  then rebuilds them and shows the update going through.
 - **Nothing asserts an upgrade is safe.** Every gate answers what blocks an
   upgrade. A `clear` result means no known blocker was found, which is not the
   same claim, and the matrix loader's rule is untouched: runtime findings are

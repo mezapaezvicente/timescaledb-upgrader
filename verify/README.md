@@ -141,6 +141,20 @@ the way, and the fixture checks judge the result. `--caggs-refused --mode seeded
 is the same without the flag, and passes only if `apply` stops before changing
 anything and names the aggregate (`caggs-refused-seeded`). No row cites it.
 
+**Aggregates on `time_bucket_ng`.** `--ng` adds the `ng.sql` layer (below) to
+the staged database, at a source from 2.8 to 2.14. No update past 2.14 gets
+through those aggregates, so `apply` rebuilds them on `time_bucket` before
+anything else, and `ng_check.sql` judges the result (`ng-empty`, `ng-seeded`).
+`--ng-refused` is the same without `--migrate-caggs`, and passes only if `apply`
+stops before changing anything, names them, shows the form it would rebuild
+each on, and leaves them as they were (`ng-refused-empty`, `ng-refused-seeded`).
+No row cites them.
+
+```sh
+python verify/harness.py --pg 15 --from 2.12 --from 2.14 --ng
+python verify/harness.py --pg 15 --from 2.12 --ng-refused
+```
+
 **What is not a row result.** If staging or seeding fails, that is the harness
 or the environment, not the transition. It writes no record; it prints
 `ERROR`, logs it, and moves on. `verify/out/runs.jsonl` has one line per row
@@ -188,14 +202,25 @@ covers the whole range) versus the 2.x form (`CREATE MATERIALIZED VIEW … WITH
 NO DATA`, `refresh_continuous_aggregate`), and `by_range()` (2.13+) versus the
 positional `create_hypertable`. One script covers every source version.
 
-Not in it: `time_bucket_ng` aggregates (refused from 2.13; a gate concern),
-retention, background policies. No policy is added and the jobs touch no
-table, so nothing changes the data between seed and check.
+Not in it: `time_bucket_ng` aggregates (the `ng.sql` layer below), retention,
+background policies. No policy is added and the jobs touch no table, so
+nothing changes the data between seed and check.
 
 `views.sql` is an optional layer, not part of the default seed: a user view on
 every `timescaledb_information` view. Most update scripts drop those views, so
 it blocks nearly every row by design. It exists to exercise preflight's
 `information_views` gate, in plain-container repros.
+
+`ng.sql` is the layer for `--ng` and `--ng-refused`, on an empty or seeded
+database at a source from 2.8 to 2.14: three aggregates on `time_bucket_ng`
+(a month and a week in `Europe/Madrid` on `timestamptz`, a day on `timestamp`,
+the shape without a catalog row before 2.15), with a refresh policy, a comment,
+an owner and a grant, and their rows as baseline tables. No update past 2.14
+gets through them. `ng_check.sql`, run with `-v rebuilt=true|false`, checks the
+rows (averages within 1e-9: the same rows summed in another order differ in the
+last digits), whether they are on `time_bucket` now or still on `time_bucket_ng`,
+that the policy, comment, owner, grant and real-time setting survived, and,
+after a rebuild, that a new row is materialized by a refresh.
 
 A source below 2.7 creates a *non-finalized* aggregate, because that was the
 only form then. The 2.24 → 2.25 update script refuses those, so seeded runs

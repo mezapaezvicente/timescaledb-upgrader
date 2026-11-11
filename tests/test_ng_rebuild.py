@@ -10,9 +10,9 @@ from __future__ import annotations
 
 import pytest
 
-from tsupgrade.apply import ApplyOptions, ApplyRefused, _plan_cagg_migration
+from tsupgrade.apply import ApplyOptions, ApplyRefused, _cleared_gates, _plan_cagg_migration
 from tsupgrade.ngrebuild import NG_ORIGIN, candidates, ng_calls
-from tsupgrade.preflight import Instance
+from tsupgrade.preflight import Instance, PreflightOptions, check_gates
 from tsupgrade.steps import (
     EnsureImage,
     MigrateCaggs,
@@ -246,6 +246,39 @@ def test_both_kinds_get_both_steps_the_rebuild_first():
     _decide(steps, cluster, source="2.14.2", migrate_caggs=True)
     assert steps[1] == RebuildNgCaggs(hop=1, expect="2.14.2")
     assert steps[2] == MigrateCaggs(hop=1, expect="2.14.2")
+
+
+def test_the_preflight_before_the_rebuild_is_told_it_will_be_cleared():
+    """Measured in the harness: the first preflight failed on the very gate the
+    rebuild after it was there to clear."""
+    steps = _decide(migrate_caggs=True)
+    assert _cleared_gates(steps[1:]) == ("time_bucket_ng",)
+    assert _cleared_gates(steps[3:]) == ()
+    assert _cleared_gates([MigrateCaggs(hop=1, expect="2.19.3"), UpdateExtension(hop=1, to="2.27.2", sql="x")]) \
+        == ("old_caggs",)
+
+
+class GateKube:
+    def __init__(self, answers):
+        self.answers = answers
+
+    def psql(self, pod, container, database, user, sql):
+        for needle, value in self.answers.items():
+            if needle in sql:
+                return 0, value, ""
+        return 0, "", ""
+
+
+@pytest.mark.parametrize("cleared,status", [((), "fail"), (("time_bucket_ng",), "pass"),
+                                            (("old_caggs",), "fail")])
+def test_preflight_passes_only_the_gate_apply_clears(cleared, status):
+    kube = GateKube({"LIKE '%time_bucket_ng%'": _row("public.ng_daily")})
+    opts = PreflightOptions(target_image="i", cleared_gates=cleared)
+    result = check_gates(kube, opts, [Instance(pod="tsdb-0", role="primary", extensions={"verify": "2.12.2"})],
+                         "2.20.3")
+    assert result.status == status
+    if status == "pass":
+        assert any("blocked now; apply's next step clears it" in d for d in result.details)
 
 
 def test_a_source_past_214_is_not_asked_about_time_bucket_ng():

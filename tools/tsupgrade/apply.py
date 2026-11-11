@@ -448,6 +448,21 @@ def _route_images(later: Sequence[Any], opts: ApplyOptions) -> Tuple[RouteImage,
     return tuple(RouteImage(reference, on) for reference, on in found.items())
 
 
+def _cleared_gates(later: Sequence[Any]) -> Tuple[str, ...]:
+    """The gates a step of apply's own clears before the next update: a
+    preflight at the source runs before the rebuild or migration it agreed to,
+    and must not fail on what that step is there to fix (measured: it did)."""
+    cleared: List[str] = []
+    for step in later:
+        if isinstance(step, (UpdateExtension, MajorUpgrade)):
+            break
+        if isinstance(step, RebuildNgCaggs):
+            cleared.append("time_bucket_ng")
+        elif isinstance(step, MigrateCaggs):
+            cleared.append("old_caggs")
+    return tuple(cleared)
+
+
 def _step_preflight(
     step: Preflight,
     opts: ApplyOptions,
@@ -476,6 +491,7 @@ def _step_preflight(
             route_checked=not first,
             use_cached_images=opts.use_cached_images,
             statefulset=opts.statefulset,
+            cleared_gates=_cleared_gates(later),
         )
     )
     lines = ["{0}: {1} - {2}".format(r.name, r.status, r.summary) for r in results]
