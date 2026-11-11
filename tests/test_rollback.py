@@ -162,6 +162,19 @@ def test_rollback_takes_the_data_directory_from_the_report():
     assert "delete pvc storage-volume-tsdb-1" in kube.writes
 
 
+def test_rollback_mounts_every_claim_and_deletes_every_replica_claim():
+    kube = UpgradedKube()
+    kube.mounts = [{"name": "storage-volume", "mountPath": "/var/lib/postgresql"},
+                   {"name": "wal-volume", "mountPath": "/var/lib/postgresql/wal"}]
+    report = _report(data="/var/lib/postgresql/data", kept="/var/lib/postgresql/data.pg12")
+    result = _rollback(report, kube, discard_writes=True)
+    assert result["result"] == "pass", result.get("failure")
+    assert [v["persistentVolumeClaim"]["claimName"] for v in kube.spec_seen["spec"]["volumes"]] == [
+        "storage-volume-tsdb-0", "wal-volume-tsdb-0"]
+    assert [w for w in kube.writes if w.startswith("delete pvc")] == [
+        "delete pvc storage-volume-tsdb-1", "delete pvc wal-volume-tsdb-1"]
+
+
 def test_rollback_refuses_a_report_without_a_data_directory():
     kube = UpgradedKube()
     with pytest.raises(RollbackRefused, match="give it with --data-dir"):

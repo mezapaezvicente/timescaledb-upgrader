@@ -49,9 +49,9 @@ from .apply import (
     _kubectl,
     _patroni_scope,
     _pod_phase,
+    _replica_pvcs,
     _run_on_ordinal_0,
     _StepFailed,
-    _volume,
     load_script,
 )
 from .preflight import Kube, PreflightError
@@ -164,7 +164,6 @@ def rollback(
 def _go_back(cluster: _Cluster, kube: Kube, opts: ApplyOptions, sts: Dict[str, Any],
              detail: Dict[str, Any], scope: str, sysid: str, output: List[str]) -> None:
     old, new, replicas = int(detail["from_pg"]), int(detail["to_pg"]), int(detail["replicas"])
-    claim = _volume(sts, opts)["name"]
     pod = "{0}-rollback-{1}-{2}".format(opts.statefulset, new, old)
     if _pod_phase(kube, pod) is not None:
         raise _StepFailed("pod {0} is left from an earlier run; read its log, delete it ({1}) "
@@ -194,8 +193,7 @@ def _go_back(cluster: _Cluster, kube: Kube, opts: ApplyOptions, sts: Dict[str, A
     output.extend(lines[-3:])
     kube.run(["delete", "pod", pod, "--wait=false"])
 
-    for i in range(1, replicas):
-        name = "{0}-{1}-{2}".format(claim, opts.statefulset, i)
+    for name in _replica_pvcs(sts, opts, replicas):
         rc, out, err = kube.run(["delete", "pvc", name, "--ignore-not-found", "--wait=true"])
         if rc != 0:
             raise _StepFailed("cannot delete {0}".format(name), [err or out])

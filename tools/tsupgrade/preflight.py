@@ -19,6 +19,7 @@ carried out has not been passed.
 from __future__ import annotations
 
 import json
+import posixpath
 import shutil
 import subprocess
 from dataclasses import dataclass, field
@@ -841,6 +842,31 @@ def check_disk_headroom(
 PG_UPGRADE_COPY_FACTOR = 1.1
 PG_UPGRADE_LINK_MARGIN = 256 * 1024 * 1024
 PG_UPGRADE_LINK_FRACTION = 0.02
+# On a WAL volume of its own, pg_upgrade writes only the new cluster's WAL: a
+# fresh segment or a few. The old WAL stays where it is, already counted.
+PG_UPGRADE_WAL_MARGIN = 256 * 1024 * 1024
+
+
+def _wal_headroom(kube: Kube, opts: PreflightOptions, pod: str,
+                  data: str) -> Tuple[Optional[str], Optional[str]]:
+    """``(status, detail)`` for the volume ``pg_wal`` points into, when it is
+    a symlink; ``(None, None)`` when WAL is inside the data directory."""
+    rc, out, _ = kube.exec(pod, opts.container, ["ls", "-ld", data + "/pg_wal"])
+    line = out.strip().splitlines()[0] if rc == 0 and out.strip() else ""
+    if not line.startswith("l") or " -> " not in line:
+        return None, None
+    wal = posixpath.normpath(posixpath.join(data, line.split(" -> ", 1)[1].strip()))
+    parent = posixpath.dirname(wal) or "/"
+    rc, df_out, df_err = kube.exec(pod, opts.container, ["df", "-Pk", parent])
+    usage = _parse_df(df_out) if rc == 0 else None
+    if usage is None:
+        return UNKNOWN, "{0} : pg_wal is {1}; cannot read the free space at {2} ({3})".format(
+            pod, wal, parent, (df_err or df_out or "df failed").splitlines()[:1])
+    ok = usage["free"] >= PG_UPGRADE_WAL_MARGIN
+    return (PASS if ok else FAIL), (
+        "{0} : pg_wal is {1}, on its own volume; the new cluster's WAL goes beside it: {2} free "
+        "at {3}; need >= {4} -> {5}".format(pod, wal, _human(usage["free"]), parent,
+                                           _human(PG_UPGRADE_WAL_MARGIN), "ok" if ok else "SHORT"))
 
 
 def check_pg_upgrade_headroom(
@@ -854,7 +880,8 @@ def check_pg_upgrade_headroom(
     hard-links the relation files and needs only the new catalog. Earlier
     ``<data>.pg<N>`` directories from previous hops are on the same disk,
     already counted as used, and listed so they can be removed once the
-    result is accepted.
+    result is accepted. When ``pg_wal`` is a symlink to another volume, that
+    volume needs room for the new cluster's WAL too.
     """
     title = "Disk headroom for pg_upgrade on ordinal 0"
     link = bool(opts.pg_upgrade_link)
@@ -864,6 +891,7 @@ def check_pg_upgrade_headroom(
                            "no reachable ordinal 0 with a known data directory", [])
     data = first.data_directory.rstrip("/")
     parent = data.rsplit("/", 1)[0] or "/"
+    wal_status, wal_line = _wal_headroom(kube, opts, first.pod, data)
     rc, out, err = kube.exec(first.pod, opts.container, ["du", "-sk", data])
     try:
         size = int(out.split()[0]) * 1024 if rc == 0 else None
@@ -881,7 +909,10 @@ def check_pg_upgrade_headroom(
     if size is None or usage is None:
         details.append("{0} : cannot read the size of {1} or the free space at {2} ({3})".format(
             first.pod, data, parent, (err or df_err or "du/df failed").splitlines()[:1]))
-        return CheckResult("pg_upgrade_disk", title, UNKNOWN, "could not measure", details)
+        if wal_line:
+            details.append(wal_line)
+        return CheckResult("pg_upgrade_disk", title, FAIL if wal_status == FAIL else UNKNOWN,
+                           "could not measure", details)
     if link:
         needed = max(PG_UPGRADE_LINK_MARGIN, size * PG_UPGRADE_LINK_FRACTION)
         how = "--link: the relation files are hard-linked, so only a margin"
@@ -892,11 +923,17 @@ def check_pg_upgrade_headroom(
     details.insert(0, "{0} : {1} is {2}; {3} free at {4}; need >= {5} ({6}) -> {7}".format(
         first.pod, data, _human(size), _human(usage["free"]), parent, _human(needed), how,
         "ok" if ok else "SHORT"))
+    if wal_line:
+        details.insert(1, wal_line)
+    status = PASS if ok else FAIL
+    if wal_status == FAIL or (wal_status == UNKNOWN and status == PASS):
+        status = wal_status
     details.append(
         "Free space is what df reports inside the pod. Provisioners that do not "
         "enforce quotas (local-path, hostPath) report the whole node disk.")
-    return CheckResult("pg_upgrade_disk", title, PASS if ok else FAIL,
-                       "{0} needed, {1} free".format(_human(needed), _human(usage["free"])), details)
+    return CheckResult("pg_upgrade_disk", title, status,
+                       "{0} needed, {1} free".format(_human(needed), _human(usage["free"]))
+                       + ("; WAL volume short" if wal_status == FAIL else ""), details)
 
 
 # What a pg_upgrade does to backups; said by preflight, the runbook and apply.

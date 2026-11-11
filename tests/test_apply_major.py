@@ -48,6 +48,10 @@ class MajorKube(FakeKube):
         self.spec_seen = None
         # The StatefulSet's claim templates, as the container mounts them.
         self.mounts = [{"name": "pgdata", "mountPath": "/home/postgres/pgdata"}]
+        # What readlink says of <data>/pg_wal (None: not a symlink), and the
+        # tablespaces beyond the two defaults.
+        self.wal_link = None
+        self.tablespaces = ""
 
     def json(self, args, namespaced=True):
         if args[:2] == ["get", "statefulset"]:
@@ -133,7 +137,11 @@ class MajorKube(FakeKube):
         if argv[0] == "vacuumdb":
             self.writes.append("vacuumdb on " + pod)
             return 0, "", "vacuumdb: processing database \"verify\": Generating minimal optimizer statistics (1 target)"
+        if argv[0] == "readlink":
+            return (0, self.wal_link, "") if self.wal_link else (1, "", "")
         sql = argv[-1]
+        if "FROM pg_tablespace" in sql:
+            return 0, self.tablespaces, ""
         if "WHERE datname = 'template0'" in sql:
             self.locale_sql = sql
             return 0, "UTF8|en_US.UTF-8|en_US.UTF-8|c|", ""
@@ -555,7 +563,8 @@ def test_a_finished_major_upgrade_reports_what_a_rollback_needs():
         "from_pg": 12, "to_pg": 13, "link": False, "old_image": OLD, "run_image": NEW,
         "data": "/home/postgres/pgdata/data", "data_from": "read from tsdb-0's server",
         "kept": "/home/postgres/pgdata/data.pg12",
-        "replicas": 2, "claim": "pgdata", "scope": "tsdb",
+        "wal": None, "wal_kept": None,
+        "replicas": 2, "claim": "pgdata", "claims": ["pgdata"], "scope": "tsdb",
         "system_identifier_before": "7000000000000000001",
     }
     assert "detail" not in report["steps"][1]
@@ -715,3 +724,80 @@ def test_a_plan_without_a_major_upgrade_does_not_read_the_data_directory():
     plan["target"]["pg"] = "12.22"
     report = _apply(plan, kube)
     assert "data_directory" not in report
+
+
+# --- R26: every volume claim, and WAL on its own volume ---------------------------
+
+def _chart_kube_with_wal(**kw):
+    """The chart's default: WAL on a second claim, pg_wal a symlink into it."""
+    kube = _chart_kube(**kw)
+    kube.mounts = [{"name": "storage-volume", "mountPath": "/var/lib/postgresql"},
+                   {"name": "wal-volume", "mountPath": "/var/lib/postgresql/wal"}]
+    kube.wal_link = "/var/lib/postgresql/wal/pg_wal"
+    return kube
+
+
+def test_the_upgrade_pod_mounts_every_claim_where_the_database_container_does():
+    kube = _chart_kube_with_wal()
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+    spec = kube.spec_seen["spec"]
+    assert spec["containers"][0]["volumeMounts"] == [
+        {"name": "storage-volume", "mountPath": "/var/lib/postgresql"},
+        {"name": "wal-volume", "mountPath": "/var/lib/postgresql/wal"}]
+    assert [v["persistentVolumeClaim"]["claimName"] for v in spec["volumes"]] == [
+        "storage-volume-tsdb-0", "wal-volume-tsdb-0"]
+
+
+def test_every_claims_pvc_is_deleted_for_the_replicas():
+    kube = _chart_kube_with_wal()
+    kube.replicas = 3
+    _apply(_plan(), kube)
+    assert [w for w in kube.writes if w.startswith("delete pvc")] == [
+        "delete pvc storage-volume-tsdb-1", "delete pvc wal-volume-tsdb-1",
+        "delete pvc storage-volume-tsdb-2", "delete pvc wal-volume-tsdb-2"]
+
+
+def test_a_symlinked_pg_wal_is_reported_and_its_kept_directory_recorded():
+    kube = _chart_kube_with_wal()
+    report = _apply(_plan(), kube)
+    detail = report["steps"][0]["detail"]
+    assert detail["wal"] == "/var/lib/postgresql/wal/pg_wal"
+    assert detail["wal_kept"] == "/var/lib/postgresql/wal/pg_wal.pg12"
+    assert detail["claims"] == ["storage-volume", "wal-volume"]
+    assert any(l.startswith("WAL directory: /var/lib/postgresql/wal/pg_wal") for l in report["steps"][0]["output"])
+
+
+def test_a_relative_pg_wal_link_is_resolved_against_the_data_directory():
+    kube = _chart_kube_with_wal()
+    kube.wal_link = "../wal/pg_wal"
+    report = _apply(_plan(), kube)
+    assert report["steps"][0]["detail"]["wal"] == "/var/lib/postgresql/wal/pg_wal"
+
+
+def test_wal_on_a_path_the_upgrade_pod_cannot_mount_is_refused():
+    kube = _chart_kube()
+    kube.wal_link = "/mnt/wal/pg_wal"
+    with pytest.raises(ApplyRefused, match="pg_wal is a symlink to /mnt/wal/pg_wal"):
+        _apply(_plan(), kube)
+    assert kube.writes == []
+
+
+def test_tablespaces_refuse_a_major_upgrade_before_anything_is_written():
+    kube = MajorKube()
+    kube.tablespaces = "fast,archive"
+    with pytest.raises(ApplyRefused, match="tablespaces fast, archive"):
+        _apply(_plan(), kube)
+    assert kube.writes == []
+
+
+def test_a_failure_after_the_wal_moved_says_how_to_put_it_back():
+    kube = _chart_kube_with_wal(upgrade_phase="Failed")
+    kube.failed_log = ("data directories swapped: /var/lib/postgresql/data\n"
+                       "old WAL directory moved: /var/lib/postgresql/wal/pg_wal.pg12")
+    report = _apply(_plan(), kube)
+    error = "\n".join(report["failure"]["error"])
+    assert "/var/lib/postgresql/data.pg12 back to /var/lib/postgresql/data" in error
+    assert ("ln -sfn /var/lib/postgresql/wal/pg_wal /var/lib/postgresql/data/pg_wal" in error)
+    assert "data untouched" not in error
+    assert not any(w.startswith("delete pvc") for w in kube.writes)

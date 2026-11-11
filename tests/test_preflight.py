@@ -297,6 +297,8 @@ GIB = 1024 ** 3
 class DiskKube:
     def __init__(self, data_kib, free_kib, left=""):
         self.data_kib, self.free_kib, self.left = data_kib, free_kib, left
+        self.wal_ls = "drwx------ 3 postgres postgres 4096 Nov 11 02:00 /home/postgres/pgdata/data/pg_wal"
+        self.wal_free_kib = free_kib
         self.seen = []
 
     def exec(self, pod, container, argv):
@@ -304,8 +306,11 @@ class DiskKube:
         if argv[0] == "du":
             return 0, "{0}\t{1}".format(self.data_kib, argv[-1]), ""
         if argv[0] == "df":
+            free = self.wal_free_kib if argv[-1] == "/home/postgres/wal" else self.free_kib
             return 0, ("Filesystem 1024-blocks Used Available Capacity Mounted on\n"
-                       "/dev/x 999999999 1 {0} 1% /home/postgres/pgdata".format(self.free_kib)), ""
+                       "/dev/x 999999999 1 {0} 1% /home/postgres/pgdata".format(free)), ""
+        if argv[0] == "ls":
+            return 0, self.wal_ls, ""
         return 0, self.left, ""
 
 
@@ -338,6 +343,19 @@ def test_pg_upgrade_headroom_without_ordinal_0_is_unknown():
     result = check_pg_upgrade_headroom(DiskKube(1, 1), PreflightOptions("x", pg_upgrade_link=False),
                                        INSTANCES[:1])
     assert result.status == UNKNOWN
+
+
+WAL_LINK =("lrwxrwxrwx 1 postgres postgres 22 Nov 11 02:00 /home/postgres/pgdata/data/pg_wal "
+            "-> /home/postgres/wal/pg_wal")
+
+
+@pytest.mark.parametrize("wal_free_kib,status", [(10 * GIB // 1024, PASS), (1024, FAIL)])
+def test_pg_upgrade_headroom_checks_a_wal_volume_of_its_own(wal_free_kib, status):
+    kube = DiskKube(1024, 10 * GIB // 1024)
+    kube.wal_ls, kube.wal_free_kib = WAL_LINK, wal_free_kib
+    result = check_pg_upgrade_headroom(kube, PreflightOptions("x", pg_upgrade_link=False), INSTANCES)
+    assert result.status == status, result.details
+    assert any("pg_wal is /home/postgres/wal/pg_wal, on its own volume" in d for d in result.details)
 
 
 class ArchiveKube:

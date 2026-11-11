@@ -79,8 +79,9 @@ this tool:
 - the data directory is `/var/lib/postgresql/data`. `apply` now reads it
   from the servers and `rollback` from the report (`--data-dir` overrides
   both); measured in a container, not yet on the chart;
-- WAL is on a second volume by default, which the `pg_upgrade` pod does not
-  mount;
+- WAL is on a second volume by default. The `pg_upgrade` and rollback pods
+  now mount every claim, and the new cluster's WAL stays on the WAL volume;
+  measured in a container, not yet on the chart;
 - Patroni's labels are `app`, `cluster-name` and `release`, so pass
   `--selector`;
 - after any `apply`, the chart's values still name the old image, and the next
@@ -261,12 +262,17 @@ disagree, or if the path is not below the mount of one of the StatefulSet's
 volume claim templates: the upgrade pod mounts that claim, and `pg_upgrade`
 writes beside the directory. `--data-dir` overrides it. Only when no server
 answers does it fall back to the images' `/home/postgres/pgdata/data`, and
-the report says so. Under Patroni it then moves the leader to ordinal 0,
-scales the StatefulSet to 0, and runs `pg_upgrade` in a pod on ordinal 0's
-disk, scheduled like the database pods. That pod's `initdb` takes the old
+the report says so. Tablespaces beyond the two defaults are refused, since
+their paths are not mounted and `--link` cannot cross volumes. Under Patroni
+it then moves the leader to ordinal 0, scales the StatefulSet to 0, and runs
+`pg_upgrade` in a pod on ordinal 0's disks (every volume claim template,
+where the database container mounts it), scheduled like the database pods. That pod's `initdb` takes the old
 cluster's data checksums, encoding, locale and locale provider (from its
-`template0`), or `pg_upgrade --check` would refuse it mid-outage. Then
-`apply` deletes the replicas' disks and Patroni's state in the DCS, since
+`template0`), or `pg_upgrade --check` would refuse it mid-outage. When
+`pg_wal` is a symlink to a volume of its own, the new cluster's WAL goes
+there too (`initdb --waldir`, beside the old WAL) and is swapped like the data
+directory: the old WAL is kept as `<wal>.pg<old major>`. Then `apply` deletes
+the replicas' disks, every claim's, and Patroni's state in the DCS, since
 `pg_upgrade` gives the cluster a new system identifier. Patroni's objects are
 deleted by name, for the scope Patroni reports, and `apply` refuses up front
 if the pod selector also matches endpoints or configmaps that are not
@@ -304,7 +310,8 @@ started by then).
 preflight against the image the cluster restarts on. It adds three checks:
 
 - *Disk on ordinal 0.* A copy needs the data directory's size free again,
-  WAL included; `--link` only a margin. Each hop keeps its old directory, so
+  WAL included; `--link` only a margin. A WAL volume of its own needs room for
+  the new cluster's WAL (256 MiB). Each hop keeps its old directory, so
   a chain such as 12 → 13 → 15 → 16 by copying ends with three of them;
   preflight and `apply` list them, to remove once the result is accepted.
 - *Other extensions.* The matrix verdicts cover TimescaleDB only. Preflight
@@ -339,7 +346,8 @@ undoes the last major upgrade in an `apply` report. It stops the cluster,
 puts `<data>.pg<old>` back in place (the new directory goes to
 `<data>.rolled-back-pg<new>-<its system identifier>`, so a later upgrade and
 rollback on the same disk does not collide with it), deletes the replicas'
-disks and Patroni's state, and starts the old image again, checking that the
+disks and Patroni's state, and starts the old image again (with WAL on its
+own volume, the old WAL comes back with the old directory), checking that the
 old system identifier is back. Every write since the upgrade is lost,
 extension updates included, which is why the flag is required. It refuses
 after `--link`, and after an upgrade that did not finish (whose report says
@@ -492,6 +500,10 @@ aggregate on the way (see [Old continuous aggregates](#old-continuous-aggregates
 - The old-aggregate migration was run on one aggregate per database, through
   2.15.3 on PostgreSQL 13 and, in a container, with a grant to restore. A
   dependent view or a `time_bucket_ng` aggregate stops the run instead.
+- A major upgrade with tablespaces is refused before anything stops.
+- WAL on its own volume, and the data directory at the chart's path, were run
+  through the real `pg_upgrade` and rollback scripts in a container (copy and
+  `--link`), not yet through `apply` on a cluster with that layout.
 - The disk check before a `pg_upgrade` measures the data directory with `du`
   under preflight's exec timeout; on a very large database it reports
   `unknown`, not a failure.
