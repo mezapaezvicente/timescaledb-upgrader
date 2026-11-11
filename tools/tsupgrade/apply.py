@@ -736,7 +736,7 @@ def _plan_cagg_migration(
             majors[0].from_pg, majors[-1].to_pg) if majors else "")
         raise ApplyRefused([
             "apply did not start: it could not check every database for continuous aggregates "
-            "in the old format.",
+            "created before TimescaleDB 2.7.",
         ] + ["  " + line for line in unread] + [
             "Check that the primary is running and that `psql -U {0}` can read "
             "_timescaledb_catalog in each database, then run apply again.".format(cluster.opts.psql_user),
@@ -757,12 +757,14 @@ def _plan_cagg_migration(
                 break
     hop = steps[stop - 1].hop if stop else None
 
+    which = ("continuous aggregates created before 2.7" if not bucket
+             else "continuous aggregates built on time_bucket_ng" if not found
+             else "some continuous aggregates here")
     lines = [
-        "apply did not start: TimescaleDB 2.25 and later refuse some continuous aggregates "
-        "here, and {0}.".format(target),
+        "apply did not start: TimescaleDB 2.25 and later refuse {0}, and {1}.".format(which, target),
     ]
     if found:
-        lines += ["", "In the old format:"]
+        lines += ["", "Created before TimescaleDB 2.7 (non-finalized, the old format):"]
         for cagg in found:
             lines += _describe_cagg(cagg)
     blocked: List[str] = []

@@ -98,7 +98,9 @@ def test_it_stops_before_anything_and_says_what_it_found_and_where_from():
     for shown in ("verify: public.fx_hourly", "built on public.fx_metrics", "304.0 KiB", "2 chunk(s)",
                   "1 refresh or other job(s)", "views that depend on it: none", "reader:SELECT"):
         assert shown in text
-    assert text.startswith("apply did not start: ")
+    assert text.startswith("apply did not start: TimescaleDB 2.25 and later refuse continuous "
+                           "aggregates created before 2.7, and this plan")
+    assert "Created before TimescaleDB 2.7 (non-finalized, the old format):" in text
     assert "this plan updates TimescaleDB to 2.27.2 on PostgreSQL 15" in text and "--migrate-caggs" in text
     assert text.endswith("This came from a read-only check. Nothing has been changed.")
     assert "hop" not in text.lower()
