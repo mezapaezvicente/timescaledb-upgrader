@@ -54,13 +54,16 @@ def _route():
 
 
 class Cluster:
-    def __init__(self, aggregates=CAGG, ng=""):
-        self.aggregates, self.ng = aggregates, ng
+    def __init__(self, aggregates=CAGG, ng="", kind="v"):
+        self.aggregates, self.ng, self.kind = aggregates, ng, kind
         self.sql = []
         self.writes = []
+        self.kube, self.opts = None, ApplyOptions()
 
     def psql(self, pod, database, sql):
         self.sql.append(sql)
+        if sql.startswith("SELECT relkind FROM pg_class"):
+            return 0, self.kind, ""
         if "information_schema.columns" in sql:
             exists = "'finalized'" in sql and False or "bucket_func" in sql
             return 0, "t" if exists else "f", ""
@@ -143,13 +146,35 @@ def test_a_source_already_in_the_window_migrates_after_the_first_preflight():
 
 
 @pytest.mark.parametrize("cluster,said", [
-    (Cluster(aggregates=WITH_VIEW), "Drop them first and recreate them afterwards: public.fx_depends"),
+    (Cluster(aggregates=WITH_VIEW), "verify: public.fx_depends, on public.fx_hourly"),
     (Cluster(ng="public.fx_ng"), "public.fx_ng"),
 ])
 def test_what_would_fail_stops_even_with_the_flag(cluster, said):
     """Measured with a view: the call fails partway and cannot be retried."""
     text = _refusal(cluster=cluster, migrate_caggs=True)
     assert said in text and "read-only check" in text
+
+
+def test_a_dependent_view_comes_with_what_to_run_for_it():
+    text = _refusal(cluster=Cluster(aggregates=WITH_VIEW), migrate_caggs=True)
+    exec_ = "kubectl -n timescale exec -i tsdb-0 -c timescaledb --"
+    assert exec_ + " pg_dump -U postgres -d verify --schema-only -t '\"public\".\"fx_depends\"' > verify.public.fx_depends.sql" in text
+    assert exec_ + " psql -U postgres -d verify -c 'DROP VIEW \"public\".\"fx_depends\"'" in text
+    assert exec_ + " psql -U postgres -d verify -v ON_ERROR_STOP=1 < verify.public.fx_depends.sql" in text
+    assert "REFRESH" not in text and "postgresql.org/docs/current/sql-dropview.html" in text
+
+
+def test_a_dependent_materialized_view_is_dropped_and_refreshed_as_one():
+    text = _refusal(cluster=Cluster(aggregates=WITH_VIEW, kind="m"), migrate_caggs=True)
+    assert "public.fx_depends (materialized)" in text
+    assert "DROP MATERIALIZED VIEW" in text and "REFRESH MATERIALIZED VIEW" in text
+
+
+def test_the_commands_reach_the_cluster_apply_reached():
+    cluster = Cluster(aggregates=WITH_VIEW)
+    cluster.opts = ApplyOptions(context="kind-prod", namespace="db", container="pg")
+    assert "kubectl --context kind-prod -n db exec -i tsdb-0 -c pg --" in _refusal(
+        cluster=cluster, migrate_caggs=True)
 
 
 def test_a_route_with_no_stop_in_the_window_stops_even_with_the_flag():
@@ -171,17 +196,23 @@ def test_a_route_below_2_25_is_not_stopped_and_not_even_asked():
 def test_a_question_that_fails_stops_it_before_anything():
     """Measured: going on left it to the gate at hop 6, after three pg_upgrades."""
     cluster = Cluster()
-    cluster.psql = lambda *a: (1, "", "connection lost")
+    cluster.psql = lambda *a: (1, "", "psql: error: connection lost" + chr(10) + "more")
     text = _refusal(cluster=cluster, migrate_caggs=True)
-    assert "could not be established" in text and "Nothing has been changed" in text
+    assert "Nothing has been changed" in text and "apply did not start" in text
+    assert "  verify: psql: error: connection lost" + chr(10) in text
+    assert "to hop 6, after 1 pg_upgrade, when" in text and "psql -U postgres" in text
 
 
 def test_no_primary_stops_it_before_anything():
     steps = _route()
     replica = Instance(pod="tsdb-1", role="replica", extensions={"verify": "2.1.1"})
-    with pytest.raises(ApplyRefused, match="no primary"):
-        _plan_cagg_migration(steps, {"source": {"ts": "2.1.1"}}, Cluster(), [replica], ["verify"],
+    down = Instance(pod="tsdb-0", role="unknown", error="connection refused")
+    with pytest.raises(ApplyRefused) as refused:
+        _plan_cagg_migration(steps, {"source": {"ts": "2.1.1"}}, Cluster(), [down, replica], ["verify"],
                              ApplyOptions())
+    text = chr(10).join(refused.value.reasons)
+    assert "no primary could be queried: tsdb-0 is unknown, connection refused; tsdb-1 is replica" in text
+    assert "Nothing has been changed" in text
 
 
 def test_empty_last_fields_survive_output_being_stripped():

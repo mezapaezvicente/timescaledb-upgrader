@@ -126,3 +126,29 @@ def test_an_aggregate_with_no_views_and_no_grants_is_read_through_stripped_outpu
 def test_a_view_on_the_aggregate_is_found_at_the_oldest_release(box):
     box.database("viewed", view=True)
     assert old_caggs(_runner(box), "viewed", "2.1.1")[0].dependents == ("public.fx_depends",)
+
+
+@pytest.mark.parametrize("kind", ["VIEW", "MATERIALIZED VIEW"])
+def test_the_view_advice_works_as_written(box, kind):
+    """What the refusal tells the operator to run: save, drop, migrate, load."""
+    name = "advice_" + kind.split()[0].lower()
+    box.database(name)
+    assert box.psql(name, "CREATE {0} fx_depends AS SELECT device, count(*) AS n FROM fx_hourly GROUP BY device".format(kind))[0] == 0
+    assert box.psql(name, "GRANT SELECT ON fx_depends TO reader")[0] == 0
+    assert box.psql(name, "COMMENT ON {0} fx_depends IS 'kept'".format(kind))[0] == 0
+    before = box.psql(name, "SELECT * FROM fx_depends ORDER BY 1")[1]
+    assert box.psql(name, "ALTER EXTENSION timescaledb UPDATE TO '2.15.3'")[0] == 0
+
+    rc, saved, err = box.exec(None, None, ["pg_dump", "-U", "postgres", "-d", name, "--schema-only",
+                                           "-t", '"public"."fx_depends"'])
+    assert rc == 0 and "fx_depends" in saved, err
+    assert box.psql(name, 'DROP {0} "public"."fx_depends"'.format(kind))[0] == 0
+    outcome = _step_migrate_caggs(MigrateCaggs(hop=4, expect="2.15.3"), Cluster(box), [name])
+    assert outcome.status != "failed", outcome.output
+    rc, _, err = box.psql(name, None, saved)
+    assert rc == 0, err
+    if kind != "VIEW":
+        assert box.psql(name, "REFRESH MATERIALIZED VIEW public.fx_depends")[0] == 0
+    assert box.psql(name, "SELECT * FROM fx_depends ORDER BY 1")[1] == before
+    assert box.psql(name, "SELECT has_table_privilege('reader', 'public.fx_depends', 'SELECT')")[1].strip() == "t"
+    assert box.psql(name, "SELECT obj_description('public.fx_depends'::regclass)")[1].strip() == "kept"

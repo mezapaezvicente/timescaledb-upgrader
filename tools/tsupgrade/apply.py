@@ -85,6 +85,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -623,6 +624,68 @@ def _describe_cagg(cagg: OldCagg) -> List[str]:
     ]
 
 
+def _quoted_name(name: str) -> str:
+    """schema.name as an exact identifier, for pg_dump -t and DROP."""
+    return ".".join('"' + part.replace('"', '""') + '"' for part in name.split(".", 1))
+
+
+# Measured in tests/test_cagg_migrate_container.py: save, drop, migrate, load.
+_VIEW_DOCS = [
+    "  https://www.postgresql.org/docs/current/app-pgdump.html",
+    "  https://www.postgresql.org/docs/current/sql-dropview.html",
+]
+
+
+def _view_guidance(cluster: _Cluster, pod: str, found: Sequence[OldCagg],
+                   runner: Callable[[str, str], Tuple[int, str, str]]) -> List[str]:
+    """What to run, view by view, to take the dependent views out of the way and
+    put them back: the operator runs it; apply only reads."""
+    opts = cluster.opts
+    user = opts.psql_user
+
+    def in_pod(*words: str) -> str:
+        return _kubectl(opts, "exec", "-i", pod, "-c", opts.container, "--") + " " + " ".join(
+            shlex.quote(w) for w in words)
+
+    lines = [
+        "Views depend on these aggregates. With one in place, cagg_migrate fails partway "
+        "(measured): it leaves the old aggregate behind as <name>_old, still blocking 2.25, "
+        "and it cannot be run again. So apply stops even with --migrate-caggs.",
+        "",
+        "To go on, save each view to a file on this machine and drop it, run apply, and "
+        "recreate the view from its file once apply has finished:",
+    ]
+    for cagg in found:
+        for view in cagg.dependents:
+            rc, kind, _ = runner(cagg.database, "SELECT relkind FROM pg_class WHERE oid = to_regclass({0})".format(
+                _literal(_quoted_name(view))))
+            materialized = rc == 0 and kind.strip() == "m"
+            what = "MATERIALIZED VIEW" if materialized else "VIEW"
+            exact = _quoted_name(view)
+            saved = "{0}.{1}.sql".format(cagg.database, view)
+            lines += [
+                "  {0}: {1}{2}, on {3}".format(cagg.database, view, " (materialized)" if materialized else "",
+                                              cagg.name),
+                "    save:     " + in_pod("pg_dump", "-U", user, "-d", cagg.database, "--schema-only",
+                                          "-t", exact) + " > " + shlex.quote(saved),
+                "    drop:     " + in_pod("psql", "-U", user, "-d", cagg.database, "-c",
+                                          "DROP {0} {1}".format(what, exact)),
+                "    recreate: " + in_pod("psql", "-U", user, "-d", cagg.database, "-v",
+                                          "ON_ERROR_STOP=1") + " < " + shlex.quote(saved),
+            ]
+            if materialized:
+                lines.append("    then:     " + in_pod("psql", "-U", user, "-d", cagg.database, "-c",
+                                                      "REFRESH MATERIALIZED VIEW " + exact))
+    lines += [
+        "The file keeps the view's definition, owner, grants and comment, and a pg_dump file "
+        "loads into a newer PostgreSQL, so it can be recreated on the new major. Recreate it "
+        "on whichever instance is the primary then. Anything that reads the view fails until "
+        "it is back. If another view depends on one of these, DROP refuses: save and drop "
+        "that one first, and recreate it last (DROP ... CASCADE would drop it unsaved).",
+    ] + _VIEW_DOCS
+    return lines
+
+
 def _plan_cagg_migration(
     steps: List[Any], plan: Dict[str, Any], cluster: _Cluster, instances: Sequence[Instance],
     databases: Sequence[str], opts: ApplyOptions,
@@ -635,10 +698,17 @@ def _plan_cagg_migration(
     if crossing is None:
         return
     primary = next((i for i in instances if i.role == "primary" and not i.error), None)
-    unread: List[str] = [] if primary else ["no primary could be queried"]
+    unread: List[str] = [] if primary else ["no primary could be queried: " + "; ".join(
+        "{0} is {1}{2}".format(i.pod, i.role, ", " + i.error if i.error else "") for i in instances
+    ) if instances else "no primary could be queried: no instances were found"]
+    failed: Dict[str, str] = {}
 
     def runner(database: str, sql: str) -> Tuple[int, str, str]:
-        return cluster.psql(primary.pod, database, sql)
+        rc, out, err = cluster.psql(primary.pod, database, sql)
+        if rc != 0:
+            said = [line.strip() for line in (err or out).splitlines() if line.strip()]
+            failed.setdefault(database, said[0] if said else "psql exited {0}".format(rc))
+        return rc, out, err
 
     found: List[OldCagg] = []
     bucket: List[str] = []
@@ -647,21 +717,29 @@ def _plan_cagg_migration(
         caggs = old_caggs(runner, database, version)
         ng = time_bucket_ng_caggs(runner, database)
         if caggs is None or ng is None:
-            unread.append("cannot read the continuous aggregates of {0}".format(database))
+            unread.append("{0}: {1}".format(database, failed.get(
+                database, "the catalog answered in a form this version does not read")))
             continue
         found.extend(caggs)
         if ng:
             bucket.append("  {0}: {1}".format(database, ng))
     if unread:
         # Not going on to find out at that hop, after every pg_upgrade before it.
+        majors = sum(1 for s in steps[:index] if isinstance(s, MajorUpgrade))
         raise ApplyRefused([
             "This comes from a read-only check. Nothing has been changed.",
             "",
-            "Hop {0} of this plan updates to {1}, and the update to 2.25 refuses continuous "
-            "aggregates in the old format. Whether this database holds any could not be "
-            "established:".format(crossing.hop, crossing.to),
+            "apply did not start. Hop {0} of this plan updates to {1}, and the update to 2.25 "
+            "refuses continuous aggregates in the old format. So before changing anything, apply "
+            "looks for them in every database, to stop or migrate them in time. It could not "
+            "finish looking:".format(crossing.hop, crossing.to),
         ] + ["  " + line for line in unread] + [
-            "Run apply again once the database can be read.",
+            "",
+            "Going on would leave that question to hop {0}, after {1}, when the database has "
+            "already been changed.".format(crossing.hop, "{0} pg_upgrade{1}".format(
+                majors, "" if majors == 1 else "s") if majors else "the updates before it"),
+            "Check that the primary is running and that `psql -U {0}` can read "
+            "_timescaledb_catalog in each database, then run apply again.".format(cluster.opts.psql_user),
         ], plain=True)
     if not found and not bucket:
         return
@@ -691,12 +769,8 @@ def _plan_cagg_migration(
     if bucket:
         blocked += ["Built on time_bucket_ng, which 2.25 also refuses and migrating is not known "
                     "to fix; rebuild these without it first:"] + bucket
-    views = sorted({v for cagg in found for v in cagg.dependents})
-    if views:
-        blocked += ["Views depend on these aggregates. cagg_migrate fails partway with them there "
-                    "(measured), leaving the old aggregate behind, still blocking 2.25, and it "
-                    "cannot be retried. Drop them first and recreate them afterwards: "
-                    + ", ".join(views)]
+    if any(cagg.dependents for cagg in found):
+        blocked += _view_guidance(cluster, primary.pod, found, runner)
     if found and stop is None:
         blocked.append("This route stops at no release from 2.14 to 2.24, where cagg_migrate is "
                        "known to work. Plan to such a release first, migrate, and plan on from there.")

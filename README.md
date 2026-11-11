@@ -572,9 +572,21 @@ cagg_migrate('<aggregate>')`, which is what TimescaleDB's own hint says, is a tr
 The call drops the old aggregate for good, so have a backup. It also drops grants
 without a word, so `apply` puts them back, with the owner, and runs the refresh the
 call asks for. A refresh policy is kept under a new job id. Some cases stop even
-with the flag: a view on the aggregate (the call fails partway, leaves `<name>_old`
-behind still blocking 2.25, and cannot be retried, so drop the view first), an
-aggregate on `time_bucket_ng`, and a route with no stop from 2.14 to 2.24.
+with the flag: a view on the aggregate, an aggregate on `time_bucket_ng`, and a
+route with no stop from 2.14 to 2.24.
+
+A view on the aggregate makes the call fail partway: it leaves `<name>_old` behind,
+still blocking 2.25, and cannot be retried. So `apply` names each view and the
+aggregate it is on, and prints the commands, for this cluster, to save it with
+`pg_dump --schema-only -t`, drop it, and recreate it from that file once `apply` has
+finished (and refresh it, if it is a materialized view). The file keeps the view's
+definition, owner, grants and comment. That sequence is measured on 2.15.3, for a
+view and a materialized view; loading the file on the new major relies on pg_dump
+output loading into newer PostgreSQL, which its documentation states.
+
+If the check cannot read a database, or finds no primary, `apply` stops at the
+start too, says why with psql's own error, and that nothing has been changed:
+finding out at the 2.25 hop would be after the pg_upgrades before it.
 
 **Going back from a copy.** `tsupgrade rollback --report report.json
 --discard-writes-since-upgrade` undoes the last major upgrade in an `apply`
