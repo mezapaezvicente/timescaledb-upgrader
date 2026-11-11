@@ -7,14 +7,15 @@ thing before you touch a cluster that matters.
 Built for people running TimescaleDB on their own clusters, often on the
 [archived Timescale Helm charts](https://github.com/timescale/helm-charts) or a
 fork of them. Nothing here depends on those charts. The tooling talks to a live
-cluster and a live database, so it works the same whether your StatefulSet came
-from a chart, a fork, Kustomize, or hand-written YAML.
+cluster and a live database, not to chart values.
 
-> **Status:** preflight, `plan` and `apply` are complete: extension updates,
-> image rollouts and PostgreSQL major upgrades with `pg_upgrade`, each plan
-> pinned to the route its matrix row was verified on. `rollback` undoes a
-> copy-mode major upgrade. Every same-PG row of the matrix and 7 of its 28
-> cross-PG rows are established by running them — see [Roadmap](#roadmap).
+> **Status:** preflight, `plan`, `apply` and `rollback` are complete: extension
+> updates, image rollouts and PostgreSQL major upgrades with `pg_upgrade`, each
+> plan pinned to the route its matrix row was verified on. All 131 rows of the
+> matrix are established, 126 by running them with this tool. `apply` drives a
+> Patroni StatefulSet laid out like the `timescaledb-ha` image's defaults; the
+> archived chart's own layout is not supported yet — see
+> [Who can use it today](#who-can-use-it-today).
 
 ---
 
@@ -27,290 +28,83 @@ volume you cannot easily roll back.
 
 The parts that make that survivable are unglamorous: knowing exactly what
 versions you are running right now, knowing whether the target image exists,
-knowing whether you have the disk headroom for a dump, and having rehearsed the
-procedure somewhere it does not matter. That is what this repo is about.
+knowing whether you have the disk headroom, and having rehearsed the procedure
+somewhere it does not matter. That is what this repo is about.
 
 **A note on the version matrix.** Nothing in this repo asserts a compatibility
-fact that has not been verified against a source. Entries that have not been
-verified are marked `"verified": false` with a null source rather than filled in
-from memory. An upgrade tool that guesses is worse than no tool at all.
+fact it has not established. A transition nobody has run is recorded as
+`verdict: null`, `verified: false`, with no evidence, rather than filled in
+from memory or from documentation. An upgrade tool that guesses is worse than
+no tool at all.
+
+---
+
+## Contents
+
+- [Who can use it today](#who-can-use-it-today)
+- [Requirements](#requirements)
+- [1. Preflight](#1-preflight)
+- [2. Plan](#2-plan)
+- [3. Apply](#3-apply)
+- [Changing the PostgreSQL major](#changing-the-postgresql-major)
+- [Going back from a copy](#going-back-from-a-copy)
+- [Without `apply`: a script for any deployment](#without-apply-a-script-for-any-deployment)
+- [Where images come from](#where-images-come-from)
+- [Old continuous aggregates](#old-continuous-aggregates)
+- [The version matrix](#the-version-matrix)
+- [Known limits](#known-limits)
+- [Try it locally](#try-it-locally)
+- [Layout](#layout) · [Roadmap](#roadmap)
+
+---
+
+## Who can use it today
+
+| Your deployment | `preflight`, `plan` | `plan --format script` | `apply`, `rollback` |
+|---|---|---|---|
+| A Patroni StatefulSet on a `timescaledb-ha` image, `OnDelete`, data at `/home/postgres/pgdata/data` (as in [`deploy/`](deploy/)) | yes | yes | yes |
+| The archived `timescaledb-single` chart | yes, with `--selector` | yes | **not yet** (below) |
+| An operator (CloudNativePG, StackGres, Zalando…) | `plan`; preflight not tried | yes | no: the operator would fight `apply` for the pods |
+
+`apply` needs `--statefulset`, `--selector` and `--container` when yours are
+not `tsdb`, `application=patroni` and `timescaledb`.
+
+**The archived chart.** Read from the `timescaledb-single` StatefulSet template
+and `values.yaml` on the archived repository's `main` branch; not run against
+this tool:
+
+- the template hard-codes `updateStrategy: RollingUpdate`, so `apply` refuses
+  the StatefulSet, and patching it to `OnDelete` is undone by the next
+  `helm upgrade`;
+- the data directory is `/var/lib/postgresql/data`, while `apply` and
+  `rollback` look for `/home/postgres/pgdata/data`;
+- WAL is on a second volume by default, which the `pg_upgrade` pod does not
+  mount;
+- Patroni's labels are `app`, `cluster-name` and `release`, so pass
+  `--selector`;
+- after any `apply`, the chart's values still name the old image, and the next
+  `helm upgrade` would put it back. Update the image tag in your values first.
+
+Until that is done, chart users get the most from `preflight`, `plan` and
+`plan --format script`.
 
 ---
 
 ## Requirements
 
-| Tool | Why |
-|---|---|
-| [Docker](https://docs.docker.com/get-docker/) | runs the kind node |
-| [kind](https://kind.sigs.k8s.io/docs/user/quick-start/#installation) ≥ 0.20 | the local cluster |
-| `kubectl` | everything |
-| `make`, `bash`, `sed` | the entry points |
+- Python 3.8 or later, standard library only — nothing to install.
+  `scripts/tsupgrade.sh` finds an interpreter and runs `python -m tsupgrade`.
+- `kubectl`, pointed at the cluster, with rights to read pods and exec into
+  them (preflight), and to change the StatefulSet, pods, PVCs, endpoints and
+  configmaps in its namespace (`apply`, `rollback`).
+- `bash`. On Windows, Git Bash or WSL.
 
-On Windows, run from **Git Bash** or **WSL**. The scripts pipe manifests to
-`kubectl` over stdin specifically so they work there.
-
-The first `make up` downloads the TimescaleDB HA image, which is several GB.
-Later runs reuse it.
+Every command below is `bash scripts/tsupgrade.sh <command>`; `--help` on any
+of them lists its options.
 
 ---
 
-## Quickstart
-
-```bash
-make up      # create the cluster and bring up TimescaleDB under Patroni
-make smoke   # prove it works: connect, create a hypertable, insert, query
-make down    # destroy everything
-```
-
-`make up` is idempotent — re-run it to apply manifest changes or to change the
-replica count.
-
-<details>
-<summary>What <code>make up</code> actually does</summary>
-
-1. Creates a single-node kind cluster from [`cluster/kind-config.yaml`](cluster/kind-config.yaml),
-   with the node image pinned by digest.
-2. Renders [`deploy/*.yaml`](deploy/) and applies them: namespace, RBAC, a
-   credentials Secret, the Patroni ConfigMap, three Services, and the
-   StatefulSet.
-3. Waits for every Patroni member to report ready over its REST API.
-4. Creates the application database and `CREATE EXTENSION timescaledb`.
-
-</details>
-
-### Seeding data
-
-```bash
-make seed                                            # 100k rows
-make seed ROWS=50000000 CHUNK_INTERVAL="6 hours"     # something to time
-```
-
-Values are **deterministic**, not random: seeding the same parameters twice
-produces identical data, which is what lets you compare a database before and
-after an upgrade and claim the contents are unchanged. The table is recreated on
-each run, so `ROWS` is exact.
-
-| Knob | Default | Meaning |
-|---|---|---|
-| `ROWS` | `100000` | total rows |
-| `CHUNK_INTERVAL` | `1 day` | hypertable `chunk_time_interval` |
-| `DEVICES` | `10` | distinct `device_id` values |
-| `STEP` | `10 seconds` | time between ticks |
-| `START_TS` | `2024-01-01 00:00:00+00` | first timestamp |
-| `TABLE` | `metrics` | table name |
-
-### Other targets
-
-```bash
-make status       # Patroni members, pods, services, volumes
-make psql         # interactive shell on the current primary
-make logs         # tail the primary
-make clean        # drop the namespace, keep the cluster
-make load-image   # side-load the image from local Docker instead of pulling
-```
-
-`make load-image` uses `kind load docker-image`. That fails for the
-multi-platform `timescaledb-ha` images when Docker uses the containerd image
-store, which is the Docker Desktop default. The error is
-`ctr: content digest sha256:... not found`
-([kind#3795](https://github.com/kubernetes-sigs/kind/issues/3795), unfixed as
-of kind v0.33.0). Until the script is changed, load a single platform by hand:
-
-```bash
-docker save --platform linux/amd64 "$TSDB_IMAGE" \
-  | docker exec -i "${KIND_CLUSTER}-control-plane" \
-      ctr --namespace=k8s.io images import --digests --snapshotter=overlayfs -
-```
-
-kind's own documented alternative is `docker image save --platform linux/amd64
--o image.tar "$TSDB_IMAGE"`, then `kind load image-archive image.tar --name
-"$KIND_CLUSTER"`. It works too, but writes a multi-GB temp file. The
-verification harness already loads images the first way.
-
-### Knobs
-
-Override any of these on the command line:
-
-```bash
-make up REPLICAS=3
-make up TSDB_IMAGE=timescale/timescaledb-ha:pg17.11-ts2.30.1
-make up NAMESPACE=timescale-test CLUSTER_NAME=tsdb2
-```
-
-| Knob | Default |
-|---|---|
-| `TSDB_IMAGE` | `timescale/timescaledb-ha:pg16.15-ts2.30.1` |
-| `REPLICAS` | `1` |
-| `NAMESPACE` | `timescale` |
-| `CLUSTER_NAME` | `tsdb` |
-| `STORAGE` | `5Gi` |
-| `APP_DB` | `bench` |
-
----
-
-## How the harness is built
-
-**Own manifests, no Helm.** The Timescale charts are archived, so depending on
-them would build this repo on abandoned tooling. [`deploy/`](deploy/) holds
-plain YAML with `__PLACEHOLDER__` tokens that `scripts/lib.sh` substitutes and
-pipes into `kubectl apply -f -`.
-
-**Patroni uses the Kubernetes API as its DCS.** No etcd, no Consul — Patroni
-stores the leader lock in an `Endpoints` object and needs only a namespaced
-`Role`. See [`deploy/10-rbac.yaml`](deploy/10-rbac.yaml).
-
-**Three Services, three jobs.** `tsdb` is selector-less and Patroni writes its
-endpoints, so it always points at the current leader; `tsdb-headless` gives
-StatefulSet pods stable DNS; `tsdb-replica` selects on the `role=replica` label
-Patroni maintains. Those label *values* are pinned in the Patroni config rather
-than inherited, because the defaults have changed across Patroni majors.
-
-**`updateStrategy: OnDelete`.** A database StatefulSet should not be rolled by a
-controller unsupervised — least of all one whose pod template is about to change
-PostgreSQL major versions. Pod replacement is a deliberate act here.
-
-**The app database is created after bootstrap, not in Patroni's
-`post_bootstrap` hook.** A failing bootstrap hook makes Patroni wipe the data
-directory and retry, which turns a one-line SQL mistake into an opaque crash
-loop.
-
----
-
-## The version matrix
-
-Upgrade compatibility lives in [`data/upgrade-matrix.json`](data/upgrade-matrix.json)
-as **data, not code**. Adding a supported path means editing JSON and citing a
-source; it does not mean editing Python. The published table is
-[`docs/matrix.md`](docs/matrix.md).
-
-Each row records a transition and what is known about it:
-
-```json
-{
-  "source_pg": "15", "source_ts": "2.28",
-  "target_pg": "15", "target_ts": "2.30",
-  "verdict": "no_image",
-  "reason": "No timescale/timescaledb-ha tag pairs PostgreSQL 15 with TimescaleDB 2.30. ...",
-  "steps": [],
-  "verified": true,
-  "evidence": null,
-  "references": ["https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000"]
-}
-```
-
-| Verdict | Meaning |
-|---|---|
-| `in_place` | The data directory can be upgraded without exporting the data. |
-| `dump_restore` | The data must be exported and reloaded. |
-| `unsupported` | Not a supported path. |
-| `no_image` | No published image exists for the target pair. |
-| `null` | **Not established.** The tooling refuses to act on it. |
-
-### What is verified, and what is not
-
-The loader enforces the rule that keeps this honest: **a row marked `verified`
-must carry a verdict and the `evidence` behind it** — the records of running
-that migration with this tool (`verify/harness.py`), once on an empty database
-and once on a seeded one, and for a PostgreSQL major change both again with
-`pg_upgrade --link`. A row that is not verified must be blank: no verdict, no
-reason, no evidence. `no_image` is the one exception, because the container
-registry answers it: such a row cites the registry listing in `references`.
-Otherwise `references` holds upstream issues and release notes that explain a
-verdict; they are never its proof.
-
-All 131 rows are verified: 126 by running them (98 same-PG, 28 that change
-major) and 5 `no_image` rows by the registry. Every record names one commit, on
-a clean tree, and each row's route is pinned by digest.
-
-Verified does not mean every run passed. On ten rows (pg13 2.1-2.6 and pg14
-2.5-2.6 same-PG, pg11 2.1 to pg13 and pg14) the seeded run fails the three
-fixture checks that need to alter a continuous aggregate created before 2.7.
-The upgrade completes and the data is intact; the row says so and gives the
-step. pg11 2.1 to pg15-pg18 pass seeded because those routes have to migrate the
-aggregate on the way (see "Old continuous aggregates").
-
-Known limits:
-
-- `--image-registry` reaches the registry anonymously, so a private mirror
-  needs `--use-cached-images`. No run went through a real mirror: the harness
-  uses a host that cannot resolve, and a registry that answers is stubbed in
-  the tests.
-- A registry that does not answer stops `apply` unless `--use-cached-images` is
-  given.
-- The reset of Patroni's state deletes `<scope>-sync` if present and labelled,
-  but synchronous mode was not measured.
-- That WAL archiving fails until `stanza-upgrade` has run is inferred from
-  pgBackRest checking the system identifier, not observed. The rest of the
-  backup advice is from pgBackRest's user guide.
-- The old-aggregate migration was run on one aggregate per database, through
-  2.15.3 on PostgreSQL 13 and, in a container, with a grant to restore. A
-  dependent view or a `time_bucket_ng` aggregate stops the run instead.
-
-### Which images actually exist
-
-[`data/images.json`](data/images.json) is generated by querying the Docker
-registry, not written by hand:
-
-```bash
-make images           # summarise the catalog
-make images-refresh   # re-query the registry and regenerate it
-```
-
-### What each image really installs
-
-An image's registry labels predict the TimescaleDB versions it ships, and the
-prediction is wrong in ways that strand databases: `pg15.18-ts2.28.3` is
-labelled from 2.12.2 but cannot install below 2.13.0, `pg12.22-ts2.11.2` ships
-1.7.5 and then 2.1.0 onwards with no 2.0 at all, and the oldest images carry no
-version labels. [`data/image-contents.json`](data/image-contents.json) records
-what each image this repository uses actually installs, measured with `ls` in a
-throwaway container (install script and shared object both present). `drift`
-and `plan` use a measured entry in place of the labels.
-
-```bash
-make image-contents                       # re-measure (images must be pulled)
-bash scripts/tsupgrade.sh contents show   # one line per image, holes visible
-```
-
-### Looking up a transition
-
-```bash
-make lookup FROM_PG=15.18 FROM_TS=2.28.3 TO_PG=15 TO_TS=2.30
-```
-
-Versions are matched at their natural unit — PostgreSQL major, TimescaleDB
-series — so a discovered `15.18` / `2.28.3` finds the row written as `15` /
-`2.28`. A row may pin an exact patch release, and then it must match exactly and
-takes precedence over the series-wide row around it.
-
-Exit codes are meant to be scripted against:
-
-| Code | Meaning |
-|---|---|
-| `0` | a verdict, verified and sourced |
-| `3` | a row exists but its verdict is not established |
-| `4` | no row at all — the matrix says nothing about this transition |
-| `1` | error |
-
-Codes `3` and `4` are deliberately different. "We have not established this" is
-not the same answer as "there is no such transition", and neither is permission
-to proceed.
-
-### Regenerating
-
-```bash
-make matrix-scaffold   # add transitions the catalog implies; existing rows are kept
-make matrix            # render docs/matrix.md
-make test              # unit tests over the loader, lookup and shipped data
-```
-
-`matrix-scaffold` never overwrites an existing row, so refreshing the catalog
-after a new TimescaleDB release adds the newly possible transitions and leaves
-verified work alone.
-
----
-
-## Preflight
+## 1. Preflight
 
 One command, run before you touch anything:
 
@@ -323,11 +117,17 @@ It answers, for the cluster you are actually pointed at:
 | Check | What it establishes |
 |---|---|
 | Cluster and namespace | Echoes back the context, API server, Kubernetes version and namespace, so you can confirm you are where you think you are. |
-| Target image exists | Queries the target's registry for the manifest. |
+| Target image exists | Queries the target's registry for the manifest. Under `apply`, every image the plan still has to run, by digest. |
 | Target image on nodes | Whether the image is already cached on each node. |
 | Running versions, per instance | PostgreSQL and TimescaleDB versions **queried from each database**, per member, and per database. |
-| Disk headroom | Free space where a dump would land, against the live database size. |
+| PostgreSQL patch level | Refuses the six patch releases that cannot load TimescaleDB (17.1, 16.5, 15.9, 14.14, 13.17, 12.21), and a target TimescaleDB that will not load on the server's minor. |
+| Disk headroom | Free space where a dump would land, against the live database size. Before a `pg_upgrade`, free space on ordinal 0 for the copy or link. |
+| Other extensions | Every other extension installed, and the libraries its C functions use, against what the target image ships. |
+| Collation | Warns when a hop changes glibc under a database whose text is sorted by a libc collation. |
+| WAL archiving | Before a `pg_upgrade`: flags `archive_mode = on`, since backups will not match the upgraded cluster. |
 | Permissions | Ownership, mode and writability of the data directory and dump path, plus PVC capacity, access modes and whether the storage class can expand. |
+| Drift | Each database against what its own image can install: `stranded` (the image cannot load the recorded version) and `ahead` (the image was rolled back under it) fail; `lagging` passes with an advisory. |
+| Update-script gates | Objects the update scripts would refuse: old continuous aggregates, aggregates on `time_bucket_ng`, user views on `timescaledb_information`. |
 | Matrix verdict | Looks the discovered versions up against the requested target. |
 
 Versions come from `current_setting('server_version')` and `pg_extension` — never
@@ -342,7 +142,8 @@ disagreement is reported rather than flattened into one confident answer.
 - Every connection opens with `PGOPTIONS=-c default_transaction_read_only=on`,
   so **PostgreSQL itself** rejects any statement that would write, whatever the
   SQL says.
-- Commands run inside pods are limited to `df`, `stat`, `id` and `test`.
+- Commands run inside pods are limited to `df`, `du`, `stat`, `id`, `test` and
+  `ls`.
 
 This is why "is the image pullable from this cluster?" reports `unknown` rather
 than `pass` when the image is not already cached: proving it would require
@@ -365,11 +166,12 @@ nobody has established is `unknown`, not approval.
 Registry auth failures and timeouts are **failures**, not unknowns, and every
 request carries an explicit timeout so nothing hangs a maintenance window. A
 registry that will not answer is never recorded as a registry that has no such
-image. Under `apply` the one way past it is the operator's choice, below.
+image. Under `apply` the one way past it is the operator's choice (see
+[Where images come from](#where-images-come-from)).
 
 ---
 
-## Plan and apply
+## 2. Plan
 
 `plan` decides and writes nothing; `apply` executes a plan and is the only
 command that writes. They are separate so a plan can be read, diffed and
@@ -378,7 +180,6 @@ approved before anything touches a cluster.
 ```bash
 bash scripts/tsupgrade.sh plan --from-pg 15.13 --from-ts 2.12.2 \
   --target-image timescale/timescaledb-ha:pg15.18-ts2.28.3 --output plan.json
-bash scripts/tsupgrade.sh apply plan.json --report report.json
 ```
 
 **A verified row is verified for its route.** Its records ran one route
@@ -400,11 +201,25 @@ route its own records ran; they are not joined into one, because no record
 ran the whole.
 
 A plan is a list of hops: one image the cluster must run, then one `ALTER
-EXTENSION timescaledb UPDATE TO '<v>'`. Each hop runs preflight against its
-image (any FAIL stops), rolls the StatefulSet onto it if needed (replicas
-first, primary last), updates every database in a fresh `psql -X` session,
-cycles client sessions so none keeps the old library loaded, and confirms
-every database on every instance reports the new version.
+EXTENSION timescaledb UPDATE TO '<v>'`. Known TimescaleDB bugs add stops: a
+database updated from below 2.15 stops at 2.27.2 on the way to 2.28.2/2.28.3
+([#10272](https://github.com/timescale/timescaledb/issues/10272)), and one on
+1.x stops at 2.1.1 on the way to 2.10.2 or later
+([#5789](https://github.com/timescale/timescaledb/issues/5789)).
+
+---
+
+## 3. Apply
+
+```bash
+bash scripts/tsupgrade.sh apply plan.json --report report.json
+```
+
+Each hop runs preflight against its image (any FAIL stops), rolls the
+StatefulSet onto it if needed (replicas first, primary last), updates every
+database in a fresh `psql -X` session, cycles client sessions so none keeps the
+old library loaded, and confirms every database on every instance reports the
+new version.
 
 `apply` refuses, having written nothing, when the cluster is not in the state
 the plan was made from, when an update step carries SQL other than the one
@@ -420,26 +235,9 @@ it had already done. It never retries or rolls back on its own.
 TimescaleDB must be at the source version, because a real upgrade has to
 cover them all.
 
-### Without `apply`: a script for any deployment
+---
 
-`apply` drives a Patroni StatefulSet itself, so it cannot run under an
-operator, which would fight it for the pods. The version stepping does not
-depend on Patroni, and it is the part operators leave to you: the stops for
-known TimescaleDB bugs, the images that ship each release, the release
-`pg_upgrade` needs on both majors, never running `update_extensions.sql`.
-`plan --format script` writes the plan as a commented shell script. It runs
-the `ALTER EXTENSION`s and the version checks with `psql -X` against the
-primary (`PG*` variables, `DATABASES`), and stops at each step only your
-deployment can do (rolling out an image, the `pg_upgrade`), saying exactly
-what that step must do.
-
-```bash
-bash scripts/tsupgrade.sh plan --from-pg 15.13 --from-ts 2.20.3 \
-  --target-image timescale/timescaledb-ha:pg15.18-ts2.28.3 --format script > upgrade.sh
-DATABASES="app metrics" PGHOST=... bash upgrade.sh
-```
-
-### Changing the PostgreSQL major
+## Changing the PostgreSQL major
 
 A target on a newer major is planned as a route of `pg_upgrade` hops between
 same-major segments, from the measured contents of the route's images (an
@@ -525,12 +323,52 @@ full backup (pgBackRest's "Upgrading PostgreSQL", for the 2.54–2.59 the
 images ship). The data directory keeps its path, so `pg1-path` does not
 change. The runbook and `apply`'s report say the same.
 
-**Where images come from.** Before its first hop, `apply` asks the registry for
-every image the plan has to run, by digest, the `pg_upgrade` images included, so
-a missing one shows up before anything stops. It asks once: a digest does not
-change, so an outage at a later hop does not stop a run whose images were
-confirmed. If an image is not there, `apply` stops. If the registry does not answer, `apply` also stops, says that the image
-may well be fine, and lists what can be done:
+---
+
+## Going back from a copy
+
+`tsupgrade rollback --report report.json --discard-writes-since-upgrade`
+undoes the last major upgrade in an `apply` report. It stops the cluster,
+puts `<data>.pg<old>` back in place (the new directory goes to
+`<data>.rolled-back-pg<new>-<its system identifier>`, so a later upgrade and
+rollback on the same disk does not collide with it), deletes the replicas'
+disks and Patroni's state, and starts the old image again, checking that the
+old system identifier is back. Every write since the upgrade is lost,
+extension updates included, which is why the flag is required. It refuses
+after `--link`, and after an upgrade that did not finish (whose report says
+how to start the old cluster instead).
+
+---
+
+## Without `apply`: a script for any deployment
+
+`apply` drives a Patroni StatefulSet itself, so it cannot run under an
+operator, which would fight it for the pods. The version stepping does not
+depend on Patroni, and it is the part operators leave to you: the stops for
+known TimescaleDB bugs, the images that ship each release, the release
+`pg_upgrade` needs on both majors, never running `update_extensions.sql`.
+`plan --format script` writes the plan as a commented shell script. It runs
+the `ALTER EXTENSION`s and the version checks with `psql -X` against the
+primary (`PG*` variables, `DATABASES`), and stops at each step only your
+deployment can do (rolling out an image, the `pg_upgrade`), saying exactly
+what that step must do.
+
+```bash
+bash scripts/tsupgrade.sh plan --from-pg 15.13 --from-ts 2.20.3 \
+  --target-image timescale/timescaledb-ha:pg15.18-ts2.28.3 --format script > upgrade.sh
+DATABASES="app metrics" PGHOST=... bash upgrade.sh
+```
+
+---
+
+## Where images come from
+
+Before its first hop, `apply` asks the registry for every image the plan has
+to run, by digest, the `pg_upgrade` images included, so a missing one shows up
+before anything stops. It asks once: a digest does not change, so an outage at
+a later hop does not stop a run whose images were confirmed. If an image is
+not there, `apply` stops. If the registry does not answer, `apply` also stops,
+says that the image may well be fine, and lists what can be done:
 
 - try again once the registry answers;
 - `--image-registry HOST/PATH` (or `$TSUPGRADE_IMAGE_REGISTRY`) runs the images
@@ -552,14 +390,18 @@ without the image will not start until the registry answers. `plan
 --image-registry` names the mirror in the runbook and the script; the plan file
 keeps the verified route either way.
 
-**Old continuous aggregates.** An aggregate from before 2.7 cannot cross the 2.25
-update, which also removes `cagg_migrate`, the only way to convert it. If a plan
-reaches 2.25 with one, `apply` stops before changing anything, says this came from
-a read-only check, and shows each aggregate: its database and name, what it is
-built on, its size and chunks, its jobs, the views on it and its grants. At a
-terminal it asks y/n; `--migrate-caggs` is the same yes for scripts; without either
-it stops. Agreeing does not run anything yet: an old database cannot migrate (2.1.1
-has no `cagg_migrate`), so `apply` does it at the first stop on the route from 2.14
+---
+
+## Old continuous aggregates
+
+An aggregate from before 2.7 cannot cross the 2.25 update, which also removes
+`cagg_migrate`, the only way to convert it. If a plan reaches 2.25 with one,
+`apply` stops before changing anything, says this came from a read-only check,
+and shows each aggregate: its database and name, what it is built on, its size
+and chunks, its jobs, the views on it and its grants. At a terminal it asks
+y/n; `--migrate-caggs` is the same yes for scripts; without either it stops.
+Agreeing does not run anything yet: an old database cannot migrate (2.1.1 has
+no `cagg_migrate`), so `apply` does it at the first stop on the route from 2.14
 to 2.24, with:
 
 ```sql
@@ -572,20 +414,88 @@ cagg_migrate('<aggregate>')`, which is what TimescaleDB's own hint says, is a tr
 The call drops the old aggregate for good, so have a backup. It also drops grants
 without a word, so `apply` puts them back, with the owner, and runs the refresh the
 call asks for. A refresh policy is kept under a new job id. Some cases stop even
-with the flag: a view on the aggregate (the call fails partway, leaves `<name>_old`
-behind still blocking 2.25, and cannot be retried, so drop the view first), an
-aggregate on `time_bucket_ng`, and a route with no stop from 2.14 to 2.24.
+with the flag: a view on the aggregate, an aggregate on `time_bucket_ng`, and a
+route with no stop from 2.14 to 2.24.
 
-**Going back from a copy.** `tsupgrade rollback --report report.json
---discard-writes-since-upgrade` undoes the last major upgrade in an `apply`
-report. It stops the cluster, puts `<data>.pg<old>` back in place (the new
-directory goes to `<data>.rolled-back-pg<new>-<its system identifier>`, so a
-later upgrade and rollback on the same disk does not collide with it),
-deletes the replicas' disks and Patroni's state, and starts the old image
-again, checking that the old system identifier is back. Every write since the upgrade is lost, extension
-updates included, which is why the flag is required. It refuses after
-`--link`, and after an upgrade that did not finish (whose report says how to
-start the old cluster instead).
+A view on the aggregate makes the call fail partway: it leaves `<name>_old` behind,
+still blocking 2.25, and cannot be retried. So `apply` names each view and the
+aggregate it is on, and prints the commands, for this cluster, to save it with
+`pg_dump --schema-only -t`, drop it, and recreate it from that file once `apply` has
+finished (and refresh it, if it is a materialized view). The file keeps the view's
+definition, owner, grants and comment. That sequence is measured on 2.15.3, for a
+view and a materialized view; loading the file on the new major relies on pg_dump
+output loading into newer PostgreSQL, which its documentation states.
+
+If the check cannot read a database, or finds no primary, `apply` stops at the
+start too, says why with psql's own error, and that nothing has been changed:
+finding out at the 2.25 hop would be after the pg_upgrades before it.
+
+---
+
+## The version matrix
+
+Which upgrades are established lives in
+[`data/upgrade-matrix.json`](data/upgrade-matrix.json), published as
+[`docs/matrix.md`](docs/matrix.md). The format, the verification rule, the
+image catalog and `make lookup` are in
+[`docs/matrix-method.md`](docs/matrix-method.md).
+
+**What verified means.** A row is verified only by running that migration with
+this tool on a disposable kind cluster (`verify/harness.py`): once on an empty
+database and once on a seeded one, and for a PostgreSQL major change both again
+with `pg_upgrade --link`. Documentation and changelogs are cited, never taken as
+proof. The one exception is `no_image`, which the container registry answers.
+
+All 131 rows are verified: 126 by running them (98 same-PG, 28 that change
+major) and 5 `no_image` rows by the registry. Every record names one commit, on
+a clean tree, and each row's route is pinned by digest. Each row is proven at
+the PostgreSQL minors and image digests its records name, on a fixture of about
+50,000 rows: it shows that the route works, not how long it takes on your data.
+
+Verified does not mean every run passed. On ten rows (pg13 2.1-2.6 and pg14
+2.5-2.6 same-PG, pg11 2.1 to pg13 and pg14) the seeded run fails the three
+fixture checks that need to alter a continuous aggregate created before 2.7.
+The upgrade completes and the data is intact; the row says so and gives the
+step. pg11 2.1 to pg15-pg18 pass seeded because those routes have to migrate the
+aggregate on the way (see [Old continuous aggregates](#old-continuous-aggregates)).
+
+---
+
+## Known limits
+
+- The archived Helm chart's layout is not supported by `apply` and `rollback`
+  yet (see [Who can use it today](#who-can-use-it-today)).
+- `--image-registry` reaches the registry anonymously, so a private mirror
+  needs `--use-cached-images`. No run went through a real mirror: the harness
+  uses a host that cannot resolve, and a registry that answers is stubbed in
+  the tests.
+- A registry that does not answer stops `apply` unless `--use-cached-images` is
+  given.
+- The reset of Patroni's state deletes `<scope>-sync` if present and labelled,
+  but synchronous mode was not measured.
+- That WAL archiving fails until `stanza-upgrade` has run is inferred from
+  pgBackRest checking the system identifier, not observed. The rest of the
+  backup advice is from pgBackRest's user guide.
+- The old-aggregate migration was run on one aggregate per database, through
+  2.15.3 on PostgreSQL 13 and, in a container, with a grant to restore. A
+  dependent view or a `time_bucket_ng` aggregate stops the run instead.
+- The disk check before a `pg_upgrade` measures the data directory with `du`
+  under preflight's exec timeout; on a very large database it reports
+  `unknown`, not a failure.
+
+---
+
+## Try it locally
+
+```bash
+make up      # a kind cluster with TimescaleDB under Patroni
+make smoke   # connect, create a hypertable, insert, query
+make down    # destroy everything
+```
+
+Requirements, seeding, knobs and how the cluster is built:
+[`docs/local-cluster.md`](docs/local-cluster.md). The verification harness that
+establishes matrix rows: [`verify/README.md`](verify/README.md).
 
 ---
 
@@ -594,36 +504,44 @@ start the old cluster instead).
 ```
 cluster/           kind cluster definition (node image pinned by digest)
 deploy/            Kubernetes manifests with __PLACEHOLDER__ tokens
-scripts/           the real logic; the Makefile is just a table of contents
+scripts/           shell entry points; the Makefile is just a table of contents
   lib.sh           shared config, rendering, psql/kubectl helpers
+  tsupgrade.sh     runs the CLI with a Python 3.8+ it finds
 data/
-  images.json      generated: which image tags the registry actually serves
+  images.json           generated: which image tags the registry actually serves
   image-contents.json   generated: what specific images can really install
   upgrade-matrix.json   the compatibility matrix
-docs/matrix.md     generated: the published version table
+docs/
+  matrix.md             generated: the published version table
+  matrix-method.md      the matrix's format and the verification rule
+  local-cluster.md      the local test cluster
 tools/tsupgrade/   the CLI (`python -m tsupgrade`), standard library only
   preflight.py     the read-only pre-upgrade checks
   plan.py          builds the runbook; writes nothing
   majors.py        routes across PostgreSQL majors (pg_upgrade hops)
-  apply.py         executes a plan; the only module that writes
-verify/            the seeded fixture and verification-run evidence
-tests/             unit tests over the loader, lookup and shipped data
+  steps.py         the plan's step types, read from JSON in one place
+  apply.py         executes a plan
+  rollback.py      undoes the last copy-mode major upgrade
+  scripts/         the shell scripts the pg_upgrade and rollback pods run
+verify/            the verification harness, its fixture and the run evidence
+tests/             unit tests, plus container tests on real pg_upgrade binaries
 ```
 
 ---
 
 ## Roadmap
 
-- [x] **Phase 1** — local test harness: `make up`, `make down`, seeding, smoke test
-- [x] **Phase 2** — version matrix as data, with a loader, lookup and published table
-- [x] **Phase 3** — read-only preflight checks against a live instance
-- [x] **Phase 4** — drift classifier, update-script gates, measured image contents
-- [x] **Phase 5** — `plan` and `apply` (extension updates and image rollouts)
+- [x] Local test cluster: `make up`, `make down`, seeding, smoke test
+- [x] Version matrix as data, with a loader, lookup and published table
+- [x] Read-only preflight checks against a live instance
+- [x] Drift classifier, update-script gates, measured image contents
+- [x] `plan` and `apply` (extension updates and image rollouts)
 - [x] Verification harness; every row established by running it with the
       upgrader, or by the registry where no image exists
 - [x] PostgreSQL major upgrades (`pg_upgrade` under Patroni, copy or `--link`)
 - [x] Rollback of a copy-mode major upgrade (`tsupgrade rollback`)
 - [x] `plan --format script`, for deployments `apply` cannot drive
+- [ ] The archived Helm chart's layout, verified as a second harness topology
 - [ ] Rehearsal on a copy of your own data
 - [ ] Maintenance-window estimation
 
