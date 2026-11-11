@@ -62,7 +62,7 @@ no tool at all.
 
 | Your deployment | `preflight`, `plan` | `plan --format script` | `apply`, `rollback` |
 |---|---|---|---|
-| A Patroni StatefulSet on a `timescaledb-ha` image, `OnDelete`, data at `/home/postgres/pgdata/data` (as in [`deploy/`](deploy/)) | yes | yes | yes |
+| A Patroni StatefulSet on a `timescaledb-ha` image, `OnDelete`, data on one volume claim (as in [`deploy/`](deploy/)) | yes | yes | yes |
 | The archived `timescaledb-single` chart | yes, with `--selector` | yes | **not yet** (below) |
 | An operator (CloudNativePG, StackGres, Zalando…) | `plan`; preflight not tried | yes | no: the operator would fight `apply` for the pods |
 
@@ -76,8 +76,9 @@ this tool:
 - the template hard-codes `updateStrategy: RollingUpdate`, so `apply` refuses
   the StatefulSet, and patching it to `OnDelete` is undone by the next
   `helm upgrade`;
-- the data directory is `/var/lib/postgresql/data`, while `apply` and
-  `rollback` look for `/home/postgres/pgdata/data`;
+- the data directory is `/var/lib/postgresql/data`. `apply` now reads it
+  from the servers and `rollback` from the report (`--data-dir` overrides
+  both); measured in a container, not yet on the chart;
 - WAL is on a second volume by default, which the `pg_upgrade` pod does not
   mount;
 - Patroni's labels are `app`, `cluster-name` and `release`, so pass
@@ -254,7 +255,13 @@ bash scripts/tsupgrade.sh plan --from-pg 12.22 --from-ts 2.11.2 \
   --target-image timescale/timescaledb-ha:pg16.15-ts2.30.1 --output plan.json
 ```
 
-**How `apply` runs one.** Under Patroni it moves the leader to ordinal 0,
+**How `apply` runs one.** Before anything stops, it reads the data directory
+from the servers (`data_directory`, ordinal 0's first). It refuses if they
+disagree, or if the path is not below the mount of one of the StatefulSet's
+volume claim templates: the upgrade pod mounts that claim, and `pg_upgrade`
+writes beside the directory. `--data-dir` overrides it. Only when no server
+answers does it fall back to the images' `/home/postgres/pgdata/data`, and
+the report says so. Under Patroni it then moves the leader to ordinal 0,
 scales the StatefulSet to 0, and runs `pg_upgrade` in a pod on ordinal 0's
 disk, scheduled like the database pods. That pod's `initdb` takes the old
 cluster's data checksums, encoding, locale and locale provider (from its
@@ -336,7 +343,8 @@ disks and Patroni's state, and starts the old image again, checking that the
 old system identifier is back. Every write since the upgrade is lost,
 extension updates included, which is why the flag is required. It refuses
 after `--link`, and after an upgrade that did not finish (whose report says
-how to start the old cluster instead).
+how to start the old cluster instead). The data directory is the one the
+report names; a report without one is refused unless `--data-dir` gives it.
 
 ---
 

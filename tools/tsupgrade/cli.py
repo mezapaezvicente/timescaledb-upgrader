@@ -614,7 +614,8 @@ def cmd_rollback(args: argparse.Namespace) -> int:
         return EXIT_ERROR
     opts = ApplyOptions(context=args.context, namespace=args.namespace, selector=args.selector,
                         container=args.container, statefulset=args.statefulset,
-                        timeout=args.timeout, rollout_timeout=args.rollout_timeout)
+                        timeout=args.timeout, rollout_timeout=args.rollout_timeout,
+                        data_dir=args.data_dir)
     print("ROLLBACK: {0}".format(LOST_WRITES), file=sys.stderr)
     try:
         result = rollback(report, opts, discard_writes=args.discard_writes)
@@ -660,6 +661,7 @@ def cmd_apply(args: argparse.Namespace) -> int:
         selector=args.selector,
         container=args.container,
         statefulset=args.statefulset,
+        data_dir=args.data_dir,
         databases=tuple(args.database),
         acknowledge_verification=args.acknowledge_verification_run,
         matrix_path=args.matrix,
@@ -947,6 +949,11 @@ def build_parser() -> argparse.ArgumentParser:
     apply.add_argument("--selector", default="application=patroni")
     apply.add_argument("--container", default="timescaledb")
     apply.add_argument("--statefulset", default="tsdb")
+    apply.add_argument(
+        "--data-dir", default=None, dest="data_dir", metavar="PATH",
+        help="the data directory, for a major upgrade (default: what the servers report, "
+        "which must agree)",
+    )
     apply.add_argument("--matrix", default=None)
     apply.add_argument("--timeout", type=float, default=30.0)
     apply.add_argument(
@@ -989,6 +996,8 @@ def build_parser() -> argparse.ArgumentParser:
     back.add_argument("--selector", default="application=patroni")
     back.add_argument("--container", default="timescaledb")
     back.add_argument("--statefulset", default="tsdb")
+    back.add_argument("--data-dir", default=None, dest="data_dir", metavar="PATH",
+                      help="the data directory (default: the one the report names)")
     back.add_argument("--timeout", type=float, default=30.0)
     back.add_argument("--rollout-timeout", type=float, default=600.0, dest="rollout_timeout")
     back.add_argument("--json", action="store_true")

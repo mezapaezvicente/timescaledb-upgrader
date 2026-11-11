@@ -16,7 +16,8 @@ import subprocess
 
 import pytest
 
-from tsupgrade.apply import _PG_UPGRADE_SCRIPT, ApplyOptions, apply_plan, check_plan
+from tsupgrade.apply import (_PG_UPGRADE_SCRIPT, ApplyOptions, ApplyRefused, apply_plan,
+                             check_plan, render_report)
 from tsupgrade.plan import PLAN_FORMAT
 from test_apply import FakeKube, _all_pass
 
@@ -45,6 +46,8 @@ class MajorKube(FakeKube):
         self.fail_pvc = fail_pvc
         self.dcs_extra = []
         self.spec_seen = None
+        # The StatefulSet's claim templates, as the container mounts them.
+        self.mounts = [{"name": "pgdata", "mountPath": "/home/postgres/pgdata"}]
 
     def json(self, args, namespaced=True):
         if args[:2] == ["get", "statefulset"]:
@@ -54,9 +57,9 @@ class MajorKube(FakeKube):
                 "template": {"spec": {
                     "securityContext": {"runAsUser": 1000, "fsGroup": 1000},
                     "containers": [{"name": "timescaledb", "image": self.template,
-                                    "volumeMounts": [{"name": "pgdata",
-                                                      "mountPath": "/home/postgres/pgdata"}]}]}},
-                "volumeClaimTemplates": [{"metadata": {"name": "pgdata"}}]}}
+                                    "volumeMounts": self.mounts + [
+                                        {"name": "socket", "mountPath": "/var/run/postgresql"}]}]}},
+                "volumeClaimTemplates": [{"metadata": {"name": m["name"]}} for m in self.mounts]}}
         if args[:2] == ["get", "endpoints,configmaps"]:
             names = [("Endpoints", "tsdb"), ("Endpoints", "tsdb-config")] + self.dcs_extra
             return {"items": [{"kind": k, "metadata": {"name": n}} for k, n in names]}
@@ -550,7 +553,8 @@ def test_a_finished_major_upgrade_reports_what_a_rollback_needs():
     detail = report["steps"][0]["detail"]
     assert detail == {
         "from_pg": 12, "to_pg": 13, "link": False, "old_image": OLD, "run_image": NEW,
-        "data": "/home/postgres/pgdata/data", "kept": "/home/postgres/pgdata/data.pg12",
+        "data": "/home/postgres/pgdata/data", "data_from": "read from tsdb-0's server",
+        "kept": "/home/postgres/pgdata/data.pg12",
         "replicas": 2, "claim": "pgdata", "scope": "tsdb",
         "system_identifier_before": "7000000000000000001",
     }
@@ -619,3 +623,95 @@ def test_one_instance_has_no_replica_disk_to_delete():
     assert not any(w.startswith("delete pvc") for w in kube.writes)
     assert "scale 1" in kube.writes
     assert report["steps"][0]["detail"]["replicas"] == 1
+
+
+# --- R25: the data directory comes from the cluster -----------------------------
+
+CHART_DATA = "/var/lib/postgresql/data"
+
+
+def _chart_kube(**kw):
+    """The archived timescaledb-single chart's layout: the claim is mounted at
+    /var/lib/postgresql and PGDATA is below it."""
+    kube = MajorKube(**kw)
+    kube.mounts = [{"name": "storage-volume", "mountPath": "/var/lib/postgresql"}]
+    kube.data_directory = CHART_DATA
+    return kube
+
+
+def _env(kube):
+    return {e["name"]: e["value"] for e in kube.spec_seen["spec"]["containers"][0]["env"]}
+
+
+def test_the_data_directory_is_read_from_the_servers_on_a_chart_layout():
+    kube = _chart_kube()
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+    spec = kube.spec_seen["spec"]
+    assert _env(kube)["DATA"] == CHART_DATA
+    assert spec["containers"][0]["volumeMounts"] == [
+        {"name": "storage-volume", "mountPath": "/var/lib/postgresql"}]
+    assert spec["volumes"][0]["persistentVolumeClaim"]["claimName"] == "storage-volume-tsdb-0"
+    assert "delete pvc storage-volume-tsdb-1" in kube.writes
+    detail = report["steps"][0]["detail"]
+    assert detail["data"] == CHART_DATA and detail["kept"] == CHART_DATA + ".pg12"
+    assert report["data_directory"] == {"path": CHART_DATA, "from": "read from tsdb-0's server"}
+    assert ("data directory: {0} (read from tsdb-0's server)".format(CHART_DATA)
+            in report["steps"][0]["output"])
+    assert "data dir  : {0} (read from tsdb-0's server)".format(CHART_DATA) in render_report(report)
+
+
+def test_instances_that_disagree_on_the_data_directory_are_refused():
+    kube = _chart_kube()
+    kube.data_directories = {"tsdb-1": "/var/lib/postgresql/other"}
+    with pytest.raises(ApplyRefused, match="different data directories .*tsdb-1=/var/lib/postgresql/other"):
+        _apply(_plan(), kube)
+    assert kube.writes == []
+
+
+@pytest.mark.parametrize("data", ["/pgdata/data", "/var/lib/postgresql", "/var/lib/postgresqlx/data"])
+def test_a_data_directory_not_below_a_claims_mount_is_refused(data):
+    """Equal to the mount is refused too: pg_upgrade puts <data>.new and
+    <data>.pg<old> beside it, which would land outside the volume."""
+    kube = _chart_kube()
+    kube.data_directory = data
+    with pytest.raises(ApplyRefused, match="not below the mount of any volume claim template"):
+        _apply(_plan(), kube)
+    assert kube.writes == []
+
+
+def test_data_dir_overrides_what_the_servers_report():
+    kube = _chart_kube()
+    kube.data_directory = "/somewhere/else"
+    report = _apply(_plan(), kube, data_dir="/var/lib/postgresql/pgdata")
+    assert report["result"] == "pass", report.get("failure")
+    assert _env(kube)["DATA"] == "/var/lib/postgresql/pgdata"
+    assert report["data_directory"]["from"] == "given with --data-dir"
+
+
+def test_the_images_default_is_the_fallback_only_when_no_server_says_and_the_report_says_so():
+    kube = MajorKube()
+    kube.data_directory = ""
+    report = _apply(_plan(), kube)
+    assert report["result"] == "pass", report.get("failure")
+    assert _env(kube)["DATA"] == "/home/postgres/pgdata/data"
+    assert "no server reported it" in report["data_directory"]["from"]
+    assert "--data-dir" in report["data_directory"]["from"]
+
+
+def test_the_upgrade_pod_repeats_the_mounts_subpath():
+    kube = _chart_kube()
+    kube.mounts = [{"name": "storage-volume", "mountPath": "/var/lib/postgresql", "subPath": "pg"}]
+    _apply(_plan(), kube)
+    assert kube.spec_seen["spec"]["containers"][0]["volumeMounts"] == [
+        {"name": "storage-volume", "mountPath": "/var/lib/postgresql", "subPath": "pg"}]
+
+
+def test_a_plan_without_a_major_upgrade_does_not_read_the_data_directory():
+    kube = _chart_kube()
+    kube.data_directories = {"tsdb-1": "/elsewhere"}
+    plan = _plan()
+    plan["steps"] = plan["steps"][1:]
+    plan["target"]["pg"] = "12.22"
+    report = _apply(plan, kube)
+    assert "data_directory" not in report

@@ -38,17 +38,20 @@ sit where the new one would go.
 from __future__ import annotations
 
 import time
+from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional
 
 from .apply import (
     ApplyOptions,
     _Cluster,
+    _data_mount,
     _dcs_objects,
     _kubectl,
     _patroni_scope,
     _pod_phase,
     _run_on_ordinal_0,
     _StepFailed,
+    _volume,
     load_script,
 )
 from .preflight import Kube, PreflightError
@@ -83,10 +86,9 @@ def last_major_upgrade(report: Any) -> Dict[str, Any]:
             "the last major upgrade in the report did not finish ({0}); its failure says what "
             "it left and how to start the old cluster again".format(last.get("status"))])
     detail = last.get("detail")
-    if not isinstance(detail, dict) or not detail.get("kept") or not detail.get("old_image"):
-        raise RollbackRefused(["the report does not say where the old directory is or which "
-                               "image ran before; it predates rollback (apply it again with "
-                               "this version to get one)"])
+    if not isinstance(detail, dict) or not detail.get("old_image"):
+        raise RollbackRefused(["the report does not say which image ran before; it predates "
+                               "rollback (apply it again with this version to get one)"])
     if detail.get("link"):
         raise RollbackRefused([
             "PostgreSQL {0} -> {1} used --link: the old directory shares its files with the "
@@ -109,6 +111,14 @@ def rollback(
         raise RollbackRefused([LOST_WRITES + "; say so with --discard-writes-since-upgrade"])
     detail = last_major_upgrade(report)
     old, new = int(detail["from_pg"]), int(detail["to_pg"])
+    # The report's data directory, unless --data-dir says otherwise; never assumed.
+    data = opts.data_dir or detail.get("data")
+    if not data:
+        raise RollbackRefused(["the report does not say where the data directory is; give it "
+                               "with --data-dir"])
+    kept = (detail.get("kept") if not opts.data_dir and detail.get("kept")
+            else "{0}.pg{1}".format(data, old))
+    opts = replace(opts, data_dir=data)
     kube = kube or Kube(opts.context, opts.namespace, opts.timeout)
     cluster = _Cluster(kube, opts, sleep, clock)
 
@@ -130,13 +140,18 @@ def rollback(
     if others:
         raise RollbackRefused(["the pod selector {0} also matches {1}, which are not Patroni's "
                                "objects for scope {2}".format(opts.selector, ", ".join(others), scope)])
+    sts = kube.json(["get", "statefulset", opts.statefulset])
+    if _data_mount(sts, opts, data) is None:
+        raise RollbackRefused(["the data directory {0} is not below the mount of any volume claim "
+                               "template of statefulset/{1}".format(data, opts.statefulset)])
 
     output: List[str] = ["going back from PostgreSQL {0} (system identifier {1}) to {2}: {3}".format(
         new, sysid, old, LOST_WRITES)]
     result: Dict[str, Any] = {"rollback_format": ROLLBACK_FORMAT, "from_pg": new, "to_pg": old,
                               "lost": LOST_WRITES, "output": output}
     try:
-        _go_back(cluster, kube, opts, detail, scope, sysid, output)
+        _go_back(cluster, kube, opts, sts, dict(detail, data=data, kept=kept), scope, sysid,
+                 output)
         result["result"] = "pass"
     except (_StepFailed, PreflightError) as exc:
         result["result"] = "fail"
@@ -146,11 +161,10 @@ def rollback(
     return result
 
 
-def _go_back(cluster: _Cluster, kube: Kube, opts: ApplyOptions, detail: Dict[str, Any],
-             scope: str, sysid: str, output: List[str]) -> None:
+def _go_back(cluster: _Cluster, kube: Kube, opts: ApplyOptions, sts: Dict[str, Any],
+             detail: Dict[str, Any], scope: str, sysid: str, output: List[str]) -> None:
     old, new, replicas = int(detail["from_pg"]), int(detail["to_pg"]), int(detail["replicas"])
-    sts = kube.json(["get", "statefulset", opts.statefulset])
-    claim = detail.get("claim") or "pgdata"
+    claim = _volume(sts, opts)["name"]
     pod = "{0}-rollback-{1}-{2}".format(opts.statefulset, new, old)
     if _pod_phase(kube, pod) is not None:
         raise _StepFailed("pod {0} is left from an earlier run; read its log, delete it ({1}) "

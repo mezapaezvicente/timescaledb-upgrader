@@ -69,9 +69,9 @@ def _report(**detail):
         {"hop": 2, "action": "update_extension", "status": "done", "summary": "", "output": []}]}
 
 
-def _rollback(report, kube, **kw):
+def _rollback(report, kube, data_dir=None, **kw):
     clock = Clock()
-    return rollback(report, ApplyOptions(poll_interval=1, rollout_timeout=5,
+    return rollback(report, ApplyOptions(poll_interval=1, rollout_timeout=5, data_dir=data_dir,
                                          selector="application=patroni,cluster-name=tsdb"),
                     kube=kube, sleep=clock.sleep, clock=clock, **kw)
 
@@ -140,6 +140,49 @@ def test_apply_then_rollback_round_trips_the_report():
     report = _apply(_plan(), MajorKube())
     kube = UpgradedKube()
     assert _rollback(json.loads(json.dumps(report)), kube, discard_writes=True)["result"] == "pass"
+
+
+def _no_data(report):
+    for key in ("data", "kept"):
+        report["steps"][0]["detail"].pop(key)
+    return report
+
+
+def test_rollback_takes_the_data_directory_from_the_report():
+    kube = UpgradedKube()
+    kube.mounts = [{"name": "storage-volume", "mountPath": "/var/lib/postgresql"}]
+    report = _report(data="/var/lib/postgresql/data", kept="/var/lib/postgresql/data.pg12",
+                     claim="storage-volume")
+    result = _rollback(report, kube, discard_writes=True)
+    assert result["result"] == "pass", result.get("failure")
+    env = {e["name"]: e["value"] for e in kube.spec_seen["spec"]["containers"][0]["env"]}
+    assert env["DATA"] == "/var/lib/postgresql/data" and env["KEPT"] == "/var/lib/postgresql/data.pg12"
+    assert kube.spec_seen["spec"]["volumes"][0]["persistentVolumeClaim"]["claimName"] == (
+        "storage-volume-tsdb-0")
+    assert "delete pvc storage-volume-tsdb-1" in kube.writes
+
+
+def test_rollback_refuses_a_report_without_a_data_directory():
+    kube = UpgradedKube()
+    with pytest.raises(RollbackRefused, match="give it with --data-dir"):
+        _rollback(_no_data(_report()), kube, discard_writes=True)
+    assert kube.writes == []
+
+
+def test_data_dir_stands_in_for_a_report_without_one_and_overrides_one_that_has_it():
+    for report in (_no_data(_report()), _report(data="/home/postgres/pgdata/wrong")):
+        kube = UpgradedKube()
+        result = _rollback(report, kube, data_dir="/home/postgres/pgdata/pg", discard_writes=True)
+        assert result["result"] == "pass", result.get("failure")
+        env = {e["name"]: e["value"] for e in kube.spec_seen["spec"]["containers"][0]["env"]}
+        assert env["DATA"] == "/home/postgres/pgdata/pg" and env["KEPT"] == "/home/postgres/pgdata/pg.pg12"
+
+
+def test_rollback_refuses_a_data_directory_outside_every_claim():
+    kube = UpgradedKube()
+    with pytest.raises(RollbackRefused, match="not below the mount"):
+        _rollback(_report(data="/var/lib/postgresql/data"), kube, discard_writes=True)
+    assert kube.writes == []
 
 
 # --- the swap script, on a real disk ------------------------------------------

@@ -33,8 +33,8 @@ pytestmark = pytest.mark.skipif(not _docker_ready(), reason="Docker or {0} not a
 
 SETUP = r"""
 set -e
-mkdir -p /tmp/pg
-/usr/lib/postgresql/12/bin/initdb -D /tmp/pg/data -U postgres -E UTF8 --locale=C.UTF-8 \
+mkdir -p "$(dirname {data})"
+/usr/lib/postgresql/12/bin/initdb -D {data} -U postgres -E UTF8 --locale=C.UTF-8 \
   --data-checksums >/dev/null
 {extra}
 cat > /tmp/pg_upgrade.sh <<'__TSUPGRADE_EOF__'
@@ -42,15 +42,15 @@ cat > /tmp/pg_upgrade.sh <<'__TSUPGRADE_EOF__'
 __TSUPGRADE_EOF__
 set +e
 FROM=12 TO=13 PG_BIN_OLD=/usr/lib/postgresql/12/bin PG_BIN_NEW=/usr/lib/postgresql/13/bin \
-DATA=/tmp/pg/data LINK={link} ENCODING=UTF8 LC_COLLATE=C.UTF-8 LC_CTYPE=C.UTF-8 \
+DATA={data} LINK={link} ENCODING=UTF8 LC_COLLATE=C.UTF-8 LC_CTYPE=C.UTF-8 \
 LOCALE_PROVIDER=libc PROVIDER_LOCALE= bash /tmp/pg_upgrade.sh
 echo "exit $?"
-cat /tmp/pg/data/PG_VERSION 2>/dev/null | sed 's/^/PG_VERSION /'
+cat {data}/PG_VERSION 2>/dev/null | sed 's/^/PG_VERSION /'
 """
 
 
-def _run(link: str = "", extra: str = "") -> str:
-    program = SETUP.format(script=_PG_UPGRADE_SCRIPT, link=link, extra=extra)
+def _run(link: str = "", extra: str = "", data: str = "/tmp/pg/data") -> str:
+    program = SETUP.format(script=_PG_UPGRADE_SCRIPT, link=link, extra=extra, data=data)
     # Bytes, not text: on Windows text mode would send CRLF into bash.
     done = subprocess.run(["docker", "run", "--rm", "-i", "--entrypoint", "bash", IMAGE, "-s"],
                           input=program.encode("utf-8"), capture_output=True, timeout=600)
@@ -87,3 +87,12 @@ def test_a_real_check_failure_leaves_the_old_cluster_as_it_was():
     assert "pg_upgrade --check failed" in out
     assert "old cluster disabled" not in out and "moved" not in out
     assert "PG_VERSION 12" in out
+
+
+def test_a_real_upgrade_at_the_charts_data_directory():
+    """R25: the archived chart's PGDATA, /var/lib/postgresql/data, with the
+    volume mounted at /var/lib/postgresql. The kept directory lands beside it."""
+    out = _run(data="/var/lib/postgresql/data")
+    assert "exit 0" in out, out
+    assert "PG_VERSION 13" in out
+    assert "upgraded to PostgreSQL 13; the old data directory is /var/lib/postgresql/data.pg12" in out
