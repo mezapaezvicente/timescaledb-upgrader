@@ -7,6 +7,9 @@ CI rather than in front of someone mid-maintenance-window.
 
 from __future__ import annotations
 
+import os
+import warnings
+
 import pytest
 
 from tsupgrade.evidence import load_record, staleness
@@ -241,16 +244,74 @@ def stale_records(entries, git=_git):
     return found
 
 
+class StaleRecordsWarning(UserWarning):
+    """Cited records that no longer speak for the code (R24)."""
+
+
+def release_context(environ=None, git=_git):
+    """True where a stale record must fail: ``TSUPGRADE_RELEASE=1`` (set by
+    ``make release-check``), or a checkout of a tagged release."""
+    environ = os.environ if environ is None else environ
+    if environ.get("TSUPGRADE_RELEASE") == "1":
+        return True
+    return bool(git("tag", "--points-at", "HEAD", "--list", "v*"))
+
+
+def check_freshness(stale, release):
+    """Fail in a release context; elsewhere warn with the count and the first
+    few, so a development branch stays green but says what a release needs."""
+    if not stale:
+        return
+    lines = ["{0} [{1}]: {2}".format(*s) for s in stale[:20]]
+    if release:
+        raise AssertionError(
+            "{0} cited records are stale; re-run them before a release:\n{1}".format(
+                len(stale), "\n".join(lines)
+            )
+        )
+    warnings.warn(StaleRecordsWarning(
+        "{0} cited records are stale; `make release-check` fails until they are "
+        "re-run. First {1}:\n{2}".format(len(stale), min(len(stale), 5), "\n".join(lines[:5]))
+    ))
+
+
 def test_every_cited_record_ran_the_code_that_ships():
     """R5: verdicts must come from the code that ships. Enforced once a
     release is tagged (every row re-run, then `git tag v...`); until then the
-    re-runs are still to come, which TODO.md tracks."""
+    re-runs are still to come, which TODO.md tracks. R24: it fails only in a
+    release context; on a development branch it warns."""
     if _git("rev-parse", "HEAD") is None:
         pytest.skip("not a git checkout")
     if not _git("tag", "--list", "v*"):
         pytest.skip("no release tagged yet: re-run every row, then tag (R5)")
-    stale = stale_records(load_matrix())
-    assert not stale, "\n".join("{0} [{1}]: {2}".format(*s) for s in stale[:20])
+    check_freshness(stale_records(load_matrix()), release_context())
+
+
+def test_a_stale_record_warns_outside_a_release():
+    stale = [("pg16/ts2.28 -> pg16/ts2.30", "empty", "ran abc12345; changed since by def5678")]
+    with pytest.warns(StaleRecordsWarning, match="1 cited records are stale"):
+        check_freshness(stale, release=False)
+
+
+def test_a_stale_record_fails_in_a_release():
+    stale = [("pg16/ts2.28 -> pg16/ts2.30", "empty", "ran abc12345; changed since by def5678")]
+    with pytest.raises(AssertionError, match=r"pg16/ts2.28 -> pg16/ts2.30 \[empty\]"):
+        check_freshness(stale, release=True)
+
+
+def test_fresh_records_pass_in_both_contexts():
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        check_freshness([], release=False)
+        check_freshness([], release=True)
+
+
+def test_the_release_context_is_the_variable_or_a_tagged_checkout():
+    untagged = lambda *a: ""
+    assert release_context({"TSUPGRADE_RELEASE": "1"}, git=untagged)
+    assert not release_context({}, git=untagged)
+    assert not release_context({"TSUPGRADE_RELEASE": "0"}, git=untagged)
+    assert release_context({}, git=lambda *a: "v0.1.0")
 
 
 def test_the_freshness_rule_catches_a_record_older_than_the_code():

@@ -452,6 +452,11 @@ a clean tree, and each row's route is pinned by digest. Each row is proven at
 the PostgreSQL minors and image digests its records name, on a fixture of about
 50,000 rows: it shows that the route works, not how long it takes on your data.
 
+A record made before a later change to the code that decides a run is stale.
+On a development branch the tests only warn about stale records; `make
+release-check`, and the tests on a tagged release, fail on them. A release
+re-runs what is stale first ([details](docs/matrix-method.md#what-makes-a-row-verified)).
+
 Verified does not mean every run passed. On ten rows (pg13 2.1-2.6 and pg14
 2.5-2.6 same-PG, pg11 2.1 to pg13 and pg14) the seeded run fails the three
 fixture checks that need to alter a continuous aggregate created before 2.7.
