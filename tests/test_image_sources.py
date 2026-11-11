@@ -241,7 +241,7 @@ def test_a_later_hop_does_not_ask_the_registry(monkeypatch):
     called = []
     monkeypatch.setattr(pf, "manifest_exists", lambda *a, **k: called.append(a))
     monkeypatch.setattr(pf, "Kube", lambda *a: Kube())
-    for name in ("check_context", "check_abi_break", "check_pg_minor_floor", "check_disk_headroom",
+    for name in ("check_context", "check_helm", "check_abi_break", "check_pg_minor_floor", "check_disk_headroom",
                  "check_extensions", "check_collation", "check_permissions", "check_drift",
                  "check_gates", "check_matrix"):
         monkeypatch.setattr(pf, name, lambda *a, **k: None)

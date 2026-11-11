@@ -25,6 +25,7 @@ import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from .helm import helm_owner, values_note
 from .images import (
     RegistryError,
     manifest_exists,
@@ -329,6 +330,37 @@ def check_context(kube: Kube, opts: PreflightOptions) -> CheckResult:
         "pointed at {0} / {1}".format(effective, opts.namespace),
         details,
     )
+
+
+def check_helm(kube: Kube, opts: PreflightOptions) -> CheckResult:
+    """Is the StatefulSet managed by Helm? Never a failure: the next
+    ``helm upgrade`` would undo an image change, so the operator has to change
+    the chart's values too, and this says which."""
+    title = "Helm ownership"
+    name = opts.statefulset
+    try:
+        if not name:
+            owners = {ref.get("name") for pod in kube.json(["get", "pods", "-l", opts.selector]).get("items", [])
+                      for ref in pod.get("metadata", {}).get("ownerReferences") or []
+                      if ref.get("kind") == "StatefulSet"}
+            if len(owners) != 1:
+                return CheckResult("helm", title, UNKNOWN, "the pods are owned by {0} StatefulSets, "
+                                   "not one".format(len(owners)), sorted(o for o in owners if o))
+            name = owners.pop()
+        sts = kube.json(["get", "statefulset", name])
+    except PreflightError as exc:
+        return CheckResult("helm", title, UNKNOWN, "cannot read the StatefulSet: {0}".format(exc), [])
+    release = helm_owner(sts)
+    if release is None:
+        return CheckResult("helm", title, PASS, "statefulset/{0} is not managed by Helm".format(name), [])
+    note = values_note(opts.target_image, release, major=opts.pg_upgrade_link is not None,
+                       statefulset=name)
+    result = CheckResult("helm", title, PASS, "statefulset/{0} is managed by Helm{1}".format(
+        name, "" if release == "Helm" else " release " + release), note)
+    if not opts.route_checked:  # once per apply run, not at every hop
+        result.notice = "{0}: the chart's values still name the old image; {1}".format(
+            result.summary, " ".join(line.strip() for line in note[1:]))
+    return result
 
 
 def check_target_image(opts: PreflightOptions) -> Tuple[CheckResult, Optional[str], Optional[str]]:
@@ -1717,6 +1749,7 @@ def run_preflight(opts: PreflightOptions) -> List[CheckResult]:
     results: List[CheckResult] = []
 
     results.append(check_context(kube, opts))
+    results.append(check_helm(kube, opts))
     if opts.route_images or opts.route_checked:
         if opts.route_images:
             results.append(check_route_images(kube, opts))

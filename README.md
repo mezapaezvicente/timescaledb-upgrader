@@ -85,7 +85,9 @@ this tool:
 - Patroni's labels are `app`, `cluster-name` and `release`, so pass
   `--selector`;
 - after any `apply`, the chart's values still name the old image, and the next
-  `helm upgrade` would put it back. Update the image tag in your values first.
+  `helm upgrade` would put it back. Preflight says when Helm manages the
+  StatefulSet, and the runbook, the script and `apply`'s report end with the
+  image repository and tag to put in your values first.
 
 Until that is done, chart users get the most from `preflight`, `plan` and
 `plan --format script`.
@@ -119,6 +121,7 @@ It answers, for the cluster you are actually pointed at:
 | Check | What it establishes |
 |---|---|
 | Cluster and namespace | Echoes back the context, API server, Kubernetes version and namespace, so you can confirm you are where you think you are. |
+| Helm ownership | Whether Helm manages the StatefulSet (`app.kubernetes.io/managed-by: Helm`, or a `meta.helm.sh/release-name` annotation); if so, the image to put in the chart's values. Never a failure. |
 | Target image exists | Queries the target's registry for the manifest. Under `apply`, every image the plan still has to run, by digest. |
 | Target image on nodes | Whether the image is already cached on each node. |
 | Running versions, per instance | PostgreSQL and TimescaleDB versions **queried from each database**, per member, and per database. |
@@ -236,6 +239,15 @@ it had already done. It never retries or rolls back on its own.
 `--database` scopes a run to named databases; without it every database with
 TimescaleDB must be at the source version, because a real upgrade has to
 cover them all.
+
+**Helm.** `apply` changes the StatefulSet with `kubectl set image`, and the
+chart's values still name the old image, so the next `helm upgrade` would
+put it back; after a major upgrade, the pods would not start on the upgraded
+data. It does not refuse. When Helm manages the StatefulSet and the run
+changed its image, the report ends with the image repository and tag to put
+in the values. The runbook and `plan --format script` always end with the same
+note, worded "if a Helm chart manages this StatefulSet", since `plan` does
+not look at the cluster.
 
 ---
 

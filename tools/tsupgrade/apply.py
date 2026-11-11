@@ -92,6 +92,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
+from .helm import helm_owner, values_note
 from .gates import OldCagg, old_caggs, reaches_old_cagg_removal, time_bucket_ng_caggs
 from .images import mirrored
 from .plan import PLAN_FORMAT, VERIFICATION, pinned
@@ -1634,6 +1635,7 @@ def apply_plan(
         raise ApplyRefused(reasons)
 
     cluster = _Cluster(kube, opts, sleep, clock, data_how, wal)
+    image_before = _statefulset_image(kube, opts)
     _plan_cagg_migration(steps, plan, cluster, instances, databases, opts)
     preflight = preflight or run_preflight
     report: Dict[str, Any] = {
@@ -1680,7 +1682,36 @@ def apply_plan(
     if failure:
         report["failure"] = failure
     report["final"] = _final_state(cluster, databases)
+    helm = _helm_section(kube, opts, image_before, any(isinstance(s, MajorUpgrade) for s in steps))
+    if helm:
+        report["helm"] = helm
     return report
+
+
+def _statefulset_image(kube: Kube, opts: ApplyOptions) -> Optional[str]:
+    try:
+        sts = kube.json(["get", "statefulset", opts.statefulset])
+    except PreflightError:
+        return None
+    template = sts.get("spec", {}).get("template", {}).get("spec", {})
+    return next((c.get("image") for c in template.get("containers") or []
+                 if c.get("name") == opts.container), None)
+
+
+def _helm_section(kube: Kube, opts: ApplyOptions, before: Optional[str],
+                  major: bool) -> Optional[Dict[str, Any]]:
+    """When Helm owns the StatefulSet and apply changed its image: what to put
+    in the chart's values before the next ``helm upgrade`` (R28)."""
+    try:
+        sts = kube.json(["get", "statefulset", opts.statefulset])
+    except PreflightError:
+        return None
+    release = helm_owner(sts)
+    after = _statefulset_image(kube, opts)
+    if release is None or not after or after == before:
+        return None
+    return {"release": release, "image": after,
+            "note": values_note(after, release, major=major, statefulset=opts.statefulset)}
 
 
 def render_report(report: Dict[str, Any]) -> str:
@@ -1708,6 +1739,9 @@ def render_report(report: Dict[str, Any]) -> str:
             inst.get("pod"), inst.get("role"), inst.get("server_version"), inst.get("image")))
     for db, version in sorted((final.get("databases") or {}).items()):
         lines.append("{0}: timescaledb {1}".format(db, version))
+    if report.get("helm"):
+        lines.append("")
+        lines.extend(report["helm"]["note"])
     lines.append("")
     lines.append("result    : {0}".format(report.get("result", "?").upper()))
     return "\n".join(lines)

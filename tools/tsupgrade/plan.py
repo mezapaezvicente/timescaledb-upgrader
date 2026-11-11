@@ -69,6 +69,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from .drift import BridgeHop, ImageProfile, plan_chain
+from .helm import values_note
 from .images import RegistryError, mirrored, parse_image_reference, parse_release_tag
 from .majors import MajorHop, Profiles, find_route, tag_major
 from .matrix import Matrix, MatrixEntry, MatrixError
@@ -616,6 +617,25 @@ def build_plan(
     }
 
 
+def final_image(plan: Dict[str, Any], image_registry: Optional[str] = None) -> str:
+    """The image the StatefulSet runs once the plan is through: the last one
+    rolled out, by digest when the plan pins one."""
+    image = plan["target"]["image"]
+    for step in plan["steps"]:
+        if step["action"] == "ensure_image":
+            image = pinned(step["image"], step.get("digest"))
+        elif step["action"] == "major_upgrade":
+            image = pinned(step["run_image"], step.get("run_digest"))
+    return mirrored(image, image_registry)
+
+
+def _helm_note(plan: Dict[str, Any], image_registry: Optional[str]) -> List[str]:
+    """Offline, a plan cannot tell whether Helm owns the StatefulSet: it says
+    what to change if it does."""
+    major = any(step["action"] == "major_upgrade" for step in plan["steps"])
+    return values_note(final_image(plan, image_registry), major=major)
+
+
 def render_runbook(plan: Dict[str, Any], image_registry: Optional[str] = None) -> str:
     """The plan as an operator reads it. Same content as the JSON, nothing more."""
     lines: List[str] = []
@@ -707,6 +727,7 @@ def render_runbook(plan: Dict[str, Any], image_registry: Optional[str] = None) -
                          "image's default release, past any stop this plan makes")
         elif action == "analyze":
             lines.append("{0}. vacuumdb --all --analyze-in-stages: {1}".format(prefix, step["why"]))
+    lines += [""] + _helm_note(plan, image_registry)
     return "\n".join(lines)
 
 
@@ -816,5 +837,6 @@ def render_script(plan: Dict[str, Any], image_registry: Optional[str] = None) ->
         elif action == "analyze":
             lines += ["say 'statistics: pg_upgrade carries none over before PostgreSQL 18'",
                       "vacuumdb --all --analyze-in-stages"]
-    lines += ["", "say 'done: timescaledb {0} on PostgreSQL {1}'".format(tgt["ts"], tgt["pg"]), ""]
+    lines += [""] + ["# " + line for line in _helm_note(plan, image_registry)]
+    lines += ["say 'done: timescaledb {0} on PostgreSQL {1}'".format(tgt["ts"], tgt["pg"]), ""]
     return "\n".join(lines)
