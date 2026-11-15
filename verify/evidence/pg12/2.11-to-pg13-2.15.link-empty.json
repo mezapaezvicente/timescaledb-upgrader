@@ -28,15 +28,15 @@
     "reached": "2.15.3"
   },
   "upgrader": {
-    "commit": "e2e3c13344fd4246561de8f948c4a0d5bd5730ec",
+    "commit": "35ff46348a3f964cdfc0e9fe9a22a7021ec65a76",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg12/2.11-to-pg13-2.15.link-empty.log",
-  "recorded_at": "2026-11-02T10:39:49Z",
+  "recorded_at": "2026-11-15T17:25:11Z",
   "stage": "done",
-  "started_at": "2026-11-02T10:35:50Z",
-  "finished_at": "2026-11-02T10:39:49Z",
+  "started_at": "2026-11-15T17:21:08Z",
+  "finished_at": "2026-11-15T17:25:11Z",
   "source_pg_version": "12.22",
   "replicas": 2,
   "pods": [
@@ -44,14 +44,14 @@
       "pod": "tsdb-0",
       "role": "primary",
       "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3@sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
-      "image_id": "docker.io/library/import-2026-10-29@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
+      "image_id": "docker.io/library/import-2026-11-15@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
       "server_version": "13.22"
     },
     {
       "pod": "tsdb-1",
       "role": "replica",
       "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3@sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
-      "image_id": "docker.io/library/import-2026-10-29@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
+      "image_id": "docker.io/library/import-2026-11-15@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
       "server_version": "13.22"
     }
   ],

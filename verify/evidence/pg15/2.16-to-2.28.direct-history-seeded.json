@@ -20,19 +20,19 @@
     "reached": "2.16.1"
   },
   "upgrader": {
-    "commit": "e2e3c13344fd4246561de8f948c4a0d5bd5730ec",
+    "commit": "35ff46348a3f964cdfc0e9fe9a22a7021ec65a76",
     "dirty": false
   },
   "result": "fail",
   "log": "verify/out/pg15/2.16-to-2.28.direct-history-seeded.log",
-  "recorded_at": "2026-11-02T14:27:23Z",
+  "recorded_at": "2026-11-15T21:22:09Z",
   "failure": {
     "explanation": "the direct update 2.16.1 -> 2.28.3 failed",
     "error": "DETAIL:  The job history will only keep the last 1000 successes and failures and run once each day.\nERROR:  cannot drop table _timescaledb_internal.bgw_job_stat_history because other objects depend on it\nDETAIL:  view timescaledb_information.job_errors depends on table _timescaledb_internal.bgw_job_stat_history\nHINT:  Use DROP ... CASCADE to drop the dependent objects too.\nCONTEXT:  SQL statement \"DROP TABLE _timescaledb_internal.bgw_job_stat_history\""
   },
   "stage": "apply",
-  "started_at": "2026-11-02T14:27:15Z",
-  "finished_at": "2026-11-02T14:27:23Z",
+  "started_at": "2026-11-15T21:22:02Z",
+  "finished_at": "2026-11-15T21:22:09Z",
   "source_pg_version": "15.18",
   "replicas": 2,
   "pods": null,
