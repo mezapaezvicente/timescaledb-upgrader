@@ -1,0 +1,104 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "15",
+    "source_ts": "2.12",
+    "target_pg": "15",
+    "target_ts": "2.28"
+  },
+  "mode": "ng-empty",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg15.13-ts2.20.3",
+      "digest": "sha256:c89ebb3dc18218a92cdbc0fd1014f65632fcf1bfa0728f5f36650ce88127690c"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+      "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f"
+    }
+  ],
+  "pg_version": "15.18",
+  "versions": {
+    "source": "2.12.2",
+    "target": "2.28.3",
+    "reached": "2.28.3"
+  },
+  "upgrader": {
+    "commit": "1449c7374608d476d16146a4c012c87bc778718f",
+    "dirty": false
+  },
+  "result": "pass",
+  "log": "verify/out/pg15/2.12-to-2.28.ng-empty.log",
+  "recorded_at": "2026-11-11T09:28:00Z",
+  "stage": "done",
+  "started_at": "2026-11-11T09:24:39Z",
+  "finished_at": "2026-11-11T09:28:00Z",
+  "source_pg_version": "15.13",
+  "replicas": 2,
+  "pods": [
+    {
+      "pod": "tsdb-0",
+      "role": "primary",
+      "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3@sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:71480d8e7d3bd4707667801621320148a91c9908cf972120ab3aacb1d1758262",
+      "server_version": "15.18"
+    },
+    {
+      "pod": "tsdb-1",
+      "role": "replica",
+      "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3@sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:71480d8e7d3bd4707667801621320148a91c9908cf972120ab3aacb1d1758262",
+      "server_version": "15.18"
+    }
+  ],
+  "baseline": "ng|9|10|60",
+  "checks": {
+    "ng_rows": {
+      "status": "pass",
+      "detail": "fx_ng_day same, fx_ng_month same, fx_ng_week same"
+    },
+    "ng_bucket": {
+      "status": "pass",
+      "detail": "fx_ng_day on time_bucket, fx_ng_month on time_bucket, fx_ng_week on time_bucket"
+    },
+    "ng_kept": {
+      "status": "pass",
+      "detail": "policy t, comment monthly, Madrid time, owner fx_ng_owner, reader t, real-time t"
+    },
+    "ng_refresh": {
+      "status": "pass",
+      "detail": "2026-03-10 has 1 materialized row(s) after a refresh"
+    }
+  },
+  "apply_exit": 0,
+  "plan": {
+    "hops": 3,
+    "path": "verify/out/pg15/2.12-to-2.28.plan.json"
+  },
+  "route": {
+    "start": {
+      "image": "timescale/timescaledb-ha:pg15.13-ts2.20.3",
+      "digest": "sha256:c89ebb3dc18218a92cdbc0fd1014f65632fcf1bfa0728f5f36650ce88127690c"
+    },
+    "steps": [
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg15.13-ts2.20.3",
+        "digest": "sha256:c89ebb3dc18218a92cdbc0fd1014f65632fcf1bfa0728f5f36650ce88127690c",
+        "to": "2.20.3"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+        "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+        "to": "2.27.2"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg15.18-ts2.28.3",
+        "digest": "sha256:f49bf91b8966318e9bab4c44e4cc6c6533539dd44fcb049ee3334349dfcb233f",
+        "to": "2.28.3"
+      }
+    ]
+  }
+}
