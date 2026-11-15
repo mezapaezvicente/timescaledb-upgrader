@@ -30,7 +30,13 @@ a harness can add what turns out to matter without a schema change:
                     which is its pass. Evidence for those flags, never a row's
                     verdict. ``caggs-refused-seeded`` when a route reaching 2.25
                     without ``--migrate-caggs`` stopped before changing
-                    anything, which is its pass; never a row's verdict
+                    anything, which is its pass; never a row's verdict.
+                    ``ng-empty`` or ``ng-seeded`` when the database also held
+                    aggregates on ``time_bucket_ng`` and ``apply`` rebuilt them
+                    on the way; ``ng-refused-empty`` or ``ng-refused-seeded``
+                    when the same run without ``--migrate-caggs`` stopped before
+                    changing anything, which is its pass. Evidence for the
+                    rebuild, never a row's verdict
 ``images``          every image the run used, in order, each ``{reference,
                     digest}`` -- a two-image row lists both
 ``pg_version``      the exact server version the extension ran on
@@ -108,7 +114,8 @@ VERDICT_CODE = (
 EVIDENCE_FORMAT = 1
 MODES = ("empty", "seeded", "history-empty", "history-seeded", "link-empty", "link-seeded",
          "rollback-empty", "rollback-seeded", "mirror-empty", "mirror-seeded",
-         "mirror-refused-empty", "mirror-refused-seeded", "caggs-refused-seeded")
+         "mirror-refused-empty", "mirror-refused-seeded", "caggs-refused-seeded",
+         "ng-empty", "ng-seeded", "ng-refused-empty", "ng-refused-seeded")
 CONTROLS = ("direct",)
 RESULTS = ("pass", "fail")
 
@@ -292,7 +299,7 @@ def validate_record(doc: Any) -> List[str]:
         problems.append("a passing run must reach its target version")
 
     if (result == "pass" and isinstance(transition, dict) and "control" not in doc
-            and not str(doc.get("mode")).startswith(("mirror-refused-", "caggs-refused-"))
+            and not str(doc.get("mode")).startswith(("mirror-refused-", "caggs-refused-", "ng-refused-"))
             and transition.get("source_pg") != transition.get("target_pg")):
         problems.extend(_major_upgrade_problems(doc))
 

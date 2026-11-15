@@ -91,7 +91,16 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from .gates import OldCagg, old_caggs, reaches_old_cagg_removal, time_bucket_ng_caggs
+from .gates import (
+    NG_LAST,
+    OldCagg,
+    _at_or_below,
+    old_caggs,
+    reaches_old_cagg_removal,
+    reaches_time_bucket_ng_failure,
+    time_bucket_ng_caggs,
+)
+from .ngrebuild import REBUILD_FROM, RebuildFailed, preview, rebuild
 from .images import mirrored
 from .plan import PLAN_FORMAT, VERIFICATION, pinned
 from .steps import (
@@ -99,6 +108,7 @@ from .steps import (
     MajorUpgrade,
     MigrateCaggs,
     Preflight,
+    RebuildNgCaggs,
     UpdateExtension,
     VerifyVersion,
     parse_steps,
@@ -174,8 +184,9 @@ class ApplyOptions:
     image_registry: Optional[str] = None
     # Go on when a registry does not answer, if the images can run without it.
     use_cached_images: bool = False
-    # Migrate old continuous aggregates if the plan needs it; else ``confirm``
-    # is asked, and with neither apply stops before changing anything.
+    # Migrate old continuous aggregates, and rebuild those on time_bucket_ng,
+    # if the plan needs it; else ``confirm`` is asked, and with neither apply
+    # stops before changing anything.
     migrate_caggs: bool = False
     confirm: Optional[Callable[[str], bool]] = None
     # Called as soon as something is worth telling the operator, since a run
@@ -437,6 +448,21 @@ def _route_images(later: Sequence[Any], opts: ApplyOptions) -> Tuple[RouteImage,
     return tuple(RouteImage(reference, on) for reference, on in found.items())
 
 
+def _cleared_gates(later: Sequence[Any]) -> Tuple[str, ...]:
+    """The gates a step of apply's own clears before the next update: a
+    preflight at the source runs before the rebuild or migration it agreed to,
+    and must not fail on what that step is there to fix (measured: it did)."""
+    cleared: List[str] = []
+    for step in later:
+        if isinstance(step, (UpdateExtension, MajorUpgrade)):
+            break
+        if isinstance(step, RebuildNgCaggs):
+            cleared.append("time_bucket_ng")
+        elif isinstance(step, MigrateCaggs):
+            cleared.append("old_caggs")
+    return tuple(cleared)
+
+
 def _step_preflight(
     step: Preflight,
     opts: ApplyOptions,
@@ -465,6 +491,7 @@ def _step_preflight(
             route_checked=not first,
             use_cached_images=opts.use_cached_images,
             statefulset=opts.statefulset,
+            cleared_gates=_cleared_gates(later),
         )
     )
     lines = ["{0}: {1} - {2}".format(r.name, r.status, r.summary) for r in results]
@@ -605,6 +632,15 @@ def _in_migration_window(version: str) -> bool:
     return _MIGRATE_FROM <= key[:2] < _MIGRATE_BELOW
 
 
+def _in_rebuild_window(version: str) -> bool:
+    """Where the rebuild on time_bucket is measured to work: 2.8.0 to 2.14."""
+    try:
+        key = parse_version(version)
+    except InvalidVersion:
+        return False
+    return REBUILD_FROM <= key[:3] and key[:2] <= NG_LAST
+
+
 def _size(size: int) -> str:
     value, unit = float(size), "bytes"
     for unit in ("bytes", "KiB", "MiB", "GiB", "TiB"):
@@ -650,8 +686,9 @@ def _view_guidance(cluster: _Cluster, pod: str, found: Sequence[OldCagg],
             shlex.quote(w) for w in words)
 
     lines = [
-        "Views depend on them, and cagg_migrate fails partway with a view in place, leaving the "
-        "old aggregate behind. Save and drop each view, run apply, then recreate it from its file:",
+        "Views depend on them, and the old aggregate cannot be replaced with a view in place: "
+        "cagg_migrate fails partway, leaving it behind, and the rebuild cannot drop it. Save and "
+        "drop each view, run apply, then recreate it from its file:",
     ]
     for cagg in found:
         for view in cagg.dependents:
@@ -694,13 +731,21 @@ def _plan_cagg_migration(
     steps: List[Any], plan: Dict[str, Any], cluster: _Cluster, instances: Sequence[Instance],
     databases: Sequence[str], opts: ApplyOptions,
 ) -> None:
-    """Before anything changes: does this route reach the 2.25 refusal with
-    aggregates it will refuse? If so stop, and say what they are, unless the
-    operator agrees to migrate them; then add the step. Read-only until then."""
+    """Before anything changes: does this route reach an update that will
+    refuse aggregates the databases hold -- 2.25 for the old format, any
+    release past 2.14 for ``time_bucket_ng``? If so stop, and say what they
+    are, unless the operator agrees to migrate or rebuild them; then add the
+    steps. Read-only until then."""
+    source = str(plan["source"]["ts"])
     index, crossing = next(((i, s) for i, s in enumerate(steps) if isinstance(s, UpdateExtension)
                             and reaches_old_cagg_removal(s.to)), (None, None))
-    if crossing is None:
+    ng_index, ng_crossing = (None, None)
+    if _at_or_below(source, NG_LAST) is not False:
+        ng_index, ng_crossing = next(((i, s) for i, s in enumerate(steps) if isinstance(s, UpdateExtension)
+                                      and reaches_time_bucket_ng_failure(s.to)), (None, None))
+    if crossing is None and ng_crossing is None:
         return
+    first = min(i for i in (index, ng_index) if i is not None)
     primary = next((i for i in instances if i.role == "primary" and not i.error), None)
     unread: List[str] = [] if primary else ["no primary could be queried: " + "; ".join(
         "{0} is {1}{2}".format(i.pod, i.role, ", " + i.error if i.error else "") for i in instances
@@ -715,84 +760,169 @@ def _plan_cagg_migration(
         return rc, out, err
 
     found: List[OldCagg] = []
-    bucket: List[str] = []
+    bucket: List[OldCagg] = []
     for database in databases if primary else ():
         version = primary.extensions.get(database)
-        caggs = old_caggs(runner, database, version)
-        ng = time_bucket_ng_caggs(runner, database)
+        caggs = old_caggs(runner, database, version) if crossing is not None else []
+        ng = time_bucket_ng_caggs(runner, database) if ng_crossing is not None else []
         if caggs is None or ng is None:
             unread.append("{0}: {1}".format(database, failed.get(
                 database, "the catalog answered in a form this version does not read")))
             continue
-        found.extend(caggs)
-        if ng:
-            bucket.append("  {0}: {1}".format(database, ng))
+        # One built on time_bucket_ng is rebuilt, which also leaves the old format.
+        rebuilt = {c.name for c in ng}
+        found.extend(c for c in caggs if c.name not in rebuilt)
+        bucket.extend(ng)
     footer = ["", "This came from a read-only check. Nothing has been changed."]
-    target = "this plan updates TimescaleDB to {0}{1}".format(crossing.to, _on_pg(steps, index, plan))
+    target = "this plan updates TimescaleDB to {0}{1}".format(crossing.to, _on_pg(steps, index, plan)) \
+        if crossing is not None else ""
+    ng_target = "this plan updates TimescaleDB to {0}{1}".format(
+        ng_crossing.to, _on_pg(steps, ng_index, plan)) if ng_crossing is not None else ""
     if unread:
         # Not going on to find out at that hop, after every pg_upgrade before it.
-        majors = [s for s in steps[:index] if isinstance(s, MajorUpgrade)]
+        majors = [s for s in steps[:first] if isinstance(s, MajorUpgrade)]
         later = (" Finding them only then would be after upgrading PostgreSQL from {0} to {1}.".format(
             majors[0].from_pg, majors[-1].to_pg) if majors else "")
+        why = ("{0}, and TimescaleDB 2.25 and later refuse continuous aggregates created before "
+               "2.7".format(target) if first == index else
+               "{0}, and no update past 2.14 gets through a continuous aggregate built on "
+               "time_bucket_ng".format(ng_target))
         raise ApplyRefused([
             "apply did not start: it could not check every database for continuous aggregates "
-            "created before TimescaleDB 2.7.",
+            "the update would refuse.",
         ] + ["  " + line for line in unread] + [
             "Check that the primary is running and that `psql -U {0}` can read "
             "_timescaledb_catalog in each database, then run apply again.".format(cluster.opts.psql_user),
             "",
-            "Why it checks first: {0}, and TimescaleDB 2.25 and later refuse those "
-            "aggregates.{1}".format(target, later),
+            "Why it checks first: {0}.{1}".format(why, later),
         ] + footer, plain=True)
     if not found and not bucket:
         return
 
-    source = str(plan["source"]["ts"])
     stop: Optional[int] = 1 if _in_migration_window(source) else None
     release = source
-    if stop is None:
+    if found and stop is None:
         for i, step in enumerate(steps[:index]):
             if isinstance(step, VerifyVersion) and _in_migration_window(step.expect):
                 stop, release = i + 1, step.expect
                 break
-    hop = steps[stop - 1].hop if stop else None
+    ng_stop: Optional[int] = 1 if _in_rebuild_window(source) else None
+    ng_release = source
+    if bucket and ng_stop is None:
+        for i, step in enumerate(steps[:ng_index]):
+            if isinstance(step, VerifyVersion) and _in_rebuild_window(step.expect):
+                ng_stop, ng_release = i + 1, step.expect
+                break
 
-    which = ("continuous aggregates created before 2.7" if not bucket
-             else "continuous aggregates built on time_bucket_ng" if not found
-             else "some continuous aggregates here")
-    lines = [
-        "apply did not start: TimescaleDB 2.25 and later refuse {0}, and {1}.".format(which, target),
-    ]
+    if found and bucket:
+        lines = ["apply did not start: some continuous aggregates here would stop this plan: {0}, past "
+                 "2.14 and past 2.25.".format(target)]
+    elif found:
+        lines = ["apply did not start: TimescaleDB 2.25 and later refuse continuous aggregates created "
+                 "before 2.7, and {0}.".format(target)]
+    else:
+        lines = ["apply did not start: no TimescaleDB update past 2.14 gets through a continuous "
+                 "aggregate built on time_bucket_ng, and {0}.".format(ng_target)]
     if found:
         lines += ["", "Created before TimescaleDB 2.7 (non-finalized, the old format):"]
         for cagg in found:
             lines += _describe_cagg(cagg)
     blocked: List[str] = []
     if bucket:
-        blocked += ["Built on time_bucket_ng, which no known migration fixes; rebuild these "
-                    "without it first:"] + bucket
-    if any(cagg.dependents for cagg in found):
-        blocked += _view_guidance(cluster, primary.pod, found, runner)
+        lines += ["", "Built on time_bucket_ng:"]
+        # The time_bucket forms are worked out where time_bucket takes a
+        # timezone; below 2.8 the rebuild finds out at its stop.
+        ahead = _in_rebuild_window(source)
+        for cagg in bucket:
+            lines += _describe_cagg(cagg)
+            if not ahead:
+                continue
+            try:
+                lines.append("    rebuilt on: " + preview(runner, cagg.database, cagg.name))
+            except RebuildFailed as exc:
+                blocked += ["{0}: {1}".format(cagg.database, exc.summary)] + ["  " + l for l in exc.output]
+    if any(cagg.dependents for cagg in found + bucket):
+        blocked += _view_guidance(cluster, primary.pod, found + bucket, runner)
     if found and stop is None:
         blocked.append("This plan never stops at a TimescaleDB release from 2.14 to 2.24, where "
                        "cagg_migrate is known to work. Plan to one first, migrate, then plan on.")
+    if bucket and ng_stop is None:
+        blocked.append("This plan never stops at a TimescaleDB release from 2.8 to 2.14, where the "
+                       "rebuild on time_bucket is known to work. Plan to one first, then plan on.")
     if blocked:
         raise ApplyRefused(lines + [""] + blocked + footer, plain=True)
 
-    lines += [
-        "",
-        "They have to be migrated before 2.25, which also removes cagg_migrate. If you agree, "
-        "apply does it partway through the plan, when TimescaleDB reaches {0}{1}:".format(
-            release, _on_pg(steps, stop, plan)),
-        "  CALL cagg_migrate('<aggregate>', override => true, drop_old => true)",
-        "This drops the old aggregate and cannot be undone, so have a backup. It needs about "
-        "the size above free again and takes as long as rebuilding that data. apply then puts "
-        "back the grants and owner the call removes.",
-    ]
+    if found:
+        lines += [
+            "",
+            "They have to be migrated before 2.25, which also removes cagg_migrate. If you agree, "
+            "apply does it partway through the plan, when TimescaleDB reaches {0}{1}:".format(
+                release, _on_pg(steps, stop, plan)),
+            "  CALL cagg_migrate('<aggregate>', override => true, drop_old => true)",
+            "This drops the old aggregate and cannot be undone, so have a backup. It needs about "
+            "the size above free again and takes as long as rebuilding that data. apply then puts "
+            "back the grants and owner the call removes.",
+        ]
+    if bucket:
+        lines += [
+            "",
+            "The ones on time_bucket_ng have to be rebuilt on time_bucket first: no update upstream "
+            "converts them, and cagg_migrate refuses them. If you agree, apply rebuilds each {0}: it "
+            "builds the same aggregate on time_bucket beside it, keeps it only if the two agree on "
+            "the live data, materializes it, and swaps it in under the same name with the refresh "
+            "policy, owner, grants and comment.".format(
+                "before anything else" if ng_stop == 1 else
+                "partway through the plan, when TimescaleDB reaches {0}{1}".format(
+                    ng_release, _on_pg(steps, ng_stop, plan))),
+            "This drops the old aggregate and cannot be undone, so have a backup. It needs about "
+            "the size above free again and takes as long as rebuilding that data.",
+        ]
     if not opts.migrate_caggs and not (opts.confirm and opts.confirm(NL.join(lines + footer))):
         raise ApplyRefused(lines + ["", "To go on: run apply again with --migrate-caggs, or answer "
-                                    "y at its prompt. Or plan to a target below 2.25."] + footer, plain=True)
-    steps.insert(stop, MigrateCaggs(hop=hop, expect=release))
+                                    "y at its prompt. Or plan to a target below {0}.".format(
+                                        "2.15" if bucket else "2.25")] + footer, plain=True)
+    # The later stop first, so the earlier index still holds.
+    inserts = []
+    if found:
+        inserts.append((stop, 1, MigrateCaggs(hop=steps[stop - 1].hop, expect=release)))
+    if bucket:
+        inserts.append((ng_stop, 0, RebuildNgCaggs(hop=steps[ng_stop - 1].hop, expect=ng_release)))
+    for at, _, step in sorted(inserts, key=lambda x: (x[0], x[1]), reverse=True):
+        steps.insert(at, step)
+
+
+def _step_rebuild_ng_caggs(step: RebuildNgCaggs, cluster: _Cluster, databases: Sequence[str]) -> _Outcome:
+    primary = cluster.primary()
+    if primary is None:
+        raise _StepFailed("no ready primary to rebuild the aggregates on")
+    # Rebuilding an aggregate takes as long as its data does.
+    kube = cluster.kube
+    if isinstance(kube, Kube):
+        kube = Kube(kube.context, kube.namespace, 7 * 24 * 3600.0)
+
+    def run(database: str, sql: str) -> Tuple[int, str, str]:
+        return kube.exec(primary, cluster.opts.container, [
+            "psql", "-U", cluster.opts.psql_user, "-d", database, "-X", "-qtAF", "|",
+            "-v", "ON_ERROR_STOP=1", "-c", sql])
+
+    output: List[str] = []
+    rebuilt = 0
+    for database in databases:
+        caggs = time_bucket_ng_caggs(run, database)
+        if caggs is None:
+            raise _StepFailed("cannot read the continuous aggregates of {0}".format(database), output)
+        for cagg in caggs:
+            try:
+                output += rebuild(run, database, cagg.name)
+            except RebuildFailed as exc:
+                raise _StepFailed("{0}: {1}".format(database, exc.summary), output + exc.output)
+            rebuilt += 1
+        left = time_bucket_ng_caggs(run, database)
+        if left:
+            raise _StepFailed("{0} still holds aggregates on time_bucket_ng: {1}".format(
+                database, ", ".join(c.name for c in left)), output)
+    return _Outcome("rebuilt {0} continuous aggregate(s) on time_bucket at {1}".format(rebuilt, step.expect),
+                    output)
 
 
 def _step_migrate_caggs(step: MigrateCaggs, cluster: _Cluster, databases: Sequence[str]) -> _Outcome:
@@ -1504,6 +1634,7 @@ def apply_plan(
         "verify_version": lambda step: _step_verify(step, cluster, databases),
         "major_upgrade": lambda step: _step_major_upgrade(step, cluster),
         "migrate_caggs": lambda step: _step_migrate_caggs(step, cluster, databases),
+        "rebuild_ng_caggs": lambda step: _step_rebuild_ng_caggs(step, cluster, databases),
         "analyze": lambda step: _step_analyze(cluster, databases),
     }
     for step in steps:

@@ -23,6 +23,7 @@ from tsupgrade.gates import (
     check_information_views,
     check_multinode,
     check_old_caggs,
+    check_time_bucket_ng,
     run_gates,
 )
 
@@ -71,10 +72,6 @@ def _between(text, start, end):
 MODERN = [
     ("continuous_agg", "finalized"),
     ("continuous_aggs_bucket_function", "bucket_func"),
-]
-LEGACY = [
-    ("continuous_agg", "finalized"),
-    ("continuous_aggs_bucket_function", "name"),
 ]
 
 
@@ -276,17 +273,6 @@ def test_unfinalized_aggregate_blocks():
     assert any("cagg_migrate" in d for d in result.details)
 
 
-def test_time_bucket_ng_blocks_independently_of_the_format():
-    """A fully finalized aggregate still blocks if its bucket is time_bucket_ng.
-
-    Two separate RAISE EXCEPTION blocks ship in 2.24.0--2.25.0.sql; the research
-    named the second one but gave no query for it.
-    """
-    db = FakeDB(columns=MODERN, rows={"time_bucket_ng": "public.ng_cagg"})
-    result = check_old_caggs(db, "db", "2.13.0", "2.30.1")
-    assert result.status == BLOCKED
-
-
 def test_missing_finalized_column_means_already_past_the_cutoff():
     """2.25 drops the column along with the format, so absence satisfies it."""
     db = FakeDB(columns=[("continuous_aggs_bucket_function", "bucket_func")])
@@ -295,31 +281,62 @@ def test_missing_finalized_column_means_already_past_the_cutoff():
     assert any("past the 2.25 cutoff" in d for d in result.details)
 
 
-def test_legacy_bucket_schema_is_queried_by_name():
-    """Before ~2.14 the catalog has `name` + `experimental`, not `bucket_func`.
-
-    Without this branch the gate goes indeterminate on precisely the old
-    databases it protects, since a 2.13 database reaching 2.30 passes straight
-    through the 2.25 block.
-    """
-    db = FakeDB(columns=LEGACY, rows={"bf.name LIKE": "public.ng_cagg"})
-    result = check_old_caggs(db, "db", "2.13.0", "2.30.1")
-    assert result.status == BLOCKED
-    assert any("bf.name LIKE" in call for call in db.calls)
-    # Note the table is `continuous_aggs_bucket_function`, so a bare
-    # "bucket_func" substring matches it too; check the column reference.
-    assert not any("bf.bucket_func" in call for call in db.calls)
-
-
-def test_neither_bucket_schema_means_nothing_can_use_it():
-    db = FakeDB(columns=[("continuous_agg", "finalized")])
+def test_the_format_gate_leaves_time_bucket_ng_to_its_own():
+    """No database with one reaches 2.25: every update past 2.14 fails first."""
+    db = FakeDB(columns=MODERN, rows={"time_bucket_ng": NG_ROW})
     assert check_old_caggs(db, "db", "2.13.0", "2.30.1").status == CLEAR
+    assert not any("time_bucket_ng" in call for call in db.calls)
 
 
-def test_blocked_beats_clear_across_sub_checks():
-    db = FakeDB(columns=MODERN, rows={"time_bucket_ng": "public.ng"})
-    result = check_old_caggs(db, "db", "2.13.0", "2.30.1")
+# --------------------------------------------------------------------------
+# Aggregates on time_bucket_ng
+# --------------------------------------------------------------------------
+
+NG_ROW = "\x1f".join(["public.ng_cagg", "public.metrics", "8192", "1", "0", "", "", "end"])
+
+
+@pytest.mark.parametrize(
+    "source,target,applies",
+    [
+        ("2.12.2", "2.15.0", True),   # the first update that fails
+        ("2.14.2", "2.30.1", True),
+        ("2.4.0", "2.20.3", True),    # the first release that could create one
+        ("2.13.0", "2.14.2", False),  # never leaves 2.14
+        ("2.15.3", "2.30.1", False),  # cannot hold one: no database with one gets there
+    ],
+)
+def test_time_bucket_ng_gate_applies_only_past_214(source, target, applies):
+    result = check_time_bucket_ng(FakeDB(), "db", source, target)
+    assert (result.status != NOT_APPLICABLE) is applies
+
+
+def test_time_bucket_ng_is_found_by_the_definition_not_the_bucket_catalog():
+    """Measured: before 2.15 a fixed-width bucket without a timezone has no
+    row in continuous_aggs_bucket_function, and the old gate called it clear."""
+    db = FakeDB(rows={"time_bucket_ng": NG_ROW})
+    result = check_time_bucket_ng(db, "db", "2.12.2", "2.28.3")
     assert result.status == BLOCKED
+    query = next(call for call in db.calls if "time_bucket_ng" in call)
+    assert "pg_get_viewdef" in query and "direct_view_name" in query
+    assert "continuous_aggs_bucket_function" not in query
+
+
+def test_time_bucket_ng_points_at_the_rebuild_not_cagg_migrate():
+    """cagg_migrate refuses them (measured), whatever the 2.25 hint says."""
+    result = check_time_bucket_ng(FakeDB(rows={"time_bucket_ng": NG_ROW}), "db", "2.12.2", "2.28.3")
+    assert "1 continuous aggregate(s)" in result.summary
+    assert any("public.ng_cagg" in d for d in result.details)
+    assert any("--migrate-caggs" in d and "refuses" in d for d in result.details)
+    assert not any("CALL cagg_migrate" in d for d in result.details)
+
+
+def test_time_bucket_ng_clear_when_none():
+    assert check_time_bucket_ng(FakeDB(), "db", "2.12.2", "2.28.3").status == CLEAR
+
+
+def test_time_bucket_ng_failure_is_indeterminate():
+    db = FakeDB(fail_on=("pg_get_viewdef",))
+    assert check_time_bucket_ng(db, "db", "2.12.2", "2.28.3").status == INDETERMINATE
 
 
 # --------------------------------------------------------------------------
@@ -355,9 +372,9 @@ def test_information_views_failure_is_indeterminate():
 # The set
 # --------------------------------------------------------------------------
 
-def test_run_gates_returns_all_three():
+def test_run_gates_returns_all_four():
     results = run_gates(FakeDB(columns=MODERN), "db", "2.13.0", "2.30.1")
-    assert [r.name for r in results] == ["multinode", "old_caggs", "information_views"]
+    assert [r.name for r in results] == ["multinode", "old_caggs", "time_bucket_ng", "information_views"]
 
 
 def test_blocks_property_only_true_for_blocked():

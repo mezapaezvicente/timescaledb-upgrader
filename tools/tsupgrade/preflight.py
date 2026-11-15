@@ -137,6 +137,9 @@ class PreflightOptions:
     route_checked: bool = False
     use_cached_images: bool = False
     statefulset: Optional[str] = None
+    # From apply: gates its own next step clears before the update (it
+    # migrates or rebuilds those aggregates), so they do not fail this hop.
+    cleared_gates: Tuple[str, ...] = ()
 
 
 # Older Patroni labels the leader `master` whatever the configuration asks
@@ -1526,6 +1529,11 @@ def check_gates(
                 continue
             for gate in run_gates(runner, database, version, target_ts):
                 if gate.status == NOT_APPLICABLE:
+                    continue
+                if gate.status == BLOCKED and gate.name in opts.cleared_gates:
+                    statuses.append(PASS)
+                    details.append("{0}/{1} : {2} - blocked now; apply's next step clears it before "
+                                   "the update".format(inst.pod, database, gate.title))
                     continue
                 if gate.status == BLOCKED:
                     statuses.append(FAIL)

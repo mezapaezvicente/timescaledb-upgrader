@@ -21,8 +21,9 @@
 --     default), so it is raised to cover the whole range in one refresh.
 --   * create_hypertable: by_range() where it exists (2.13+), positional before.
 --
--- Deliberately not covered: time_bucket_ng aggregates (refused from 2.13, and
--- a gate rather than a fixture concern), retention, background policies, and
+-- Deliberately not covered: time_bucket_ng aggregates (ng.sql, an optional
+-- layer for the --ng runs: they stop every update past 2.14), retention,
+-- background policies, and
 -- user views on timescaledb_information (views.sql, an optional layer: they
 -- block most updates by design, which is the information_views gate's job).
 -- No policy is added and the jobs touch no table, so nothing changes the data

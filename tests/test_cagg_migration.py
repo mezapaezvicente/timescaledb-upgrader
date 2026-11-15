@@ -153,14 +153,12 @@ def test_a_source_already_in_the_window_migrates_after_the_first_preflight():
     assert steps[1] == MigrateCaggs(hop=1, expect="2.19.3")
 
 
-@pytest.mark.parametrize("cluster,said", [
-    (Cluster(aggregates=WITH_VIEW), "verify: public.fx_depends, on public.fx_hourly"),
-    (Cluster(ng="public.fx_ng"), "public.fx_ng"),
-])
-def test_what_would_fail_stops_even_with_the_flag(cluster, said):
-    """Measured with a view: the call fails partway and cannot be retried."""
-    text = _refusal(cluster=cluster, migrate_caggs=True)
-    assert said in text and text.endswith("This came from a read-only check. Nothing has been changed.")
+def test_what_would_fail_stops_even_with_the_flag():
+    """Measured with a view: the call fails partway and cannot be retried.
+    What stops a rebuild on time_bucket_ng is in test_ng_rebuild.py."""
+    text = _refusal(cluster=Cluster(aggregates=WITH_VIEW), migrate_caggs=True)
+    assert "verify: public.fx_depends, on public.fx_hourly" in text
+    assert text.endswith("This came from a read-only check. Nothing has been changed.")
 
 
 def test_a_dependent_view_comes_with_what_to_run_for_it():
@@ -195,9 +193,18 @@ def test_nothing_old_changes_nothing():
     assert _decide(list(steps), Cluster(aggregates="")) == steps
 
 
-def test_a_route_below_2_25_is_not_stopped_and_not_even_asked():
+def test_a_route_below_2_25_asks_only_about_time_bucket_ng():
+    """It goes past 2.14, where those fail; the old format is fine below 2.25."""
     steps = _route()[:10]
     assert steps[-1] == VerifyVersion(hop=4, expect="2.15.3")
+    cluster = Cluster()
+    assert _decide(list(steps), cluster) == steps
+    assert cluster.sql and all("time_bucket_ng" in sql for sql in cluster.sql)
+
+
+def test_a_route_that_stays_at_214_or_below_is_not_even_asked():
+    steps = _route()[:6]
+    assert steps[-1] == VerifyVersion(hop=2, expect="2.11.2")
     cluster = Cluster()
     assert _decide(list(steps), cluster) == steps and cluster.sql == []
 
@@ -209,7 +216,9 @@ def test_a_question_that_fails_stops_it_before_anything():
     text = _refusal(cluster=cluster, migrate_caggs=True)
     assert text.startswith("apply did not start: it could not check every database")
     assert "  verify: psql: error: connection lost" + chr(10) in text and "psql -U postgres" in text
-    assert "after upgrading PostgreSQL from 11 to 15" in text and "hop" not in text.lower()
+    # The first update it would find out at is the one past 2.14, after 11 to 13.
+    assert "no update past 2.14 gets through" in text
+    assert "after upgrading PostgreSQL from 11 to 13" in text and "hop" not in text.lower()
     assert text.endswith("This came from a read-only check. Nothing has been changed.")
 
 
