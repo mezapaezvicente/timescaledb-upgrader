@@ -953,7 +953,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--link",
         action="store_true",
         help="for a PostgreSQL major change: pg_upgrade --link, which hard-links the "
-        "data files instead of copying them (fast, no extra space, but the old "
+        "data files instead of copying them (fast, little extra space, but the old "
         "cluster is unusable once the new one has started)",
     )
     plan.add_argument("--output", default=None, help="also write the plan as JSON here")

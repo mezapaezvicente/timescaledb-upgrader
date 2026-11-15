@@ -436,7 +436,8 @@ keeps the verified route either way.
 
 ## Old continuous aggregates
 
-An aggregate from before 2.7 cannot cross the 2.25 update, which also removes
+An aggregate in the old format (created before 2.7, or up to 2.13 with
+`finalized = false`) cannot cross the 2.25 update, which also removes
 `cagg_migrate`, the only way to convert it. If a plan reaches 2.25 with one,
 `apply` stops before changing anything, says this came from a read-only check,
 and shows each aggregate: its database and name, what it is built on, its size

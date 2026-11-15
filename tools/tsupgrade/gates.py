@@ -425,8 +425,8 @@ def check_old_caggs(
         details.append(
             "Run CALL cagg_migrate('<aggregate>', override => true, drop_old => "
             "true) on each BEFORE updating: without those options the old one "
-            "stays, and this still blocks. The 2.25 update drops cagg_migrate "
-            "itself, so afterwards the only remaining fix is restoring a backup."
+            "stays, and this still blocks. The 2.25 update refuses while they "
+            "exist and removes cagg_migrate, so migrate before reaching 2.25."
         )
 
     summary = {

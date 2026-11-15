@@ -99,8 +99,10 @@ def test_it_stops_before_anything_and_says_what_it_found_and_where_from():
                   "1 refresh or other job(s)", "views that depend on it: none", "reader:SELECT"):
         assert shown in text
     assert text.startswith("apply did not start: TimescaleDB 2.25 and later refuse continuous "
-                           "aggregates created before 2.7, and this plan")
-    assert "Created before TimescaleDB 2.7 (non-finalized, the old format):" in text
+                           "aggregates in the old format, and this plan")
+    # Measured 2026-11-15: finalized = false still created one at 2.7.0 and 2.13.1.
+    assert ("In the old format (non-finalized: created before TimescaleDB 2.7, or up to 2.13 with "
+            "finalized = false):") in text
     assert "this plan updates TimescaleDB to 2.27.2 on PostgreSQL 15" in text and "--migrate-caggs" in text
     assert text.endswith("This came from a read-only check. Nothing has been changed.")
     assert "hop" not in text.lower()

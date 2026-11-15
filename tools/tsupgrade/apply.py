@@ -886,8 +886,9 @@ def _view_guidance(cluster: _Cluster, pod: str, found: Sequence[OldCagg],
                 lines.append("    then refresh it: " + in_pod("psql", "-U", user, "-d", cagg.database, "-c",
                                                              "REFRESH MATERIALIZED VIEW " + exact))
     lines += [
-        "The file keeps the view's definition, owner, grants and comment. A view on another "
-        "view is dropped first and recreated last.",
+        "The file keeps the view's definition, owner, grants and comment. Only views directly on "
+        "the aggregate are listed: a view on one of them makes its DROP fail, so save and drop "
+        "that one first, and recreate it last.",
     ] + _VIEW_DOCS
     return lines
 
@@ -957,8 +958,8 @@ def _plan_cagg_migration(
         majors = [s for s in steps[:first] if isinstance(s, MajorUpgrade)]
         later = (" Finding them only then would be after upgrading PostgreSQL from {0} to {1}.".format(
             majors[0].from_pg, majors[-1].to_pg) if majors else "")
-        why = ("{0}, and TimescaleDB 2.25 and later refuse continuous aggregates created before "
-               "2.7".format(target) if first == index else
+        why = ("{0}, and TimescaleDB 2.25 and later refuse continuous aggregates in the old "
+               "format".format(target) if first == index else
                "{0}, and no update past 2.14 gets through a continuous aggregate built on "
                "time_bucket_ng".format(ng_target))
         raise ApplyRefused([
@@ -992,13 +993,14 @@ def _plan_cagg_migration(
         lines = ["apply did not start: some continuous aggregates here would stop this plan: {0}, past "
                  "2.14 and past 2.25.".format(target)]
     elif found:
-        lines = ["apply did not start: TimescaleDB 2.25 and later refuse continuous aggregates created "
-                 "before 2.7, and {0}.".format(target)]
+        lines = ["apply did not start: TimescaleDB 2.25 and later refuse continuous aggregates in "
+                 "the old format, and {0}.".format(target)]
     else:
         lines = ["apply did not start: no TimescaleDB update past 2.14 gets through a continuous "
                  "aggregate built on time_bucket_ng, and {0}.".format(ng_target)]
     if found:
-        lines += ["", "Created before TimescaleDB 2.7 (non-finalized, the old format):"]
+        lines += ["", "In the old format (non-finalized: created before TimescaleDB 2.7, or up to 2.13 "
+                  "with finalized = false):"]
         for cagg in found:
             lines += _describe_cagg(cagg)
     blocked: List[str] = []
@@ -1019,10 +1021,10 @@ def _plan_cagg_migration(
         blocked += _view_guidance(cluster, primary.pod, found + bucket, runner)
     if found and stop is None:
         blocked.append("This plan never stops at a TimescaleDB release from 2.14 to 2.24, where "
-                       "cagg_migrate is known to work. Plan to one first, migrate, then plan on.")
+                       "apply migrates them. Plan to one first, migrate, then plan on.")
     if bucket and ng_stop is None:
-        blocked.append("This plan never stops at a TimescaleDB release from 2.8 to 2.14, where the "
-                       "rebuild on time_bucket is known to work. Plan to one first, then plan on.")
+        blocked.append("This plan never stops at a TimescaleDB release from 2.8 to 2.14, where "
+                       "apply rebuilds them on time_bucket. Plan to one first, then plan on.")
     if blocked:
         raise ApplyRefused(lines + [""] + blocked + footer, plain=True)
 
@@ -1034,8 +1036,8 @@ def _plan_cagg_migration(
                 release, _on_pg(steps, stop, plan)),
             "  CALL cagg_migrate('<aggregate>', override => true, drop_old => true)",
             "This drops the old aggregate and cannot be undone, so have a backup. It needs about "
-            "the size above free again and takes as long as rebuilding that data. apply then puts "
-            "back the grants and owner the call removes.",
+            "the size above free again and takes as long as rebuilding that data. The call drops "
+            "the grants and leaves the role that ran it as owner; apply puts both back.",
         ]
     if bucket:
         lines += [
