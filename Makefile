@@ -30,7 +30,7 @@ export TARGET_IMAGE
 
 .DEFAULT_GOAL := help
 .PHONY: help up down status psql seed smoke logs load-image clean
-.PHONY: test matrix matrix-scaffold images images-refresh image-contents lookup preflight drift
+.PHONY: test release-check matrix matrix-scaffold images images-refresh image-contents lookup preflight drift
 
 # Lookup arguments for `make lookup`.
 TARGET_IMAGE ?=
@@ -83,6 +83,12 @@ clean: ## Delete the namespace but keep the kind cluster
 # --- version matrix (phase 2) -------------------------------------------------
 
 test: ## Run the unit test suite
+	@bash scripts/test.sh
+
+# R24: on a development branch a stale evidence record only warns. Here it
+# fails, as it does on a checkout of a tagged release. Run before tagging.
+release-check: export TSUPGRADE_RELEASE := 1
+release-check: ## Run the suite as a release: a stale evidence record fails
 	@bash scripts/test.sh
 
 matrix: ## Render the version matrix to docs/matrix.md

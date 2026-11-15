@@ -62,12 +62,17 @@ no tool at all.
 
 | Your deployment | `preflight`, `plan` | `plan --format script` | `apply`, `rollback` |
 |---|---|---|---|
-| A Patroni StatefulSet on a `timescaledb-ha` image, `OnDelete`, data at `/home/postgres/pgdata/data` (as in [`deploy/`](deploy/)) | yes | yes | yes |
-| The archived `timescaledb-single` chart | yes, with `--selector` | yes | **not yet** (below) |
+| A Patroni StatefulSet on a `timescaledb-ha` image, `OnDelete`, data on one volume claim (as in [`deploy/`](deploy/)) | yes | yes | yes |
+| The archived `timescaledb-single` chart | yes | yes | **not yet** (below) |
 | An operator (CloudNativePG, StackGres, Zalando…) | `plan`; preflight not tried | yes | no: the operator would fight `apply` for the pods |
 
-`apply` needs `--statefulset`, `--selector` and `--container` when yours are
-not `tsdb`, `application=patroni` and `timescaledb`.
+`preflight`, `apply` and `rollback` take `--selector`, `--statefulset` and
+`--container`. Without them they use `application=patroni`, `tsdb` and
+`timescaledb`, and when that selector finds no pod, they read the names from
+Patroni's own pod spec: the pods whose container sets `PATRONI_SCOPE`, the
+selector from `PATRONI_KUBERNETES_LABELS`, the StatefulSet that owns them, and
+that container. More than one Patroni cluster in the namespace is refused,
+with the list. Preflight's "Cluster and namespace" check says what it found.
 
 **The archived chart.** Read from the `timescaledb-single` StatefulSet template
 and `values.yaml` on the archived repository's `main` branch; not run against
@@ -76,14 +81,19 @@ this tool:
 - the template hard-codes `updateStrategy: RollingUpdate`, so `apply` refuses
   the StatefulSet, and patching it to `OnDelete` is undone by the next
   `helm upgrade`;
-- the data directory is `/var/lib/postgresql/data`, while `apply` and
-  `rollback` look for `/home/postgres/pgdata/data`;
-- WAL is on a second volume by default, which the `pg_upgrade` pod does not
-  mount;
-- Patroni's labels are `app`, `cluster-name` and `release`, so pass
-  `--selector`;
+- the data directory is `/var/lib/postgresql/data`. `apply` now reads it
+  from the servers and `rollback` from the report (`--data-dir` overrides
+  both); measured in a container, not yet on the chart;
+- WAL is on a second volume by default. The `pg_upgrade` and rollback pods
+  now mount every claim, and the new cluster's WAL stays on the WAL volume;
+  measured in a container, not yet on the chart;
+- Patroni's labels are `app`, `cluster-name` and `release`; the names are
+  discovered from Patroni's settings (above), checked with the chart's labels
+  in unit tests only;
 - after any `apply`, the chart's values still name the old image, and the next
-  `helm upgrade` would put it back. Update the image tag in your values first.
+  `helm upgrade` would put it back. Preflight says when Helm manages the
+  StatefulSet, and the runbook, the script and `apply`'s report end with the
+  image repository and tag to put in your values first.
 
 Until that is done, chart users get the most from `preflight`, `plan` and
 `plan --format script`.
@@ -116,7 +126,8 @@ It answers, for the cluster you are actually pointed at:
 
 | Check | What it establishes |
 |---|---|
-| Cluster and namespace | Echoes back the context, API server, Kubernetes version and namespace, so you can confirm you are where you think you are. |
+| Cluster and namespace | Echoes back the context, API server, Kubernetes version and namespace, so you can confirm you are where you think you are, and any selector, StatefulSet and container discovered from Patroni's settings. |
+| Helm ownership | Whether Helm manages the StatefulSet (`app.kubernetes.io/managed-by: Helm`, or a `meta.helm.sh/release-name` annotation); if so, the image to put in the chart's values. Never a failure. |
 | Target image exists | Queries the target's registry for the manifest. Under `apply`, every image the plan still has to run, by digest. |
 | Target image on nodes | Whether the image is already cached on each node. |
 | Running versions, per instance | PostgreSQL and TimescaleDB versions **queried from each database**, per member, and per database. |
@@ -235,6 +246,15 @@ it had already done. It never retries or rolls back on its own.
 TimescaleDB must be at the source version, because a real upgrade has to
 cover them all.
 
+**Helm.** `apply` changes the StatefulSet with `kubectl set image`, and the
+chart's values still name the old image, so the next `helm upgrade` would
+put it back; after a major upgrade, the pods would not start on the upgraded
+data. It does not refuse. When Helm manages the StatefulSet and the run
+changed its image, the report ends with the image repository and tag to put
+in the values. The runbook and `plan --format script` always end with the same
+note, worded "if a Helm chart manages this StatefulSet", since `plan` does
+not look at the cluster.
+
 ---
 
 ## Changing the PostgreSQL major
@@ -254,12 +274,23 @@ bash scripts/tsupgrade.sh plan --from-pg 12.22 --from-ts 2.11.2 \
   --target-image timescale/timescaledb-ha:pg16.15-ts2.30.1 --output plan.json
 ```
 
-**How `apply` runs one.** Under Patroni it moves the leader to ordinal 0,
-scales the StatefulSet to 0, and runs `pg_upgrade` in a pod on ordinal 0's
-disk, scheduled like the database pods. That pod's `initdb` takes the old
+**How `apply` runs one.** Before anything stops, it reads the data directory
+from the servers (`data_directory`, ordinal 0's first). It refuses if they
+disagree, or if the path is not below the mount of one of the StatefulSet's
+volume claim templates: the upgrade pod mounts that claim, and `pg_upgrade`
+writes beside the directory. `--data-dir` overrides it. Only when no server
+answers does it fall back to the images' `/home/postgres/pgdata/data`, and
+the report says so. Tablespaces beyond the two defaults are refused, since
+their paths are not mounted and `--link` cannot cross volumes. Under Patroni
+it then moves the leader to ordinal 0, scales the StatefulSet to 0, and runs
+`pg_upgrade` in a pod on ordinal 0's disks (every volume claim template,
+where the database container mounts it), scheduled like the database pods. That pod's `initdb` takes the old
 cluster's data checksums, encoding, locale and locale provider (from its
-`template0`), or `pg_upgrade --check` would refuse it mid-outage. Then
-`apply` deletes the replicas' disks and Patroni's state in the DCS, since
+`template0`), or `pg_upgrade --check` would refuse it mid-outage. When
+`pg_wal` is a symlink to a volume of its own, the new cluster's WAL goes
+there too (`initdb --waldir`, beside the old WAL) and is swapped like the data
+directory: the old WAL is kept as `<wal>.pg<old major>`. Then `apply` deletes
+the replicas' disks, every claim's, and Patroni's state in the DCS, since
 `pg_upgrade` gives the cluster a new system identifier. Patroni's objects are
 deleted by name, for the scope Patroni reports, and `apply` refuses up front
 if the pod selector also matches endpoints or configmaps that are not
@@ -297,7 +328,8 @@ started by then).
 preflight against the image the cluster restarts on. It adds three checks:
 
 - *Disk on ordinal 0.* A copy needs the data directory's size free again,
-  WAL included; `--link` only a margin. Each hop keeps its old directory, so
+  WAL included; `--link` only a margin. A WAL volume of its own needs room for
+  the new cluster's WAL (256 MiB). Each hop keeps its old directory, so
   a chain such as 12 → 13 → 15 → 16 by copying ends with three of them;
   preflight and `apply` list them, to remove once the result is accepted.
 - *Other extensions.* The matrix verdicts cover TimescaleDB only. Preflight
@@ -332,11 +364,13 @@ undoes the last major upgrade in an `apply` report. It stops the cluster,
 puts `<data>.pg<old>` back in place (the new directory goes to
 `<data>.rolled-back-pg<new>-<its system identifier>`, so a later upgrade and
 rollback on the same disk does not collide with it), deletes the replicas'
-disks and Patroni's state, and starts the old image again, checking that the
+disks and Patroni's state, and starts the old image again (with WAL on its
+own volume, the old WAL comes back with the old directory), checking that the
 old system identifier is back. Every write since the upgrade is lost,
 extension updates included, which is why the flag is required. It refuses
 after `--link`, and after an upgrade that did not finish (whose report says
-how to start the old cluster instead).
+how to start the old cluster instead). The data directory is the one the
+report names; a report without one is refused unless `--data-dir` gives it.
 
 ---
 
@@ -413,7 +447,10 @@ second call fails with `plan already exists` (measured), so a plain `CALL
 cagg_migrate('<aggregate>')`, which is what TimescaleDB's own hint says, is a trap.
 The call drops the old aggregate for good, so have a backup. It also drops grants
 without a word, so `apply` puts them back, with the owner, and runs the refresh the
-call asks for. A refresh policy is kept under a new job id. Some cases stop even
+call asks for. A refresh policy is kept, with its own offsets and schedule, under a
+new job id. Compression on the aggregate and its compression policy are kept too,
+but chunks that were compressed come back uncompressed until the policy runs, so
+the aggregate takes its uncompressed size on disk meanwhile. Some cases stop even
 with the flag: a view on the aggregate, and a route with no stop from 2.14 to
 2.24. Aggregates on `time_bucket_ng` have their own section, below.
 
@@ -497,6 +534,11 @@ a clean tree, and each row's route is pinned by digest. Each row is proven at
 the PostgreSQL minors and image digests its records name, on a fixture of about
 50,000 rows: it shows that the route works, not how long it takes on your data.
 
+A record made before a later change to the code that decides a run is stale.
+On a development branch the tests only warn about stale records; `make
+release-check`, and the tests on a tagged release, fail on them. A release
+re-runs what is stale first ([details](docs/matrix-method.md#what-makes-a-row-verified)).
+
 Verified does not mean every run passed. On ten rows (pg13 2.1-2.6 and pg14
 2.5-2.6 same-PG, pg11 2.1 to pg13 and pg14) the seeded run fails the three
 fixture checks that need to alter a continuous aggregate created before 2.7.
@@ -521,8 +563,11 @@ aggregate on the way (see [Old continuous aggregates](#old-continuous-aggregates
 - That WAL archiving fails until `stanza-upgrade` has run is inferred from
   pgBackRest checking the system identifier, not observed. The rest of the
   backup advice is from pgBackRest's user guide.
-- The old-aggregate migration was run on one aggregate per database, through
-  2.15.3 on PostgreSQL 13 and, in a container, with a grant to restore. A
+- The old-aggregate migration was run through 2.15.3 on PostgreSQL 13, on one
+  aggregate per database on kind, and in a container also with two aggregates
+  in one database, a grant to restore, compression with its policy, and a
+  refresh policy with its own settings. An aggregate on an old-format
+  aggregate cannot exist (both 2.1.1 and 2.15.3 refuse to create one). A
   dependent view stops the run instead.
 - The `time_bucket_ng` rebuild was run in a container at 2.8.0, 2.12.2 and 2.14.2
   on PostgreSQL 13, on the shapes `time_bucket_ng` takes in an aggregate (day,
@@ -530,6 +575,10 @@ aggregate on the way (see [Old continuous aggregates](#old-continuous-aggregates
   `timestamp` and `date`), and through the harness on PostgreSQL 15 from 2.12.2
   and 2.14.2 to 2.28.3. It compares the live data in full, which on a large
   aggregate is as slow as the rebuild itself.
+- A major upgrade with tablespaces is refused before anything stops.
+- WAL on its own volume, and the data directory at the chart's path, were run
+  through the real `pg_upgrade` and rollback scripts in a container (copy and
+  `--link`), not yet through `apply` on a cluster with that layout.
 - The disk check before a `pg_upgrade` measures the data directory with `du`
   under preflight's exec timeout; on a very large database it reports
   `unknown`, not a failure.

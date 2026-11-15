@@ -43,6 +43,14 @@ from .contents import (
     measure_image,
     merge_measurements,
 )
+from .discover import (
+    DEFAULT_CONTAINER,
+    DEFAULT_SELECTOR,
+    DEFAULT_STATEFULSET,
+    DiscoveryError,
+    Names,
+    resolve_names,
+)
 from .drift import (
     AHEAD,
     STRANDED,
@@ -68,6 +76,7 @@ from .plan import PlanRefused, build_plan, render_runbook, render_script, route_
 from .preflight import (
     FAIL,
     UNKNOWN,
+    Kube,
     PreflightError,
     PreflightOptions,
     render_report,
@@ -229,13 +238,34 @@ def cmd_matrix_lookup(args: argparse.Namespace) -> int:
     return EXIT_OK if entry.is_known else EXIT_UNKNOWN
 
 
+def _names(args: argparse.Namespace) -> Names:
+    """The selector, StatefulSet and container: the flags, the defaults, or
+    what Patroni's pods say (tsupgrade.discover). A cluster that cannot be
+    listed keeps the defaults, for the checks to report."""
+    kube = Kube(args.context, args.namespace, args.timeout)
+    try:
+        return resolve_names(kube, args.namespace, args.selector,
+                             getattr(args, "statefulset", None), args.container)
+    except PreflightError:
+        return Names(args.selector or DEFAULT_SELECTOR,
+                     getattr(args, "statefulset", None) or DEFAULT_STATEFULSET,
+                     args.container or DEFAULT_CONTAINER)
+
+
 def cmd_preflight(args: argparse.Namespace) -> int:
+    try:
+        names = _names(args)
+    except DiscoveryError as exc:
+        print("error: {0}".format(exc), file=sys.stderr)
+        return EXIT_ERROR
     opts = PreflightOptions(
         target_image=args.target_image,
         context=args.context,
         namespace=args.namespace,
-        selector=args.selector,
-        container=args.container,
+        selector=names.selector,
+        container=names.container,
+        statefulset=names.statefulset if names.discovered else None,
+        discovered=tuple(names.discovered),
         psql_user=args.psql_user,
         admin_db=args.admin_db,
         dump_path=args.dump_path,
@@ -612,9 +642,17 @@ def cmd_rollback(args: argparse.Namespace) -> int:
     except (OSError, json.JSONDecodeError) as exc:
         print("error: cannot read report {0}: {1}".format(args.apply_report, exc), file=sys.stderr)
         return EXIT_ERROR
-    opts = ApplyOptions(context=args.context, namespace=args.namespace, selector=args.selector,
-                        container=args.container, statefulset=args.statefulset,
-                        timeout=args.timeout, rollout_timeout=args.rollout_timeout)
+    try:
+        names = _names(args)
+    except DiscoveryError as exc:
+        print("refused: nothing was written\n  - {0}".format(exc), file=sys.stderr)
+        return EXIT_CHECK_FAILED
+    for line in names.discovered:
+        print(line, file=sys.stderr)
+    opts = ApplyOptions(context=args.context, namespace=args.namespace, selector=names.selector,
+                        container=names.container, statefulset=names.statefulset,
+                        timeout=args.timeout, rollout_timeout=args.rollout_timeout,
+                        data_dir=args.data_dir)
     print("ROLLBACK: {0}".format(LOST_WRITES), file=sys.stderr)
     try:
         result = rollback(report, opts, discard_writes=args.discard_writes)
@@ -654,12 +692,19 @@ def cmd_apply(args: argparse.Namespace) -> int:
         print("error: cannot read plan {0}: {1}".format(args.plan, exc), file=sys.stderr)
         return EXIT_ERROR
 
+    try:
+        names = _names(args)
+    except DiscoveryError as exc:
+        print("refused: nothing was written\n  - {0}".format(exc), file=sys.stderr)
+        return EXIT_CHECK_FAILED
     opts = ApplyOptions(
         context=args.context,
         namespace=args.namespace,
-        selector=args.selector,
-        container=args.container,
-        statefulset=args.statefulset,
+        selector=names.selector,
+        container=names.container,
+        statefulset=names.statefulset,
+        discovered=tuple(names.discovered),
+        data_dir=args.data_dir,
         databases=tuple(args.database),
         acknowledge_verification=args.acknowledge_verification_run,
         matrix_path=args.matrix,
@@ -799,8 +844,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pre.add_argument("--context", default=None, help="kubectl context")
     pre.add_argument("--namespace", "-n", default="timescale")
-    pre.add_argument("--selector", "-l", default="application=patroni")
-    pre.add_argument("--container", default="timescaledb")
+    pre.add_argument("--selector", "-l", default=None,
+                     help="default: application=patroni, or, when that finds no pod, the PATRONI_KUBERNETES_LABELS of the namespace's one Patroni cluster")
+    pre.add_argument("--container", default=None,
+                     help="default: timescaledb, or the container with PATRONI_SCOPE (see --selector)")
     pre.add_argument("--psql-user", default="postgres", dest="psql_user")
     pre.add_argument("--admin-db", default="postgres", dest="admin_db")
     pre.add_argument(
@@ -944,9 +991,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     apply.add_argument("--context", default=None)
     apply.add_argument("--namespace", default="timescale")
-    apply.add_argument("--selector", default="application=patroni")
-    apply.add_argument("--container", default="timescaledb")
-    apply.add_argument("--statefulset", default="tsdb")
+    apply.add_argument("--selector", default=None,
+                     help="default: application=patroni, or, when that finds no pod, the "
+                     "PATRONI_KUBERNETES_LABELS of the namespace's one Patroni cluster")
+    apply.add_argument("--container", default=None,
+                     help="default: timescaledb, or the container with PATRONI_SCOPE")
+    apply.add_argument("--statefulset", default=None,
+                     help="default: tsdb, or the Patroni pods' owner")
+    apply.add_argument(
+        "--data-dir", default=None, dest="data_dir", metavar="PATH",
+        help="the data directory, for a major upgrade (default: what the servers report, "
+        "which must agree)",
+    )
     apply.add_argument("--matrix", default=None)
     apply.add_argument("--timeout", type=float, default=30.0)
     apply.add_argument(
@@ -987,9 +1043,15 @@ def build_parser() -> argparse.ArgumentParser:
                       "pg_upgrade ran")
     back.add_argument("--context", default=None)
     back.add_argument("--namespace", default="timescale")
-    back.add_argument("--selector", default="application=patroni")
-    back.add_argument("--container", default="timescaledb")
-    back.add_argument("--statefulset", default="tsdb")
+    back.add_argument("--selector", default=None,
+                     help="default: application=patroni, or, when that finds no pod, the "
+                     "PATRONI_KUBERNETES_LABELS of the namespace's one Patroni cluster")
+    back.add_argument("--container", default=None,
+                     help="default: timescaledb, or the container with PATRONI_SCOPE")
+    back.add_argument("--statefulset", default=None,
+                     help="default: tsdb, or the Patroni pods' owner")
+    back.add_argument("--data-dir", default=None, dest="data_dir", metavar="PATH",
+                      help="the data directory (default: the one the report names)")
     back.add_argument("--timeout", type=float, default=30.0)
     back.add_argument("--rollout-timeout", type=float, default=600.0, dest="rollout_timeout")
     back.add_argument("--json", action="store_true")

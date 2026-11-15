@@ -84,10 +84,11 @@ restart. Either way the rollout waits for a primary to be back before going on.
 from __future__ import annotations
 
 import json
+import posixpath
 import re
 import shlex
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
@@ -100,6 +101,7 @@ from .gates import (
     reaches_time_bucket_ng_failure,
     time_bucket_ng_caggs,
 )
+from .helm import helm_owner, values_note
 from .ngrebuild import REBUILD_FROM, RebuildFailed, preview, rebuild
 from .images import mirrored
 from .plan import PLAN_FORMAT, VERIFICATION, pinned
@@ -137,6 +139,10 @@ __all__ = [
 
 APPLY_FORMAT = 1
 
+# Where the timescale/timescaledb-ha images keep the data directory. Used only
+# when no server can say where it is, and the report says so.
+DEFAULT_DATA_DIR = "/home/postgres/pgdata/data"
+
 DONE = "done"
 SKIPPED = "skipped"
 FAILED = "failed"
@@ -173,9 +179,11 @@ class ApplyOptions:
     # How long a running pg_upgrade pod is waited for; 0 is no limit. A pod
     # that has not started is bounded by rollout_timeout instead.
     pg_upgrade_timeout: float = 0.0
-    # Where Patroni keeps the data directory, and where each major's binaries
-    # are; both as the timescale/timescaledb-ha images lay them out.
-    data_dir: str = "/home/postgres/pgdata/data"
+    # The data directory, for a major upgrade. None: read from the servers
+    # before anything stops (resolve_data_dir); set (--data-dir), this path.
+    data_dir: Optional[str] = None
+    # Where each major's binaries are, as the timescale/timescaledb-ha images
+    # lay them out.
     pg_bin: str = "/usr/lib/postgresql/{0}/bin"
     registry_timeout: float = 15.0
     poll_interval: float = 2.0
@@ -189,6 +197,8 @@ class ApplyOptions:
     # stops before changing anything.
     migrate_caggs: bool = False
     confirm: Optional[Callable[[str], bool]] = None
+    # What tsupgrade.discover found when the names were not given.
+    discovered: Tuple[str, ...] = ()
     # Called as soon as something is worth telling the operator, since a run
     # can take hours and the report comes at the end.
     notify: Optional[Callable[[str], None]] = None
@@ -287,6 +297,116 @@ def check_statefulset(kube: Kube, opts: ApplyOptions) -> List[str]:
                 opts.statefulset, kind, opts.namespace)]
 
 
+def _claim_mounts(sts: Dict[str, Any], opts: ApplyOptions) -> List[Dict[str, Any]]:
+    """The database container's mounts of the StatefulSet's volume claim
+    templates, in the templates' order."""
+    template = sts.get("spec", {}).get("template", {}).get("spec", {})
+    container = next((c for c in template.get("containers") or []
+                      if c.get("name") == opts.container), {})
+    mounts = {m.get("name"): m for m in container.get("volumeMounts") or []}
+    claims = [c.get("metadata", {}).get("name")
+              for c in sts.get("spec", {}).get("volumeClaimTemplates") or []]
+    return [mounts[c] for c in claims if c in mounts]
+
+
+def _under(path: str, mount: str) -> bool:
+    """Strictly below: pg_upgrade writes the data directory's siblings, which
+    must be on the same volume."""
+    path, mount = posixpath.normpath(path), posixpath.normpath(mount)
+    return path.startswith(mount.rstrip("/") + "/")
+
+
+def _data_mount(sts: Dict[str, Any], opts: ApplyOptions, data: str) -> Optional[Dict[str, Any]]:
+    """The claim template's mount that holds ``data``: the deepest one."""
+    found = [m for m in _claim_mounts(sts, opts) if _under(data, m.get("mountPath") or "")]
+    return max(found, key=lambda m: len(m["mountPath"])) if found else None
+
+
+def _claims(sts: Dict[str, Any]) -> List[str]:
+    """Every volume claim template's name: each ordinal has a PVC of each."""
+    return [c.get("metadata", {}).get("name")
+            for c in sts.get("spec", {}).get("volumeClaimTemplates") or []]
+
+
+def _replica_pvcs(sts: Dict[str, Any], opts: ApplyOptions, replicas: int) -> List[str]:
+    """The PVCs of ordinals 1 and up, every claim's: WAL and data alike belong
+    to the cluster a pg_upgrade or a rollback replaces."""
+    return ["{0}-{1}-{2}".format(claim, opts.statefulset, i)
+            for i in range(1, replicas) for claim in _claims(sts)]
+
+
+def resolve_data_dir(instances: Sequence[Instance], sts: Dict[str, Any],
+                     opts: ApplyOptions) -> Tuple[List[str], str, str]:
+    """``(reasons, path, how)``: the data directory a major upgrade works on.
+
+    ``--data-dir`` if given. Otherwise what the servers report, ordinal 0's
+    first; they have to agree. :data:`DEFAULT_DATA_DIR` only when none can
+    say, and ``how`` says so. Either way the path has to sit below the mount
+    of one of the StatefulSet's volume claim templates, or the upgrade pod
+    could not reach it.
+    """
+    first = "{0}-0".format(opts.statefulset)
+    if opts.data_dir:
+        path, how = opts.data_dir, "given with --data-dir"
+    else:
+        read = {i.pod: posixpath.normpath(i.data_directory)
+                for i in instances if not i.error and i.data_directory}
+        if len(set(read.values())) > 1:
+            return (["the instances report different data directories ({0}); a major upgrade "
+                     "works on one path on every disk. Nothing was done".format(", ".join(
+                         "{0}={1}".format(p, d) for p, d in sorted(read.items())))], "", "")
+        if read:
+            pod = first if first in read else sorted(read)[0]
+            path, how = read[pod], "read from {0}'s server".format(pod)
+        else:
+            path, how = DEFAULT_DATA_DIR, ("no server reported it, so the timescaledb-ha "
+                                           "images' default; --data-dir sets it")
+    if _data_mount(sts, opts, path) is None:
+        mounts = ", ".join("{0} at {1}".format(m.get("name"), m.get("mountPath"))
+                           for m in _claim_mounts(sts, opts)) or "none"
+        return (["the data directory {0} ({1}) is not below the mount of any volume claim "
+                 "template of statefulset/{2} (container {3} mounts: {4}); the pg_upgrade pod "
+                 "could not reach it. Nothing was done".format(
+                     path, how, opts.statefulset, opts.container, mounts)], path, how)
+    return [], path, how
+
+
+_TABLESPACES_SQL = ("SELECT coalesce(string_agg(spcname, ',' ORDER BY spcname), '') FROM pg_tablespace "
+                    "WHERE spcname NOT IN ('pg_default', 'pg_global')")
+
+
+def check_major_layout(cluster: "_Cluster", sts: Dict[str, Any],
+                       primary: str) -> Tuple[List[str], Optional[str]]:
+    """``(reasons, wal)``: what a major upgrade cannot handle, read before
+    anything is written, and the WAL directory when ``pg_wal`` is a symlink.
+
+    Tablespaces are refused: each lives on its own path, often its own
+    volume, which the upgrade pod does not mount, and ``--link`` cannot
+    cross volumes. WAL on another volume is handled (the script puts the new
+    cluster's beside it), but only on a volume claim the upgrade pod mounts.
+    """
+    opts = cluster.opts
+    reasons: List[str] = []
+    rc, out, err = cluster.psql(primary, opts.admin_db, _TABLESPACES_SQL)
+    if rc != 0:
+        reasons.append("cannot read pg_tablespace on {0}: {1}".format(primary, (err or out).strip()))
+    elif out.strip():
+        reasons.append("tablespaces {0}: a major upgrade with tablespaces is not supported (the "
+                       "pg_upgrade pod does not mount their paths, and --link cannot cross "
+                       "volumes). Nothing was done".format(", ".join(out.strip().split(","))))
+    # Not a symlink, or unreadable: the script looks again on the disk itself.
+    rc, out, _ = cluster.kube.exec("{0}-0".format(opts.statefulset), opts.container,
+                                   ["readlink", (opts.data_dir or "") + "/pg_wal"])
+    wal = None
+    if rc == 0 and out.strip():
+        wal = posixpath.normpath(posixpath.join(opts.data_dir or "", out.strip()))
+        if _data_mount(sts, opts, wal) is None:
+            reasons.append("pg_wal is a symlink to {0}, which is not below the mount of any volume "
+                           "claim template of statefulset/{1}; the pg_upgrade pod could not reach "
+                           "it. Nothing was done".format(wal, opts.statefulset))
+    return reasons, wal
+
+
 def _same_pg(planned: str, running: Optional[str]) -> bool:
     """Major always; the minor too when the plan names one."""
     if not running:
@@ -360,11 +480,17 @@ class _Cluster:
         opts: ApplyOptions,
         sleep: Callable[[float], None],
         clock: Callable[[], float],
+        data_how: str = "",
+        wal: Optional[str] = None,
     ) -> None:
         self.kube = kube
         self.opts = opts
         self.sleep = sleep
         self.clock = clock
+        # Where opts.data_dir came from (resolve_data_dir), for the report.
+        self.data_how = data_how
+        # Where pg_wal points when it is a symlink (check_major_layout).
+        self.wal = wal
 
     def pods(self) -> List[Dict[str, Any]]:
         return self.kube.json(["get", "pods", "-l", self.opts.selector]).get("items", [])
@@ -492,6 +618,7 @@ def _step_preflight(
             use_cached_images=opts.use_cached_images,
             statefulset=opts.statefulset,
             cleared_gates=_cleared_gates(later),
+            discovered=opts.discovered,
         )
     )
     lines = ["{0}: {1} - {2}".format(r.name, r.status, r.summary) for r in results]
@@ -1116,11 +1243,10 @@ def _dcs_objects(kube: Kube, opts: ApplyOptions, scope: str) -> Tuple[List[str],
     return sorted(patroni), sorted(others)
 
 
-def _finish_by_hand(opts: ApplyOptions, claim: str, replicas: int, run_image: str,
+def _finish_by_hand(opts: ApplyOptions, pvcs: Sequence[str], replicas: int, run_image: str,
                     dcs: Sequence[str]) -> List[str]:
     """What apply does after a successful pg_upgrade, as commands."""
-    lines = [_kubectl(opts, "delete", "pvc", "{0}-{1}-{2}".format(claim, opts.statefulset, i))
-             for i in range(1, replicas)]
+    lines = [_kubectl(opts, "delete", "pvc", pvc) for pvc in pvcs]
     return lines + [
         _kubectl(opts, "delete", *dcs, "--ignore-not-found") if dcs
         else "(Patroni had no objects in the DCS to delete)",
@@ -1152,12 +1278,15 @@ def _old_locale(cluster: _Cluster, primary: str, old: int) -> Dict[str, str]:
 
 
 def _after_failed_upgrade(lines: Sequence[str], opts: ApplyOptions, old: int, replicas: int,
-                          claim: str) -> List[str]:
+                          claim: str, wal: Optional[str] = None) -> List[str]:
     """What a failed pg_upgrade left, from the script's exit lines; empty when
     the old cluster is as it was (a copy, or --link before linking began)."""
-    disabled = [l.split(": ", 1)[1] for l in lines if l.startswith("old cluster disabled: ")]
-    moved = [l.split(": ", 1)[1] for l in lines if l.startswith("old data directory moved: ")]
-    if not disabled and not moved:
+    def said(prefix: str) -> List[str]:
+        return [l.split(": ", 1)[1] for l in lines if l.startswith(prefix + ": ")]
+
+    disabled, moved = said("old cluster disabled"), said("old data directory moved")
+    swapped, wal_moved = said("data directories swapped"), said("old WAL directory moved")
+    if not (disabled or moved or swapped or wal_moved):
         return []
     disk = "{0}-{1}-0".format(claim, opts.statefulset)
     notes = ["the cluster is stopped, and PostgreSQL {0} will not start on ordinal 0's data "
@@ -1165,6 +1294,14 @@ def _after_failed_upgrade(lines: Sequence[str], opts: ApplyOptions, old: int, re
     if moved:
         notes.append("    the old data directory was moved to {0}; move it back to {1}".format(
             moved[0], opts.data_dir))
+    if swapped:
+        notes.append("    pg_upgrade had finished and the directories were swapped: {0} is the "
+                     "upgraded cluster and the old one is {0}.pg{1}; move {0} aside and "
+                     "{0}.pg{1} back to {0}".format(opts.data_dir, old))
+    if wal_moved:
+        notes.append("    the old WAL directory was moved to {0}; move what is at {1} aside, {0} "
+                     "back to {1}, and point {2}/pg_wal at it (ln -sfn {1} {2}/pg_wal)".format(
+                         wal_moved[0], wal or wal_moved[0].rsplit(".pg", 1)[0], opts.data_dir))
     for path in disabled:
         notes.append("    pg_upgrade --link had started linking and renamed global/pg_control "
                      "to {0}. The new cluster was never started, so the old one is unmodified "
@@ -1221,26 +1358,20 @@ _SCHEDULING = ("tolerations", "nodeSelector", "affinity", "imagePullSecrets",
                "serviceAccountName", "priorityClassName")
 
 
-def _volume(sts: Dict[str, Any], opts: ApplyOptions) -> Tuple[str, str]:
-    """``(claim, mount)``: the data volume's claim template and where the
-    database container mounts it."""
-    template = sts.get("spec", {}).get("template", {}).get("spec", {})
-    claims = sts.get("spec", {}).get("volumeClaimTemplates") or []
-    if not claims:
-        raise _StepFailed("statefulset/{0} has no volumeClaimTemplates".format(opts.statefulset))
-    claim = claims[0]["metadata"]["name"]
-    container = next((c for c in template.get("containers") or []
-                      if c.get("name") == opts.container), {})
-    mount = next((m["mountPath"] for m in container.get("volumeMounts") or []
-                  if m.get("name") == claim), None)
+def _volume(sts: Dict[str, Any], opts: ApplyOptions) -> Dict[str, Any]:
+    """The database container's mount of the claim template that holds the
+    data directory, as the upgrade pod repeats it (``subPath`` included)."""
+    mount = _data_mount(sts, opts, opts.data_dir or "")
     if mount is None:
-        raise _StepFailed("container {0} does not mount {1}".format(opts.container, claim))
-    return claim, mount
+        raise _StepFailed("the data directory {0} is not below the mount of any volume claim "
+                          "template of statefulset/{1}".format(opts.data_dir, opts.statefulset))
+    return {k: mount[k] for k in ("name", "mountPath", "subPath") if mount.get(k)}
 
 
 def _run_on_ordinal_0(kube: Kube, sts: Dict[str, Any], opts: ApplyOptions, pod: str, image: str,
                       script: str, env: Dict[str, str]) -> Tuple[int, str, str]:
-    """Start a one-off pod running ``script`` on ordinal 0's disk.
+    """Start a one-off pod running ``script`` on ordinal 0's disks: every
+    claim template the database container mounts, where it mounts them.
 
     Scheduled as the database pods are: where they may run (taints,
     selectors, affinity), with their pull secrets, account, resources and
@@ -1250,7 +1381,9 @@ def _run_on_ordinal_0(kube: Kube, sts: Dict[str, Any], opts: ApplyOptions, pod: 
     template = sts.get("spec", {}).get("template", {}).get("spec", {})
     container = next((c for c in template.get("containers") or []
                       if c.get("name") == opts.container), {})
-    claim, mount = _volume(sts, opts)
+    _volume(sts, opts)  # the data directory has to be on one of them
+    mounts = [{k: m[k] for k in ("name", "mountPath", "subPath") if m.get(k)}
+              for m in _claim_mounts(sts, opts)]
     spec = {
         "apiVersion": "v1",
         "spec": dict({key: template[key] for key in _SCHEDULING if template.get(key)}, **{
@@ -1263,10 +1396,10 @@ def _run_on_ordinal_0(kube: Kube, sts: Dict[str, Any], opts: ApplyOptions, pod: 
                 "imagePullPolicy": "IfNotPresent",
                 "command": ["bash", "-c", script],
                 "env": [{"name": k, "value": v} for k, v in env.items()],
-                "volumeMounts": [{"name": claim, "mountPath": mount}],
+                "volumeMounts": mounts,
             })],
-            "volumes": [{"name": claim, "persistentVolumeClaim": {
-                "claimName": "{0}-{1}-0".format(claim, opts.statefulset)}}],
+            "volumes": [{"name": m["name"], "persistentVolumeClaim": {
+                "claimName": "{0}-{1}-0".format(m["name"], opts.statefulset)}} for m in mounts],
         }),
     }
     return kube.run(["run", pod, "--image", image, "--restart=Never",
@@ -1303,7 +1436,12 @@ class _Hop:
 
     @property
     def claim(self) -> str:
-        return _volume(self.sts, self.opts)[0]
+        return _volume(self.sts, self.opts)["name"]
+
+    @property
+    def wal_kept(self) -> Optional[str]:
+        wal = self.cluster.wal
+        return "{0}.pg{1}".format(wal, self.step.from_pg) if wal else None
 
     @property
     def first(self) -> str:
@@ -1409,7 +1547,8 @@ def _finish_list(hop: _Hop) -> List[str]:
     again by hand, so it names the failover object a switchover may have
     left, in the kind Patroni uses here."""
     kinds = {d.split("/", 1)[0] for d in hop.dcs}
-    return _finish_by_hand(hop.opts, hop.claim, hop.replicas, hop.run_image, sorted(
+    return _finish_by_hand(hop.opts, _replica_pvcs(hop.sts, hop.opts, hop.replicas), hop.replicas,
+                           hop.run_image, sorted(
         set(hop.dcs) | {"{0}/{1}-failover".format(k, hop.scope) for k in kinds}))
 
 
@@ -1429,7 +1568,8 @@ def _run_pg_upgrade(hop: _Hop) -> None:
     _, log, _ = kube.run(["logs", hop.pod])
     lines = [l for l in log.splitlines() if l.strip()]
     if phase != "Succeeded":
-        hop.state[:] = _after_failed_upgrade(lines, opts, old, hop.replicas, hop.claim) or hop.state
+        hop.state[:] = (_after_failed_upgrade(lines, opts, old, hop.replicas, hop.claim,
+                                              hop.cluster.wal) or hop.state)
         raise _StepFailed("pg_upgrade {0} -> {1} failed in {2}".format(old, new, hop.image),
                           lines[-40:])
     # pg_upgrade's own word on copy or link sits mid-log, above the tail.
@@ -1438,19 +1578,20 @@ def _run_pg_upgrade(hop: _Hop) -> None:
     kube.run(["delete", "pod", hop.pod, "--wait=false"])
     hop.state[:] = ["ordinal 0's data directory is upgraded to PostgreSQL {0} and the cluster is "
                     "stopped; do not start it on PostgreSQL {1}'s image. The old directory is "
-                    "{2}.pg{1}{3}. To finish by hand:".format(
+                    "{2}.pg{1}{4}{3}. To finish by hand:".format(
                         new, old, opts.data_dir,
                         "; with --link it is reusable only while the new cluster has never "
                         "started, after renaming its global/pg_control.old back to "
-                        "global/pg_control" if step.link else "")] + ["    " + l for l in finish]
+                        "global/pg_control" if step.link else "",
+                        ", its WAL " + hop.wal_kept if hop.wal_kept else "")] + [
+                            "    " + l for l in finish]
 
 
 def _reset_replicas_and_dcs(hop: _Hop) -> None:
     """4. The replicas' copies and Patroni's stored state belong to the old
     cluster, whose system identifier the upgraded one no longer has."""
     opts, kube = hop.opts, hop.kube
-    for i in range(1, hop.replicas):
-        name = "{0}-{1}-{2}".format(hop.claim, opts.statefulset, i)
+    for name in _replica_pvcs(hop.sts, opts, hop.replicas):
         rc, out, err = kube.run(["delete", "pvc", name, "--ignore-not-found", "--wait=true"])
         if rc != 0:
             raise _StepFailed("cannot delete {0}".format(name), [err or out])
@@ -1506,6 +1647,10 @@ def _major_upgrade(step: MajorUpgrade, cluster: _Cluster, output: List[str],
     sts = cluster.kube.json(["get", "statefulset", cluster.opts.statefulset])
     hop = _Hop(step, cluster, sts, output, state)
     _volume(sts, cluster.opts)  # no data volume: fail here, before anything
+    output.append("data directory: {0} ({1})".format(cluster.opts.data_dir, cluster.data_how))
+    if cluster.wal:
+        output.append("WAL directory: {0} (pg_wal is a symlink); the new cluster's goes beside it "
+                      "and the old one is kept as {1}".format(cluster.wal, hop.wal_kept))
     _refuse_leftover_pod(hop)
     _move_leader(hop, _read_old_cluster(hop))
     _stop(hop)
@@ -1517,8 +1662,11 @@ def _major_upgrade(step: MajorUpgrade, cluster: _Cluster, output: List[str],
         step.from_pg, step.to_pg, hop.replicas, hop.run_image), output, detail={
             "from_pg": step.from_pg, "to_pg": step.to_pg, "link": step.link,
             "old_image": hop.old_image, "run_image": hop.run_image,
-            "data": opts.data_dir, "kept": "{0}.pg{1}".format(opts.data_dir, step.from_pg),
-            "replicas": hop.replicas, "claim": hop.claim, "scope": hop.scope,
+            "data": opts.data_dir, "data_from": cluster.data_how,
+            "kept": "{0}.pg{1}".format(opts.data_dir, step.from_pg),
+            "wal": cluster.wal, "wal_kept": hop.wal_kept,
+            "replicas": hop.replicas, "claim": hop.claim, "claims": _claims(sts),
+            "scope": hop.scope,
             "system_identifier_before": hop.system_identifier,
         })
 
@@ -1605,11 +1753,22 @@ def apply_plan(
         raise ApplyRefused(["cannot read the cluster: {0}".format(found.summary)] + found.details)
     reasons, databases = check_source(plan, instances, opts)
     reasons += check_statefulset(kube, opts)
+    steps, _ = parse_steps(plan["steps"])  # check_plan has already refused a bad one
+    data_how, wal = "", None
+    if any(isinstance(s, MajorUpgrade) for s in steps) and not reasons:
+        sts = kube.json(["get", "statefulset", opts.statefulset])
+        found_reasons, data_dir, data_how = resolve_data_dir(instances, sts, opts)
+        reasons += found_reasons
+        opts = replace(opts, data_dir=data_dir)
+        if not reasons:
+            primary = next(i.pod for i in instances if i.role == "primary" and not i.error)
+            found_reasons, wal = check_major_layout(_Cluster(kube, opts, sleep, clock), sts, primary)
+            reasons += found_reasons
     if reasons:
         raise ApplyRefused(reasons)
 
-    cluster = _Cluster(kube, opts, sleep, clock)
-    steps, _ = parse_steps(plan["steps"])  # check_plan has already refused a bad one
+    cluster = _Cluster(kube, opts, sleep, clock, data_how, wal)
+    image_before = _statefulset_image(kube, opts)
     _plan_cagg_migration(steps, plan, cluster, instances, databases, opts)
     preflight = preflight or run_preflight
     report: Dict[str, Any] = {
@@ -1622,6 +1781,10 @@ def apply_plan(
         "started_at": _now(),
         "steps": [],
     }
+    if data_how:
+        report["data_directory"] = {"path": opts.data_dir, "from": data_how}
+    if opts.discovered:
+        report["discovered"] = list(opts.discovered)
     failure: Optional[Dict[str, Any]] = None
 
     run: Dict[str, Callable[[Any], _Outcome]] = {
@@ -1655,7 +1818,36 @@ def apply_plan(
     if failure:
         report["failure"] = failure
     report["final"] = _final_state(cluster, databases)
+    helm = _helm_section(kube, opts, image_before, any(isinstance(s, MajorUpgrade) for s in steps))
+    if helm:
+        report["helm"] = helm
     return report
+
+
+def _statefulset_image(kube: Kube, opts: ApplyOptions) -> Optional[str]:
+    try:
+        sts = kube.json(["get", "statefulset", opts.statefulset])
+    except PreflightError:
+        return None
+    template = sts.get("spec", {}).get("template", {}).get("spec", {})
+    return next((c.get("image") for c in template.get("containers") or []
+                 if c.get("name") == opts.container), None)
+
+
+def _helm_section(kube: Kube, opts: ApplyOptions, before: Optional[str],
+                  major: bool) -> Optional[Dict[str, Any]]:
+    """When Helm owns the StatefulSet and apply changed its image: what to put
+    in the chart's values before the next ``helm upgrade`` (R28)."""
+    try:
+        sts = kube.json(["get", "statefulset", opts.statefulset])
+    except PreflightError:
+        return None
+    release = helm_owner(sts)
+    after = _statefulset_image(kube, opts)
+    if release is None or not after or after == before:
+        return None
+    return {"release": release, "image": after,
+            "note": values_note(after, release, major=major, statefulset=opts.statefulset)}
 
 
 def render_report(report: Dict[str, Any]) -> str:
@@ -1666,6 +1858,10 @@ def render_report(report: Dict[str, Any]) -> str:
     lines.append("source    : pg{0} / ts{1}".format(src.get("pg"), src.get("ts")))
     lines.append("target    : pg{0} / ts{1}  ({2})".format(tgt.get("pg"), tgt.get("ts"), tgt.get("image")))
     lines.append("databases : {0}".format(", ".join(report.get("databases") or []) or "none"))
+    lines.extend(report.get("discovered") or [])
+    data = report.get("data_directory")
+    if data:
+        lines.append("data dir  : {0} ({1})".format(data.get("path"), data.get("from")))
     lines.append("")
     mark = {DONE: " ok ", SKIPPED: "skip", FAILED: "FAIL"}
     for step in report.get("steps", []):
@@ -1680,6 +1876,9 @@ def render_report(report: Dict[str, Any]) -> str:
             inst.get("pod"), inst.get("role"), inst.get("server_version"), inst.get("image")))
     for db, version in sorted((final.get("databases") or {}).items()):
         lines.append("{0}: timescaledb {1}".format(db, version))
+    if report.get("helm"):
+        lines.append("")
+        lines.extend(report["helm"]["note"])
     lines.append("")
     lines.append("result    : {0}".format(report.get("result", "?").upper()))
     return "\n".join(lines)

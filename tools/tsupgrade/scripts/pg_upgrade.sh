@@ -8,13 +8,25 @@
 # template0: ENCODING, LC_COLLATE, LC_CTYPE, LOCALE_PROVIDER (libc, icu or
 # builtin), PROVIDER_LOCALE.
 #
+# WAL on its own volume: when DATA/pg_wal is a symlink, the new cluster's WAL
+# goes beside the old one's (<wal>.new, on the same volume) and is swapped like
+# the data directory: the old WAL is kept as <wal>.pg<FROM>, and each data
+# directory's pg_wal is pointed at its own. rollback_swap.sh reads the
+# symlinks to swap them back.
+#
 # On failure the EXIT trap says what was changed ("old cluster disabled:",
-# "old data directory moved:"), which apply turns into how to go back.
+# "old data directory moved:", "data directories swapped:", "old WAL directory
+# moved:"), which apply turns into how to go back.
 set -euo pipefail
 : "${FROM:?}" "${TO:?}" "${PG_BIN_OLD:?}" "${PG_BIN_NEW:?}" "${DATA:?}" "${LINK?}"
 : "${ENCODING:?}" "${LC_COLLATE:?}" "${LC_CTYPE:?}" "${LOCALE_PROVIDER:?}" "${PROVIDER_LOCALE?}"
 old_bin="$PG_BIN_OLD"; new_bin="$PG_BIN_NEW"; data="$DATA"
 new="$data.new"; keep="$data.pg$FROM"
+wal=""; wal_new=""; wal_keep=""
+if [ -L "$data/pg_wal" ]; then
+  wal=$(readlink -f "$data/pg_wal")
+  wal_new="$wal.new"; wal_keep="$wal.pg$FROM"
+fi
 cd "$(dirname "$data")"
 
 on_exit() {
@@ -24,6 +36,8 @@ on_exit() {
       if [ -e "$d/global/pg_control.old" ]; then echo "old cluster disabled: $d/global/pg_control.old"; fi
     done
     if [ -d "$keep" ] && [ ! -d "$data" ]; then echo "old data directory moved: $keep"; fi
+    if [ -d "$keep" ] && [ -d "$data" ]; then echo "data directories swapped: $data"; fi
+    if [ -n "$wal" ] && [ -d "$wal_keep" ]; then echo "old WAL directory moved: $wal_keep"; fi
   fi
   exit "$rc"
 }
@@ -33,6 +47,11 @@ for b in "$old_bin" "$new_bin"; do
   [ -x "$b/pg_upgrade" ] || [ -x "$b/postgres" ] || { echo "this image has no $b"; exit 2; }
 done
 [ -e "$keep" ] && { echo "$keep already exists; refusing to overwrite it"; exit 2; }
+if [ -n "$wal" ]; then
+  [ -d "$wal" ] || { echo "$data/pg_wal points to $wal, which is not there"; exit 2; }
+  [ -e "$wal_keep" ] && { echo "$wal_keep already exists; refusing to overwrite it"; exit 2; }
+  rm -rf "$wal_new"
+fi
 rm -rf "$new"
 
 # Data checksums must match, and PostgreSQL 18's initdb turns them on by default.
@@ -50,6 +69,7 @@ case "$LOCALE_PROVIDER" in
   icu) args+=(--locale-provider=icu --icu-locale="$PROVIDER_LOCALE") ;;
   builtin) args+=(--locale-provider=builtin --builtin-locale="$PROVIDER_LOCALE") ;;
 esac
+if [ -n "$wal" ]; then args+=(--waldir="$wal_new"); fi
 echo "old cluster: PostgreSQL $FROM, data checksums ${sums:-unknown}; initdb ${args[*]}"
 "$new_bin/initdb" "${args[@]}" -D "$new" >/dev/null
 echo "shared_preload_libraries = 'timescaledb'" >> "$new/postgresql.conf"
@@ -64,6 +84,13 @@ if [ -n "$LINK" ]; then upgrade+=(--link); fi
 "${upgrade[@]}" || { report ""; exit 1; }
 mv "$data" "$keep"
 mv "$new" "$data"
+if [ -n "$wal" ]; then
+  mv "$wal" "$wal_keep"
+  mv "$wal_new" "$wal"
+  ln -sfn "$wal" "$data/pg_wal"
+  ln -sfn "$wal_keep" "$keep/pg_wal"
+  echo "WAL: PostgreSQL $TO's is $wal, PostgreSQL $FROM's is kept as $wal_keep"
+fi
 
 # pg_upgrade's suggested script updates timescaledb straight to this image's
 # default release, past any stop the plan makes; the plan's updates replace it.
@@ -77,4 +104,5 @@ echo "relation files sharing an inode with $keep: $(find "$data/base" -type f -l
 echo "upgraded to PostgreSQL $TO; the old data directory is $keep"
 kept=()
 for d in "$data".pg*; do kept+=("$d"); done
+if [ -n "$wal" ]; then for d in "$wal".pg*; do kept+=("$d"); done; fi
 echo "old data directories on this disk, to remove once the result is accepted: ${kept[*]}"

@@ -51,6 +51,9 @@ class FakeKube:
         self.writes: List[str] = []
         self.alter_error = None
         self.strategy = "OnDelete"
+        # What each server reports as data_directory; a pod name maps to its own.
+        self.data_directory = "/home/postgres/pgdata/data"
+        self.data_directories = {}
 
     def _pod_json(self, pod):
         return {
@@ -98,7 +101,8 @@ class FakeKube:
         db, sql = argv[argv.index("-d") + 1], argv[-1]
         if sql.startswith("SELECT current_setting('server_version')"):
             dbs = ",".join(["postgres"] + sorted(self.ext))
-            return 0, "{0}|f|/data|1000|{1}|2.28.3".format(self.server, dbs), ""
+            data = self.data_directories.get(pod, self.data_directory)
+            return 0, "{0}|f|{1}|1000|{2}|2.28.3".format(self.server, data, dbs), ""
         if sql.startswith("SELECT coalesce((SELECT extversion"):
             return 0, self.ext.get(db, ""), ""
         if sql == "SELECT 1":

@@ -19,11 +19,13 @@ carried out has not been passed.
 from __future__ import annotations
 
 import json
+import posixpath
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
+from .helm import helm_owner, values_note
 from .images import (
     RegistryError,
     manifest_exists,
@@ -140,6 +142,8 @@ class PreflightOptions:
     # From apply: gates its own next step clears before the update (it
     # migrates or rebuilds those aggregates), so they do not fail this hop.
     cleared_gates: Tuple[str, ...] = ()
+    # What tsupgrade.discover found, said in "Cluster and namespace".
+    discovered: Tuple[str, ...] = ()
 
 
 # Older Patroni labels the leader `master` whatever the configuration asks
@@ -292,6 +296,7 @@ def check_context(kube: Kube, opts: PreflightOptions) -> CheckResult:
             "note            : overriding the current context ({0})".format(current)
         )
     details.append("namespace       : {0}".format(opts.namespace))
+    details.extend(opts.discovered)
 
     try:
         cluster = kube.json(["config", "view", "--minify"], namespaced=False)
@@ -331,6 +336,37 @@ def check_context(kube: Kube, opts: PreflightOptions) -> CheckResult:
         "pointed at {0} / {1}".format(effective, opts.namespace),
         details,
     )
+
+
+def check_helm(kube: Kube, opts: PreflightOptions) -> CheckResult:
+    """Is the StatefulSet managed by Helm? Never a failure: the next
+    ``helm upgrade`` would undo an image change, so the operator has to change
+    the chart's values too, and this says which."""
+    title = "Helm ownership"
+    name = opts.statefulset
+    try:
+        if not name:
+            owners = {ref.get("name") for pod in kube.json(["get", "pods", "-l", opts.selector]).get("items", [])
+                      for ref in pod.get("metadata", {}).get("ownerReferences") or []
+                      if ref.get("kind") == "StatefulSet"}
+            if len(owners) != 1:
+                return CheckResult("helm", title, UNKNOWN, "the pods are owned by {0} StatefulSets, "
+                                   "not one".format(len(owners)), sorted(o for o in owners if o))
+            name = owners.pop()
+        sts = kube.json(["get", "statefulset", name])
+    except PreflightError as exc:
+        return CheckResult("helm", title, UNKNOWN, "cannot read the StatefulSet: {0}".format(exc), [])
+    release = helm_owner(sts)
+    if release is None:
+        return CheckResult("helm", title, PASS, "statefulset/{0} is not managed by Helm".format(name), [])
+    note = values_note(opts.target_image, release, major=opts.pg_upgrade_link is not None,
+                       statefulset=name)
+    result = CheckResult("helm", title, PASS, "statefulset/{0} is managed by Helm{1}".format(
+        name, "" if release == "Helm" else " release " + release), note)
+    if not opts.route_checked:  # once per apply run, not at every hop
+        result.notice = "{0}: the chart's values still name the old image; {1}".format(
+            result.summary, " ".join(line.strip() for line in note[1:]))
+    return result
 
 
 def check_target_image(opts: PreflightOptions) -> Tuple[CheckResult, Optional[str], Optional[str]]:
@@ -844,6 +880,31 @@ def check_disk_headroom(
 PG_UPGRADE_COPY_FACTOR = 1.1
 PG_UPGRADE_LINK_MARGIN = 256 * 1024 * 1024
 PG_UPGRADE_LINK_FRACTION = 0.02
+# On a WAL volume of its own, pg_upgrade writes only the new cluster's WAL: a
+# fresh segment or a few. The old WAL stays where it is, already counted.
+PG_UPGRADE_WAL_MARGIN = 256 * 1024 * 1024
+
+
+def _wal_headroom(kube: Kube, opts: PreflightOptions, pod: str,
+                  data: str) -> Tuple[Optional[str], Optional[str]]:
+    """``(status, detail)`` for the volume ``pg_wal`` points into, when it is
+    a symlink; ``(None, None)`` when WAL is inside the data directory."""
+    rc, out, _ = kube.exec(pod, opts.container, ["ls", "-ld", data + "/pg_wal"])
+    line = out.strip().splitlines()[0] if rc == 0 and out.strip() else ""
+    if not line.startswith("l") or " -> " not in line:
+        return None, None
+    wal = posixpath.normpath(posixpath.join(data, line.split(" -> ", 1)[1].strip()))
+    parent = posixpath.dirname(wal) or "/"
+    rc, df_out, df_err = kube.exec(pod, opts.container, ["df", "-Pk", parent])
+    usage = _parse_df(df_out) if rc == 0 else None
+    if usage is None:
+        return UNKNOWN, "{0} : pg_wal is {1}; cannot read the free space at {2} ({3})".format(
+            pod, wal, parent, (df_err or df_out or "df failed").splitlines()[:1])
+    ok = usage["free"] >= PG_UPGRADE_WAL_MARGIN
+    return (PASS if ok else FAIL), (
+        "{0} : pg_wal is {1}, on its own volume; the new cluster's WAL goes beside it: {2} free "
+        "at {3}; need >= {4} -> {5}".format(pod, wal, _human(usage["free"]), parent,
+                                           _human(PG_UPGRADE_WAL_MARGIN), "ok" if ok else "SHORT"))
 
 
 def check_pg_upgrade_headroom(
@@ -857,7 +918,8 @@ def check_pg_upgrade_headroom(
     hard-links the relation files and needs only the new catalog. Earlier
     ``<data>.pg<N>`` directories from previous hops are on the same disk,
     already counted as used, and listed so they can be removed once the
-    result is accepted.
+    result is accepted. When ``pg_wal`` is a symlink to another volume, that
+    volume needs room for the new cluster's WAL too.
     """
     title = "Disk headroom for pg_upgrade on ordinal 0"
     link = bool(opts.pg_upgrade_link)
@@ -867,6 +929,7 @@ def check_pg_upgrade_headroom(
                            "no reachable ordinal 0 with a known data directory", [])
     data = first.data_directory.rstrip("/")
     parent = data.rsplit("/", 1)[0] or "/"
+    wal_status, wal_line = _wal_headroom(kube, opts, first.pod, data)
     rc, out, err = kube.exec(first.pod, opts.container, ["du", "-sk", data])
     try:
         size = int(out.split()[0]) * 1024 if rc == 0 else None
@@ -884,7 +947,10 @@ def check_pg_upgrade_headroom(
     if size is None or usage is None:
         details.append("{0} : cannot read the size of {1} or the free space at {2} ({3})".format(
             first.pod, data, parent, (err or df_err or "du/df failed").splitlines()[:1]))
-        return CheckResult("pg_upgrade_disk", title, UNKNOWN, "could not measure", details)
+        if wal_line:
+            details.append(wal_line)
+        return CheckResult("pg_upgrade_disk", title, FAIL if wal_status == FAIL else UNKNOWN,
+                           "could not measure", details)
     if link:
         needed = max(PG_UPGRADE_LINK_MARGIN, size * PG_UPGRADE_LINK_FRACTION)
         how = "--link: the relation files are hard-linked, so only a margin"
@@ -895,11 +961,17 @@ def check_pg_upgrade_headroom(
     details.insert(0, "{0} : {1} is {2}; {3} free at {4}; need >= {5} ({6}) -> {7}".format(
         first.pod, data, _human(size), _human(usage["free"]), parent, _human(needed), how,
         "ok" if ok else "SHORT"))
+    if wal_line:
+        details.insert(1, wal_line)
+    status = PASS if ok else FAIL
+    if wal_status == FAIL or (wal_status == UNKNOWN and status == PASS):
+        status = wal_status
     details.append(
         "Free space is what df reports inside the pod. Provisioners that do not "
         "enforce quotas (local-path, hostPath) report the whole node disk.")
-    return CheckResult("pg_upgrade_disk", title, PASS if ok else FAIL,
-                       "{0} needed, {1} free".format(_human(needed), _human(usage["free"])), details)
+    return CheckResult("pg_upgrade_disk", title, status,
+                       "{0} needed, {1} free".format(_human(needed), _human(usage["free"]))
+                       + ("; WAL volume short" if wal_status == FAIL else ""), details)
 
 
 # What a pg_upgrade does to backups; said by preflight, the runbook and apply.
@@ -1688,6 +1760,7 @@ def run_preflight(opts: PreflightOptions) -> List[CheckResult]:
     results: List[CheckResult] = []
 
     results.append(check_context(kube, opts))
+    results.append(check_helm(kube, opts))
     if opts.route_images or opts.route_checked:
         if opts.route_images:
             results.append(check_route_images(kube, opts))
