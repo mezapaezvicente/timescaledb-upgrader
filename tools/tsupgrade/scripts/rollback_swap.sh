@@ -8,6 +8,8 @@
 # WAL on its own volume: pg_upgrade.sh pointed the kept directory's pg_wal at
 # <wal>.pg<FROM>, and the new one's at <wal>. Those symlinks say what to swap
 # back; the new cluster's WAL goes aside under the same name as its data.
+# Tablespaces: each location (from the kept directory's pg_tblspc links) holds
+# PG_<TO>_* beside PG_<FROM>_*; the TO one goes aside as well.
 set -euo pipefail
 : "${FROM:?}" "${TO:?}" "${DATA:?}" "${KEPT:?}" "${SYSID:?}"
 data="$DATA"; keep="$KEPT"; aside="$data.rolled-back-pg$TO-$SYSID"
@@ -23,6 +25,18 @@ if [ -L "$keep/pg_wal" ]; then
   wal_aside="$wal.rolled-back-pg$TO-$SYSID"
   [ -e "$wal_aside" ] && { echo "$wal_aside already exists; refusing to overwrite it"; exit 2; }
 fi
+# Each tablespace holds PostgreSQL TO's directory beside FROM's: set it aside
+# too, or the next pg_upgrade refuses ("new cluster tablespace directory
+# already exists", measured 2026-11-15).
+ts_new=()
+for l in "$keep"/pg_tblspc/*; do
+  [ -L "$l" ] || continue
+  for d in "$(readlink "$l")"/PG_"$TO"_*; do
+    [ -d "$d" ] || continue
+    [ -e "$d.rolled-back-$SYSID" ] && { echo "$d.rolled-back-$SYSID already exists; refusing to overwrite it"; exit 2; }
+    ts_new+=("$d")
+  done
+done
 mv "$data" "$aside"
 mv "$keep" "$data"
 if [ -n "$wal" ]; then
@@ -32,4 +46,8 @@ if [ -n "$wal" ]; then
   ln -sfn "$wal" "$data/pg_wal"
   echo "PostgreSQL $TO's WAL is now $wal_aside; PostgreSQL $FROM's is back at $wal"
 fi
+for d in ${ts_new[@]+"${ts_new[@]}"}; do
+  mv "$d" "$d.rolled-back-$SYSID"
+  echo "PostgreSQL $TO's tablespace directory $d is now $d.rolled-back-$SYSID"
+done
 echo "PostgreSQL $TO's data directory is now $aside; PostgreSQL $FROM's is back at $data"

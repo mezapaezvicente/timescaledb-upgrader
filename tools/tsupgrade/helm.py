@@ -3,7 +3,11 @@
 ``apply`` changes the StatefulSet's image with ``kubectl set image``. The
 chart's values still name the old image, so the next ``helm upgrade`` puts it
 back; after a PostgreSQL major upgrade that is an old-major image on a
-new-major data directory, and the pods do not start. Nothing here refuses:
+new-major data directory. Measured on kind (2026-11-15, pg15 image on an
+upgraded pg16 directory, under Patroni): each restarted pod's PostgreSQL
+refuses the directory ("database files are incompatible with server") and
+the pod never becomes ready; nothing on the disk changes, and setting the new
+image back starts it again. Nothing here refuses:
 preflight reports the ownership, and the runbook, the script and ``apply``'s
 report end with the values to change (R28).
 
@@ -61,6 +65,7 @@ def values_note(image: str, release: Optional[str] = None, major: bool = False,
     elif digest:
         lines.append("  and the digest to {0}".format(digest))
     lines.append("  otherwise the next `helm upgrade` puts the old image back{0}".format(
-        ", and after a PostgreSQL major upgrade the pods will not start on the upgraded data "
-        "directory" if major else ""))
+        "; after a PostgreSQL major upgrade, every pod restarted on it will not start "
+        "(PostgreSQL refuses the upgraded data directory), though its data is not touched "
+        "and setting the new image back starts it again" if major else ""))
     return lines

@@ -907,19 +907,64 @@ def _wal_headroom(kube: Kube, opts: PreflightOptions, pod: str,
                                            _human(PG_UPGRADE_WAL_MARGIN), "ok" if ok else "SHORT"))
 
 
+_TABLESPACE_LOCATIONS_SQL = (
+    "SELECT coalesce(string_agg(spcname || '|' || pg_tablespace_location(oid), ',' ORDER BY spcname), '') "
+    "FROM pg_tablespace WHERE spcname NOT IN ('pg_default', 'pg_global')")
+
+
+def _tablespace_headroom(kube: Kube, opts: PreflightOptions, first: Instance,
+                         link: bool) -> List[Tuple[str, str]]:
+    """``(status, detail)`` per tablespace: pg_upgrade writes the new major's
+    directory inside each location, beside the old one (measured
+    2026-11-15), so a copy needs that tablespace's size again on its volume."""
+    rc, out, err = kube.psql(first.pod, opts.container, opts.admin_db, opts.psql_user,
+                             _TABLESPACE_LOCATIONS_SQL)
+    if rc != 0:
+        return [(UNKNOWN, "{0} : cannot list the tablespaces ({1})".format(
+            first.pod, (err or out or "psql failed").splitlines()[:1]))]
+    major = (first.server_version or "").split(".")[0]
+    found: List[Tuple[str, str]] = []
+    for item in filter(None, out.strip().split(",")):
+        name, _, location = item.partition("|")
+        _, ls_out, _ = kube.exec(first.pod, opts.container, ["sh", "-c", "ls -d {0}/PG_{1}_* "
+                                 "2>/dev/null || true".format(location, major)])
+        current = next((l.strip() for l in ls_out.splitlines() if l.strip()), None)
+        rc, du_out, _ = kube.exec(first.pod, opts.container, ["du", "-sk", current or location])
+        rc2, df_out, _ = kube.exec(first.pod, opts.container, ["df", "-Pk", location])
+        usage = _parse_df(df_out) if rc2 == 0 else None
+        try:
+            size = int(du_out.split()[0]) * 1024 if rc == 0 and current else None
+        except (IndexError, ValueError):
+            size = None
+        if size is None or usage is None:
+            found.append((UNKNOWN, "{0} : tablespace {1} at {2}: cannot read its size or the free "
+                          "space there".format(first.pod, name, location)))
+            continue
+        needed = (max(PG_UPGRADE_LINK_MARGIN, size * PG_UPGRADE_LINK_FRACTION) if link
+                  else size * PG_UPGRADE_COPY_FACTOR)
+        ok = usage["free"] >= needed
+        found.append((PASS if ok else FAIL, "{0} : tablespace {1} at {2} is {3}; {4} free there; "
+                      "need >= {5} -> {6}".format(first.pod, name, location, _human(size),
+                                                  _human(usage["free"]), _human(needed),
+                                                  "ok" if ok else "SHORT")))
+    return found
+
+
 def check_pg_upgrade_headroom(
     kube: Kube, opts: PreflightOptions, instances: Sequence[Instance]
 ) -> CheckResult:
     """Can ordinal 0's disk hold what pg_upgrade writes next to the data?
 
     ``pg_upgrade`` runs on ordinal 0's volume and keeps the old directory
-    beside the new one (``<data>.pg<old>``). A copy writes the whole data
-    directory again, WAL included, so it needs that much free; ``--link``
+    beside the new one (``<data>.pg<old>``). A copy writes the relation files
+    again; the whole directory, WAL included, is what is measured, so the
+    check errs high. ``--link``
     hard-links the relation files and needs only the new catalog. Earlier
     ``<data>.pg<N>`` directories from previous hops are on the same disk,
     already counted as used, and listed so they can be removed once the
     result is accepted. When ``pg_wal`` is a symlink to another volume, that
-    volume needs room for the new cluster's WAL too.
+    volume needs room for the new cluster's WAL too, and each tablespace's
+    volume room for its own copy.
     """
     title = "Disk headroom for pg_upgrade on ordinal 0"
     link = bool(opts.pg_upgrade_link)
@@ -930,6 +975,9 @@ def check_pg_upgrade_headroom(
     data = first.data_directory.rstrip("/")
     parent = data.rsplit("/", 1)[0] or "/"
     wal_status, wal_line = _wal_headroom(kube, opts, first.pod, data)
+    # The other volumes pg_upgrade writes to: WAL's and each tablespace's.
+    extra = ([(wal_status, wal_line)] if wal_line else []) + _tablespace_headroom(
+        kube, opts, first, link)
     rc, out, err = kube.exec(first.pod, opts.container, ["du", "-sk", data])
     try:
         size = int(out.split()[0]) * 1024 if rc == 0 else None
@@ -947,9 +995,9 @@ def check_pg_upgrade_headroom(
     if size is None or usage is None:
         details.append("{0} : cannot read the size of {1} or the free space at {2} ({3})".format(
             first.pod, data, parent, (err or df_err or "du/df failed").splitlines()[:1]))
-        if wal_line:
-            details.append(wal_line)
-        return CheckResult("pg_upgrade_disk", title, FAIL if wal_status == FAIL else UNKNOWN,
+        details.extend(line for _, line in extra)
+        return CheckResult("pg_upgrade_disk", title,
+                           FAIL if any(s == FAIL for s, _ in extra) else UNKNOWN,
                            "could not measure", details)
     if link:
         needed = max(PG_UPGRADE_LINK_MARGIN, size * PG_UPGRADE_LINK_FRACTION)
@@ -961,17 +1009,16 @@ def check_pg_upgrade_headroom(
     details.insert(0, "{0} : {1} is {2}; {3} free at {4}; need >= {5} ({6}) -> {7}".format(
         first.pod, data, _human(size), _human(usage["free"]), parent, _human(needed), how,
         "ok" if ok else "SHORT"))
-    if wal_line:
-        details.insert(1, wal_line)
-    status = PASS if ok else FAIL
-    if wal_status == FAIL or (wal_status == UNKNOWN and status == PASS):
-        status = wal_status
+    details[1:1] = [line for _, line in extra]
+    statuses = [PASS if ok else FAIL] + [s for s, _ in extra]
+    status = FAIL if FAIL in statuses else UNKNOWN if UNKNOWN in statuses else PASS
+    short = [line.split(" : ", 1)[1].split(" is ", 1)[0] for s, line in extra if s == FAIL]
     details.append(
         "Free space is what df reports inside the pod. Provisioners that do not "
         "enforce quotas (local-path, hostPath) report the whole node disk.")
     return CheckResult("pg_upgrade_disk", title, status,
                        "{0} needed, {1} free".format(_human(needed), _human(usage["free"]))
-                       + ("; WAL volume short" if wal_status == FAIL else ""), details)
+                       + ("; short: " + ", ".join(short) if short else ""), details)
 
 
 # What a pg_upgrade does to backups; said by preflight, the runbook and apply.

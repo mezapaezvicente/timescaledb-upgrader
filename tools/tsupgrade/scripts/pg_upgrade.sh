@@ -113,4 +113,9 @@ echo "upgraded to PostgreSQL $TO; the old data directory is $keep"
 kept=()
 for d in "$data".pg*; do kept+=("$d"); done
 if [ -n "$wal" ]; then for d in "$wal".pg*; do kept+=("$d"); done; fi
-echo "old data directories on this disk, to remove once the result is accepted: ${kept[*]}"
+# Each tablespace keeps the old major's directory beside the new one's.
+for l in "$keep"/pg_tblspc/*; do
+  [ -L "$l" ] || continue
+  for d in "$(readlink "$l")"/PG_"$FROM"_*; do if [ -d "$d" ]; then kept+=("$d"); fi; done
+done
+echo "old directories pg_upgrade left, to remove once the result is accepted: ${kept[*]}"

@@ -170,3 +170,92 @@ def test_the_rollback_swap_brings_back_the_old_data_and_its_wal():
     assert ("aside pg_wal -> /var/lib/postgresql/wal/pg_wal.rolled-back-pg13-7000000000000000002\n"
             in out), out
     assert "old runs 120" in out and "after_upgrade 0" in out, out
+
+
+# Tablespaces (2026-11-15): a hypertable attached to a tablespace on a mount of
+# its own (tmpfs here), TimescaleDB 2.11.2 on both majors. apply still refuses a
+# major upgrade with tablespaces (TABLESPACES_SUPPORTED); these cover what the
+# scripts do once it does not.
+TABLESPACE_CASE = r"""
+set -e
+B12=/usr/lib/postgresql/12/bin; B13=/usr/lib/postgresql/13/bin
+D=/var/lib/postgresql/data; T=/mnt/tblspc/fast
+q() { "$1"/psql -h /tmp -U postgres -XqAt -d app -c "$2" 2>/dev/null | { grep -v '^WARNING\|^ *$\|^[ _|/\\]' || true; }; }
+facts() {
+  echo "$2 rows $(q $1 'SELECT count(*) FROM m'), chunks in fast $(q $1 "SELECT count(*) FROM timescaledb_information.chunks ch JOIN pg_class c ON c.oid = format('%I.%I', ch.chunk_schema, ch.chunk_name)::regclass JOIN pg_tablespace t ON t.oid = c.reltablespace WHERE t.spcname = 'fast'"), compressed $(q $1 "SELECT count(*) FROM timescaledb_information.chunks WHERE is_compressed")"
+}
+up() {
+  FROM=12 TO=13 PG_BIN_OLD=$B12 PG_BIN_NEW=$B13 DATA=$D LINK={link} ENCODING=UTF8 LC_COLLATE=C.UTF-8 \
+  LC_CTYPE=C.UTF-8 LOCALE_PROVIDER=libc PROVIDER_LOCALE= bash /tmp/pg_upgrade.sh > /tmp/up.log 2>&1
+}
+mkdir -p $T
+$B12/initdb -D $D -U postgres -E UTF8 --locale=C.UTF-8 >/dev/null 2>&1
+echo "shared_preload_libraries = 'timescaledb'" >> $D/postgresql.conf
+$B12/pg_ctl -D $D -o '-k /tmp' -w start >/dev/null
+$B12/psql -h /tmp -U postgres -qc 'CREATE DATABASE app'
+q $B12 "CREATE EXTENSION IF NOT EXISTS timescaledb VERSION '2.11.2'" >/dev/null
+q $B12 "CREATE TABLESPACE fast LOCATION '$T'" >/dev/null
+q $B12 "CREATE TABLE m (time timestamptz NOT NULL, device int NOT NULL, v double precision)" >/dev/null
+q $B12 "SELECT create_hypertable('m', 'time', chunk_time_interval => INTERVAL '1 day')" >/dev/null
+q $B12 "SELECT attach_tablespace('fast', 'm')" >/dev/null
+q $B12 "INSERT INTO m SELECT TIMESTAMPTZ '2026-01-01' + g * INTERVAL '1 minute', g % 5, g FROM generate_series(0, 4 * 1440 - 1) g" >/dev/null
+q $B12 "ALTER TABLE m SET (timescaledb.compress, timescaledb.compress_segmentby = 'device')" >/dev/null
+q $B12 "SELECT count(compress_chunk(c)) FROM show_chunks('m', older_than => TIMESTAMPTZ '2026-01-03') c" >/dev/null
+facts $B12 "before:"
+$B12/pg_ctl -D $D -w stop >/dev/null
+cat > /tmp/pg_upgrade.sh <<'__TSUPGRADE_EOF__'
+{script}
+__TSUPGRADE_EOF__
+cat > /tmp/swap.sh <<'__TSUPGRADE_EOF__'
+{swap}
+__TSUPGRADE_EOF__
+set +e; up; echo "upgrade exit $?"; set -e
+grep 'to remove once the result is accepted' /tmp/up.log
+echo "shared in the new tablespace directory: $(find $T/PG_13_* -type f -links +1 | wc -l) of $(find $T/PG_13_* -type f | wc -l)"
+$B13/pg_ctl -D $D -o '-k /tmp' -w start >/dev/null
+facts $B13 "on 13:"
+$B13/pg_ctl -D $D -w stop >/dev/null
+[ -n "{rollback}" ] || exit 0
+set +e; FROM=12 TO=13 DATA=$D KEPT=$D.pg12 SYSID=7000000000000000002 bash /tmp/swap.sh; echo "swap exit $?"; set -e
+echo "tablespace now holds: $(ls $T | tr '\n' ' ')"
+$B12/pg_ctl -D $D -o '-k /tmp' -w start >/dev/null
+facts $B12 "back on 12:"
+$B12/pg_ctl -D $D -w stop >/dev/null
+set +e; up; echo "second upgrade exit $?"; set -e
+grep -i 'already exists' /tmp/up.log || true
+$B13/pg_ctl -D $D -o '-k /tmp' -w start >/dev/null
+facts $B13 "on 13 again:"
+"""
+
+
+def _run_tablespace(link: str = "", rollback: bool = False) -> str:
+    program = TABLESPACE_CASE.replace("{script}", _PG_UPGRADE_SCRIPT).replace("{swap}", _SWAP_SCRIPT) \
+        .replace("{link}", link).replace("{rollback}", "yes" if rollback else "")
+    done = subprocess.run(["docker", "run", "--rm", "-i", "--tmpfs", "/mnt/tblspc:uid=1000,gid=1000",
+                           "--entrypoint", "bash", IMAGE, "-s"],
+                          input=program.encode("utf-8"), capture_output=True, timeout=600)
+    return (done.stdout + done.stderr).decode("utf-8", "replace")
+
+
+@pytest.mark.parametrize("link", ["", "--link"])
+def test_a_hypertable_in_a_tablespace_on_its_own_mount_survives_the_upgrade(link):
+    out = _run_tablespace(link=link)
+    assert "upgrade exit 0" in out, out
+    assert "before: rows 5760, chunks in fast 4, compressed 2" in out, out
+    assert "on 13: rows 5760, chunks in fast 4, compressed 2" in out, out
+    shared = [l for l in out.splitlines() if l.startswith("shared in the new tablespace directory")][0]
+    count, total = shared.split(": ")[1].split(" of ")
+    assert (int(count) == int(total)) if link else (int(count) == 0), shared
+    listed = [l for l in out.splitlines() if "to remove once the result is accepted" in l][0]
+    assert "/mnt/tblspc/fast/PG_12_" in listed, listed
+
+
+def test_rollback_sets_the_new_tablespace_directory_aside_so_the_next_upgrade_can_run():
+    """Measured before the fix: PG_13_* stayed, and the next pg_upgrade
+    refused at --check ("new cluster tablespace directory already exists")."""
+    out = _run_tablespace(rollback=True)
+    assert "swap exit 0" in out, out
+    assert "PostgreSQL 13's tablespace directory /mnt/tblspc/fast/PG_13_" in out, out
+    assert "back on 12: rows 5760, chunks in fast 4, compressed 2" in out, out
+    assert "second upgrade exit 0" in out and "already exists" not in out, out
+    assert "on 13 again: rows 5760, chunks in fast 4, compressed 2" in out, out

@@ -44,9 +44,9 @@ from typing import Any, Callable, Dict, List, Optional
 from .apply import (
     ApplyOptions,
     _Cluster,
-    _data_mount,
     _dcs_objects,
     _kubectl,
+    _off_claim,
     _patroni_scope,
     _pod_phase,
     _replica_pvcs,
@@ -141,9 +141,9 @@ def rollback(
         raise RollbackRefused(["the pod selector {0} also matches {1}, which are not Patroni's "
                                "objects for scope {2}".format(opts.selector, ", ".join(others), scope)])
     sts = kube.json(["get", "statefulset", opts.statefulset])
-    if _data_mount(sts, opts, data) is None:
-        raise RollbackRefused(["the data directory {0} is not below the mount of any volume claim "
-                               "template of statefulset/{1}".format(data, opts.statefulset)])
+    problem = _off_claim(sts, opts, data)
+    if problem:
+        raise RollbackRefused(["the data directory {0} {1}".format(data, problem)])
 
     output: List[str] = ["going back from PostgreSQL {0} (system identifier {1}) to {2}: {3}".format(
         new, sysid, old, LOST_WRITES)]

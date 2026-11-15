@@ -297,13 +297,18 @@ def check_statefulset(kube: Kube, opts: ApplyOptions) -> List[str]:
                 opts.statefulset, kind, opts.namespace)]
 
 
-def _claim_mounts(sts: Dict[str, Any], opts: ApplyOptions) -> List[Dict[str, Any]]:
-    """The database container's mounts of the StatefulSet's volume claim
-    templates, in the templates' order."""
+def _container_mounts(sts: Dict[str, Any], opts: ApplyOptions) -> List[Dict[str, Any]]:
+    """Every mount of the database container, claim or not."""
     template = sts.get("spec", {}).get("template", {}).get("spec", {})
     container = next((c for c in template.get("containers") or []
                       if c.get("name") == opts.container), {})
-    mounts = {m.get("name"): m for m in container.get("volumeMounts") or []}
+    return list(container.get("volumeMounts") or [])
+
+
+def _claim_mounts(sts: Dict[str, Any], opts: ApplyOptions) -> List[Dict[str, Any]]:
+    """The database container's mounts of the StatefulSet's volume claim
+    templates, in the templates' order."""
+    mounts = {m.get("name"): m for m in _container_mounts(sts, opts)}
     claims = [c.get("metadata", {}).get("name")
               for c in sts.get("spec", {}).get("volumeClaimTemplates") or []]
     return [mounts[c] for c in claims if c in mounts]
@@ -316,10 +321,39 @@ def _under(path: str, mount: str) -> bool:
     return path.startswith(mount.rstrip("/") + "/")
 
 
+def _covering_mount(sts: Dict[str, Any], opts: ApplyOptions, path: str) -> Optional[Dict[str, Any]]:
+    """The container's deepest mount, of any kind, that ``path`` is below."""
+    found = [m for m in _container_mounts(sts, opts) if _under(path, m.get("mountPath") or "")]
+    return max(found, key=lambda m: len(posixpath.normpath(m["mountPath"]))) if found else None
+
+
 def _data_mount(sts: Dict[str, Any], opts: ApplyOptions, data: str) -> Optional[Dict[str, Any]]:
-    """The claim template's mount that holds ``data``: the deepest one."""
-    found = [m for m in _claim_mounts(sts, opts) if _under(data, m.get("mountPath") or "")]
-    return max(found, key=lambda m: len(m["mountPath"])) if found else None
+    """The mount that holds ``data``, when it is a volume claim template's.
+
+    The deepest mount covering the path decides, not the deepest claim: the
+    upgrade pod mounts only the claims, so below any other mount (an
+    ``emptyDir``, say) it would find whatever the claim holds at that path.
+    Measured 2026-11-15: with an empty directory where a tablespace should
+    be, ``pg_upgrade --check`` passes and ``--link`` disables the old cluster
+    partway.
+    """
+    mount = _covering_mount(sts, opts, data)
+    return mount if mount is not None and mount.get("name") in _claims(sts) else None
+
+
+def _off_claim(sts: Dict[str, Any], opts: ApplyOptions, path: str) -> Optional[str]:
+    """Why the upgrade pod could not reach ``path``, or None when it can."""
+    if _data_mount(sts, opts, path) is not None:
+        return None
+    mount = _covering_mount(sts, opts, path)
+    if mount is not None:
+        return ("is on volume {0} at {1}, which is not a volume claim template, so the pg_upgrade "
+                "pod does not mount it".format(mount.get("name"), mount.get("mountPath")))
+    mounts = ", ".join("{0} at {1}".format(m.get("name"), m.get("mountPath"))
+                       for m in _claim_mounts(sts, opts)) or "none"
+    return ("is not below the mount of any volume claim template of statefulset/{0} (container "
+            "{1} mounts: {2}), so the pg_upgrade pod could not reach it".format(
+                opts.statefulset, opts.container, mounts))
 
 
 def _claims(sts: Dict[str, Any]) -> List[str]:
@@ -361,17 +395,22 @@ def resolve_data_dir(instances: Sequence[Instance], sts: Dict[str, Any],
         else:
             path, how = DEFAULT_DATA_DIR, ("no server reported it, so the timescaledb-ha "
                                            "images' default; --data-dir sets it")
-    if _data_mount(sts, opts, path) is None:
-        mounts = ", ".join("{0} at {1}".format(m.get("name"), m.get("mountPath"))
-                           for m in _claim_mounts(sts, opts)) or "none"
-        return (["the data directory {0} ({1}) is not below the mount of any volume claim "
-                 "template of statefulset/{2} (container {3} mounts: {4}); the pg_upgrade pod "
-                 "could not reach it. Nothing was done".format(
-                     path, how, opts.statefulset, opts.container, mounts)], path, how)
+    problem = _off_claim(sts, opts, path)
+    if problem:
+        return (["the data directory {0} ({1}) {2}. Nothing was done".format(path, how, problem)],
+                path, how)
     return [], path, how
 
 
-_TABLESPACES_SQL = ("SELECT coalesce(string_agg(spcname, ',' ORDER BY spcname), '') FROM pg_tablespace "
+# A major upgrade with tablespaces is refused until apply has run one on a
+# cluster (a harness topology with a tablespace volume, planned). In
+# containers, pg_upgrade copies and links them within each tablespace's own
+# mount (2026-11-15), and the checks and the scripts below handle them; tests
+# turn this on to cover that path.
+TABLESPACES_SUPPORTED = False
+
+_TABLESPACES_SQL = ("SELECT coalesce(string_agg(spcname || ':' || pg_tablespace_location(oid), ',' "
+                    "ORDER BY spcname), '') FROM pg_tablespace "
                     "WHERE spcname NOT IN ('pg_default', 'pg_global')")
 
 
@@ -380,10 +419,9 @@ def check_major_layout(cluster: "_Cluster", sts: Dict[str, Any],
     """``(reasons, wal)``: what a major upgrade cannot handle, read before
     anything is written, and the WAL directory when ``pg_wal`` is a symlink.
 
-    Tablespaces are refused: each lives on its own path, often its own
-    volume, which the upgrade pod does not mount, and ``--link`` cannot
-    cross volumes. WAL on another volume is handled (the script puts the new
-    cluster's beside it), but only on a volume claim the upgrade pod mounts.
+    WAL and tablespaces on volumes of their own are handled, but only on
+    volume claims, which the upgrade pod mounts where the database container
+    does. Tablespaces are refused for now (:data:`TABLESPACES_SUPPORTED`).
     """
     opts = cluster.opts
     reasons: List[str] = []
@@ -391,19 +429,28 @@ def check_major_layout(cluster: "_Cluster", sts: Dict[str, Any],
     if rc != 0:
         reasons.append("cannot read pg_tablespace on {0}: {1}".format(primary, (err or out).strip()))
     elif out.strip():
-        reasons.append("tablespaces {0}: a major upgrade with tablespaces is not supported (the "
-                       "pg_upgrade pod does not mount their paths, and --link cannot cross "
-                       "volumes). Nothing was done".format(", ".join(out.strip().split(","))))
+        spaces = [item.split(":", 1) for item in out.strip().split(",")]
+        if not TABLESPACES_SUPPORTED:
+            reasons.append("a major upgrade with tablespaces is not supported yet ({0}): apply has "
+                           "not run one on a cluster. Nothing was done".format(
+                               ", ".join("{0} at {1}".format(n, loc) for n, loc in spaces)))
+        for name, location in spaces:
+            # pg_upgrade writes inside the location (PG_<major>_<catalog>),
+            # not beside it, so the location may be a mount's root.
+            problem = _off_claim(sts, opts, posixpath.join(location, "PG_"))
+            if problem:
+                reasons.append("tablespace {0} at {1} {2}. Nothing was done".format(
+                    name, location, problem))
     # Not a symlink, or unreadable: the script looks again on the disk itself.
     rc, out, _ = cluster.kube.exec("{0}-0".format(opts.statefulset), opts.container,
                                    ["readlink", (opts.data_dir or "") + "/pg_wal"])
     wal = None
     if rc == 0 and out.strip():
         wal = posixpath.normpath(posixpath.join(opts.data_dir or "", out.strip()))
-        if _data_mount(sts, opts, wal) is None:
-            reasons.append("pg_wal is a symlink to {0}, which is not below the mount of any volume "
-                           "claim template of statefulset/{1}; the pg_upgrade pod could not reach "
-                           "it. Nothing was done".format(wal, opts.statefulset))
+        problem = _off_claim(sts, opts, wal)
+        if problem:
+            reasons.append("pg_wal is a symlink to {0}, which {1}. Nothing was done".format(
+                wal, problem))
     return reasons, wal
 
 
@@ -1363,8 +1410,8 @@ def _volume(sts: Dict[str, Any], opts: ApplyOptions) -> Dict[str, Any]:
     data directory, as the upgrade pod repeats it (``subPath`` included)."""
     mount = _data_mount(sts, opts, opts.data_dir or "")
     if mount is None:
-        raise _StepFailed("the data directory {0} is not below the mount of any volume claim "
-                          "template of statefulset/{1}".format(opts.data_dir, opts.statefulset))
+        raise _StepFailed("the data directory {0} {1}".format(
+            opts.data_dir, _off_claim(sts, opts, opts.data_dir or "")))
     return {k: mount[k] for k in ("name", "mountPath", "subPath") if mount.get(k)}
 
 

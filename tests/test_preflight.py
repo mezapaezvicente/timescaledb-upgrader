@@ -299,18 +299,29 @@ class DiskKube:
         self.data_kib, self.free_kib, self.left = data_kib, free_kib, left
         self.wal_ls = "drwx------ 3 postgres postgres 4096 Nov 11 02:00 /home/postgres/pgdata/data/pg_wal"
         self.wal_free_kib = free_kib
+        # Tablespaces as name|location, and the size and free space of theirs.
+        self.tablespaces = ""
+        self.ts_kib, self.ts_free_kib = 0, free_kib
         self.seen = []
+
+    def psql(self, pod, container, database, user, sql):
+        assert "pg_tablespace" in sql
+        return 0, self.tablespaces, ""
 
     def exec(self, pod, container, argv):
         self.seen.append((pod, argv[0]))
         if argv[0] == "du":
-            return 0, "{0}\t{1}".format(self.data_kib, argv[-1]), ""
+            kib = self.ts_kib if argv[-1].startswith("/home/postgres/tblspc") else self.data_kib
+            return 0, "{0}\t{1}".format(kib, argv[-1]), ""
         if argv[0] == "df":
-            free = self.wal_free_kib if argv[-1] == "/home/postgres/wal" else self.free_kib
+            free = {"/home/postgres/wal": self.wal_free_kib,
+                    "/home/postgres/tblspc/fast": self.ts_free_kib}.get(argv[-1], self.free_kib)
             return 0, ("Filesystem 1024-blocks Used Available Capacity Mounted on\n"
                        "/dev/x 999999999 1 {0} 1% /home/postgres/pgdata".format(free)), ""
         if argv[0] == "ls":
             return 0, self.wal_ls, ""
+        if argv[:2] == ["sh", "-c"] and "/PG_" in argv[2]:
+            return 0, "/home/postgres/tblspc/fast/PG_16_202307071\n", ""
         return 0, self.left, ""
 
 
@@ -356,6 +367,25 @@ def test_pg_upgrade_headroom_checks_a_wal_volume_of_its_own(wal_free_kib, status
     result = check_pg_upgrade_headroom(kube, PreflightOptions("x", pg_upgrade_link=False), INSTANCES)
     assert result.status == status, result.details
     assert any("pg_wal is /home/postgres/wal/pg_wal, on its own volume" in d for d in result.details)
+
+
+@pytest.mark.parametrize("link,ts_free_gib,status", [
+    (False, 1, FAIL),    # a copy of the 2 GiB tablespace does not fit in 1
+    (False, 3, PASS),
+    (True, 1, PASS),     # linking needs only a margin there too
+])
+def test_pg_upgrade_headroom_checks_each_tablespaces_volume(link, ts_free_gib, status):
+    kube = DiskKube(1024, 10 * GIB // 1024)
+    kube.tablespaces = "fast|/home/postgres/tblspc/fast"
+    kube.ts_kib, kube.ts_free_kib = 2 * GIB // 1024, ts_free_gib * GIB // 1024
+    instances = [Instance("tsdb-0", role="primary", server_version="16.15",
+                          data_directory="/home/postgres/pgdata/data")]
+    result = check_pg_upgrade_headroom(kube, PreflightOptions("x", pg_upgrade_link=link), instances)
+    assert result.status == status, result.details
+    assert any(d.startswith("tsdb-0 : tablespace fast at /home/postgres/tblspc/fast is 2.0 GiB")
+               for d in result.details), result.details
+    if status == FAIL:
+        assert "short: tablespace fast at /home/postgres/tblspc/fast" in result.summary
 
 
 class ArchiveKube:

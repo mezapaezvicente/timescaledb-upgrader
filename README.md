@@ -248,8 +248,11 @@ cover them all.
 
 **Helm.** `apply` changes the StatefulSet with `kubectl set image`, and the
 chart's values still name the old image, so the next `helm upgrade` would
-put it back; after a major upgrade, the pods would not start on the upgraded
-data. It does not refuse. When Helm manages the StatefulSet and the run
+put it back. After a major upgrade, each pod restarted on the old image does
+not start: PostgreSQL refuses the upgraded data directory ("database files are
+incompatible with server"). Measured on kind under Patroni: the data is not
+touched, and setting the new image back starts the pods again. `apply` does
+not refuse. When Helm manages the StatefulSet and the run
 changed its image, the report ends with the image repository and tag to put
 in the values. The runbook and `plan --format script` always end with the same
 note, worded "if a Helm chart manages this StatefulSet", since `plan` does
@@ -276,12 +279,13 @@ bash scripts/tsupgrade.sh plan --from-pg 12.22 --from-ts 2.11.2 \
 
 **How `apply` runs one.** Before anything stops, it reads the data directory
 from the servers (`data_directory`, ordinal 0's first). It refuses if they
-disagree, or if the path is not below the mount of one of the StatefulSet's
-volume claim templates: the upgrade pod mounts that claim, and `pg_upgrade`
-writes beside the directory. `--data-dir` overrides it. Only when no server
-answers does it fall back to the images' `/home/postgres/pgdata/data`, and
-the report says so. Tablespaces beyond the two defaults are refused, since
-their paths are not mounted and `--link` cannot cross volumes. Under Patroni
+disagree, or if the path is not on a volume claim: the deepest mount that
+covers it has to be one of the StatefulSet's volume claim templates, because
+the upgrade pod mounts only those, and `pg_upgrade` writes beside the
+directory. `--data-dir` overrides it. Only when no server answers does it fall
+back to the images' `/home/postgres/pgdata/data`, and the report says so. A
+major upgrade with tablespaces is refused for now (see
+[Known limits](#known-limits)). Under Patroni
 it then moves the leader to ordinal 0, scales the StatefulSet to 0, and runs
 `pg_upgrade` in a pod on ordinal 0's disks (every volume claim template,
 where the database container mounts it), scheduled like the database pods. That pod's `initdb` takes the old
@@ -327,9 +331,13 @@ started by then).
 **Checked before anything stops.** Every `pg_upgrade` is preceded by a
 preflight against the image the cluster restarts on. It adds three checks:
 
-- *Disk on ordinal 0.* A copy needs the data directory's size free again,
-  WAL included; `--link` only a margin. A WAL volume of its own needs room for
-  the new cluster's WAL (256 MiB). Each hop keeps its old directory, so
+- *Disk on ordinal 0.* A copy needs the data directory's size free again;
+  the check counts the whole directory, WAL included, so it errs high, since
+  `pg_upgrade` copies the relation files and the new cluster starts its own
+  WAL. `--link` needs only a margin. A WAL volume of its own needs room for the
+  new cluster's WAL: the check asks for 256 MiB, a margin, not a measured
+  figure. Each tablespace's volume is checked the same way as the data
+  directory's. Each hop keeps its old directory, so
   a chain such as 12 → 13 → 15 → 16 by copying ends with three of them;
   preflight and `apply` list them, to remove once the result is accepted.
 - *Other extensions.* The matrix verdicts cover TimescaleDB only. Preflight
@@ -575,7 +583,13 @@ aggregate on the way (see [Old continuous aggregates](#old-continuous-aggregates
   `timestamp` and `date`), and through the harness on PostgreSQL 15 from 2.12.2
   and 2.14.2 to 2.28.3. It compares the live data in full, which on a large
   aggregate is as slow as the rebuild itself.
-- A major upgrade with tablespaces is refused before anything stops.
+- A major upgrade with tablespaces is refused before anything stops. Support
+  is planned but not there: it waits on a run through `apply` on a cluster with
+  a tablespace volume. What was measured so far, in containers: `pg_upgrade`
+  12 → 13 kept a hypertable's chunks, compressed ones included, in a tablespace
+  on a mount of its own, copying and with `--link`, and the rollback brought
+  them back; and on kind, Patroni re-cloned replicas onto empty tablespace
+  volumes.
 - WAL on its own volume, and the data directory at the chart's path, were run
   through the real `pg_upgrade` and rollback scripts in a container (copy and
   `--link`), not yet through `apply` on a cluster with that layout.

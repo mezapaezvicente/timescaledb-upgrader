@@ -813,9 +813,75 @@ def test_wal_on_a_path_the_upgrade_pod_cannot_mount_is_refused():
 
 def test_tablespaces_refuse_a_major_upgrade_before_anything_is_written():
     kube = MajorKube()
-    kube.tablespaces = "fast,archive"
-    with pytest.raises(ApplyRefused, match="tablespaces fast, archive"):
+    kube.tablespaces = "archive:/home/postgres/pgdata/archive,fast:/home/postgres/pgdata/fast"
+    with pytest.raises(ApplyRefused) as refused:
         _apply(_plan(), kube)
+    assert str(refused.value).startswith(
+        "a major upgrade with tablespaces is not supported yet (archive at "
+        "/home/postgres/pgdata/archive, fast at /home/postgres/pgdata/fast): apply has not run one "
+        "on a cluster. Nothing was done")
+    assert "--link" not in str(refused.value)
+    assert kube.writes == []
+
+
+def _supported(monkeypatch):
+    from tsupgrade import apply as apply_mod
+    monkeypatch.setattr(apply_mod, "TABLESPACES_SUPPORTED", True)
+
+
+@pytest.mark.parametrize("location", ["/home/postgres/tblspc", "/home/postgres/tblspc/fast"])
+def test_behind_the_switch_a_tablespace_on_a_claim_passes_even_at_the_mounts_root(
+        monkeypatch, location):
+    _supported(monkeypatch)
+    kube = MajorKube()
+    kube.mounts = [{"name": "pgdata", "mountPath": "/home/postgres/pgdata"},
+                   {"name": "tblspc", "mountPath": "/home/postgres/tblspc"}]
+    kube.tablespaces = "fast:" + location
+    assert _apply(_plan(), kube)["result"] == "pass"
+
+
+def test_behind_the_switch_a_tablespace_off_every_claim_is_refused(monkeypatch):
+    _supported(monkeypatch)
+    kube = MajorKube()
+    kube.tablespaces = "fast:/mnt/fast"
+    with pytest.raises(ApplyRefused, match="tablespace fast at /mnt/fast is not below the mount of "
+                                           "any volume claim template"):
+        _apply(_plan(), kube)
+    assert kube.writes == []
+
+
+class _WithEmptyDir(MajorKube):
+    """An emptyDir mounted below the data claim's path: the database pods see
+    it, the upgrade pod (claims only) would see the claim's directory there."""
+
+    def json(self, args, namespaced=True):
+        doc = super().json(args, namespaced)
+        if args[:2] == ["get", "statefulset"]:
+            doc["spec"]["template"]["spec"]["containers"][0]["volumeMounts"].append(
+                {"name": "scratch", "mountPath": self.scratch})
+        return doc
+
+
+@pytest.mark.parametrize("scratch,what", [
+    ("/home/postgres/pgdata/data", "the data directory /home/postgres/pgdata/data"),
+    ("/home/postgres/pgdata/wal", "pg_wal is a symlink to /home/postgres/pgdata/wal/pg_wal"),
+    ("/home/postgres/pgdata/ts", "tablespace fast at /home/postgres/pgdata/ts/fast"),
+])
+def test_a_non_claim_mount_below_a_claim_decides_and_is_refused(monkeypatch, scratch, what):
+    """M2b, 2026-11-15: an empty directory where a tablespace should be lets
+    pg_upgrade --check pass and --link disable the old cluster partway. The
+    deepest mount covering a path decides, not the deepest claim."""
+    _supported(monkeypatch)
+    kube = _WithEmptyDir()
+    kube.scratch = scratch
+    kube.data_directory = "/home/postgres/pgdata/data/main" if "data" in scratch else kube.data_directory
+    kube.wal_link = "/home/postgres/pgdata/wal/pg_wal"
+    kube.tablespaces = "fast:/home/postgres/pgdata/ts/fast"
+    with pytest.raises(ApplyRefused) as refused:
+        _apply(_plan(), kube)
+    assert what in str(refused.value)
+    assert "is on volume scratch at {0}, which is not a volume claim template".format(scratch) in str(
+        refused.value)
     assert kube.writes == []
 
 
