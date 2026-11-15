@@ -109,13 +109,13 @@ route, or different ones, keeps none, and `plan` treats it as unestablished
 until it is run again.
 
 **Fresh evidence.** A verdict has to come from the code that ships. Before a
-release is tagged, every row is run again so all records name one commit;
-`tests/test_shipped_data.py` then fails for any cited record from a dirty
-tree, or one whose commit has been followed by a change to the code that
-decides a run (`evidence.VERDICT_CODE`: `plan`, `apply`, `steps`, `majors`,
+release is tagged, every row is run again so all records name one commit.
+`tests/test_shipped_data.py` flags any cited record from a dirty tree, or one
+whose commit has been followed by a change to the code that decides a run (`evidence.VERDICT_CODE`: `plan`, `apply`, `steps`, `majors`,
 `drift`, `gates`, `preflight` and the `pg_upgrade.sh` script `apply` runs;
-not `rollback`, which runs only after a route has finished). The check is
-skipped until the first `v*` tag. `--resume` uses the same rule.
+not `rollback`, which runs only after a route has finished). On a development
+branch it warns; under `make release-check` and on a tagged checkout it fails.
+The check is skipped until the first `v*` tag. `--resume` uses the same rule.
 
 **Registries.** Every run passes `apply --use-cached-images`: the images are
 side-loaded, so a registry that does not answer is the network, not the row's
@@ -254,8 +254,10 @@ bash verify/fixture/try.sh pg13.22-ts2.15.3 2.1 2.7 2.14
 
 Written by the harness, one per row and mode, at
 `evidence/pg<major>/<source_ts>-to-<target_ts>.<key>.json`, where the key is
-`empty`, `seeded`, `history-empty`, `history-seeded`, or a control's
-`direct-history-empty` / `direct-history-seeded`. A re-run
+`empty`, `seeded`, `link-empty`, `link-seeded`, `history-empty`,
+`history-seeded`, a control's `direct-history-empty` /
+`direct-history-seeded`, or one of the flag runs' keys named above
+(`rollback-*`, `mirror-*`, `caggs-refused-seeded`, `ng-*`). A re-run
 overwrites; git keeps the earlier record. The format is defined and validated
 in [`tools/tsupgrade/evidence.py`](../tools/tsupgrade/evidence.py) and kept
 loose on purpose — required fields only, anything else passes through:
@@ -268,5 +270,6 @@ loose on purpose — required fields only, anything else passes through:
 - pass or fail; on failure, a short plain explanation and the verbatim error lines
 - the path to the full log
 
-Records are evidence, not verdicts. Nothing maps them onto the matrix's verdict
-enum yet; that is decided after the runs show which failures actually occur.
+Records are evidence, not verdicts. A verdict is written into the matrix from
+its row's records, and `tests/test_shipped_data.py` checks that each verified
+row agrees with them (`test_every_verified_row_agrees_with_its_evidence`).

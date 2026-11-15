@@ -5,7 +5,11 @@ records the parts that were run against real infrastructure, so that anyone
 picking it up can re-run them rather than trust them.
 
 Executed 2026-09-20 against `timescale/timescaledb-ha:pg16.15-ts2.30.1`, as a
-standalone container and as a single-node kind cluster under Patroni.
+standalone container and as a single-node kind cluster under Patroni, with
+later notes up to 2026-11-11. **It is a dated record**: what it says was true
+when it was run, and some of it has moved on since (test counts, and the pg12
+2.0 route, which was bridged later). The [README](../README.md) and
+[`matrix-method.md`](matrix-method.md) describe the tool as it is.
 
 ## What an image can install
 
@@ -65,7 +69,9 @@ bridged through `pg12.6-ts2.0.1-p0` must stop at 1.7.5; landing on that image's
 ceiling (2.0.1) leaves it on a version `pg12.22` cannot load. The bridge search
 is breadth-first over every installable version for that reason. It also means
 a pg12 database already **at 2.0** cannot reach 2.11 through these two images at
-all; that needs a pg12 image shipping both 2.0.x and 2.1+.
+all; that needs a pg12 image shipping both 2.0.x and 2.1+. (Later found:
+`pg12.6-ts2.1.1-p2` ships 2.0.0-2.0.2 and 2.1.0-2.1.1, and the pg12 2.0 -> 2.11
+row is verified through it.)
 
 ```sh
 make image-contents                       # docker run --rm, ls only, no server
@@ -204,7 +210,7 @@ is reported in the command's output rather than resolved silently.
 
 ## The test suite
 
-261 tests, no cluster and no network. Everything above that needed real
+261 tests at the time (2026-09-20), no cluster and no network. Everything above that needed real
 infrastructure is reproduced here as a scripted fixture, so the decisions stay
 covered on a laptop with Docker switched off.
 
@@ -291,7 +297,7 @@ checks the column reference `bf.bucket_func`.
 Unit tests need nothing installed beyond Python:
 
 ```sh
-bash scripts/test.sh                 # 261 tests, no cluster, no network
+bash scripts/test.sh                 # the unit tests; the container tests skip without Docker
 ```
 
 Offline drift needs only network access to the registry:

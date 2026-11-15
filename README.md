@@ -1,7 +1,7 @@
 # timescaledb-upgrader
 
-A chart-agnostic toolkit for upgrading and rolling back **self-hosted
-TimescaleDB on Kubernetes** — plus a local test harness to rehearse the whole
+A toolkit for upgrading and rolling back **self-hosted TimescaleDB on
+Kubernetes**, under Patroni — plus a local test harness to rehearse the whole
 thing before you touch a cluster that matters.
 
 Built for people running TimescaleDB on their own clusters, often on the
@@ -104,9 +104,11 @@ Until that is done, chart users get the most from `preflight`, `plan` and
 
 - Python 3.8 or later, standard library only — nothing to install.
   `scripts/tsupgrade.sh` finds an interpreter and runs `python -m tsupgrade`.
-- `kubectl`, pointed at the cluster, with rights to read pods and exec into
-  them (preflight), and to change the StatefulSet, pods, PVCs, endpoints and
-  configmaps in its namespace (`apply`, `rollback`).
+- `kubectl`, pointed at the cluster. Preflight needs to read pods, exec into
+  them, and read the StatefulSet, PVCs and the namespace, plus the
+  cluster-scoped nodes and storage classes. `apply` and `rollback` also change
+  the StatefulSet, pods, PVCs, endpoints and configmaps in the namespace, and
+  start a pod there.
 - `bash`. On Windows, Git Bash or WSL.
 
 Every command below is `bash scripts/tsupgrade.sh <command>`; `--help` on any
@@ -149,12 +151,15 @@ disagreement is reported rather than flattened into one confident answer.
 
 ### It is read-only, and that is enforced
 
-- Only `kubectl get` / `exec` are used. Never `apply`, `patch`, `delete` or `scale`.
+- Only `kubectl get` and `exec` touch the cluster (with the client-side
+  `kubectl config` and `kubectl version`). Never `apply`, `patch`, `delete` or
+  `scale`.
 - Every connection opens with `PGOPTIONS=-c default_transaction_read_only=on`,
   so **PostgreSQL itself** rejects any statement that would write, whatever the
   SQL says.
-- Commands run inside pods are limited to `df`, `du`, `stat`, `id`, `test` and
-  `ls`.
+- Commands run inside pods are `psql` (through `env`, to set that option) and
+  `df`, `du`, `stat`, `id`, `test` and `ls`, an `ls` with a wildcard going
+  through `sh -c`.
 
 This is why "is the image pullable from this cluster?" reports `unknown` rather
 than `pass` when the image is not already cached: proving it would require
@@ -304,7 +309,7 @@ re-clones the replicas. The plan ends with `vacuumdb --all
 
 By default `pg_upgrade` copies, and the old data directory stays beside the
 new one as `<data>.pg<old major>`, to go back to. `plan --link` hard-links
-instead, which is fast and needs no space but leaves the old directory
+instead, which is fast and needs little space but leaves the old directory
 unusable once the new cluster has started. Both modes are verified on kind
 for every verified cross-PG row, and the records show what `pg_upgrade` did:
 copied files, or hard links into the old directory.
@@ -438,7 +443,8 @@ keeps the verified route either way.
 
 An aggregate in the old format (created before 2.7, or up to 2.13 with
 `finalized = false`) cannot cross the 2.25 update, which also removes
-`cagg_migrate`, the only way to convert it. If a plan reaches 2.25 with one,
+`cagg_migrate`, TimescaleDB's procedure for converting it. If a plan reaches
+2.25 with one,
 `apply` stops before changing anything, says this came from a read-only check,
 and shows each aggregate: its database and name, what it is built on, its size
 and chunks, its jobs, the views on it and its grants. At a terminal it asks
