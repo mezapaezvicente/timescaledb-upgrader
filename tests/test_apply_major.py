@@ -407,8 +407,11 @@ def _fake_cluster(tmp_path):
     return old_bin, new_bin, data
 
 
-def _script(tmp_path, fake, link="--link", locale_provider="libc"):
+def _script(tmp_path, fake, link="--link", locale_provider="libc", prepare=None):
+    """``prepare(data)``: leave the disk as an earlier run would have."""
     old_bin, new_bin, data = _fake_cluster(tmp_path)
+    if prepare:
+        prepare(data)
     env = {"PATH": "/usr/bin:/bin", "FROM": "12", "TO": "13", "PG_BIN_OLD": old_bin.as_posix(),
            "PG_BIN_NEW": new_bin.as_posix(), "DATA": data.as_posix(), "LINK": link, "FAKE": fake,
            "ENCODING": "UTF8", "LC_COLLATE": "C.UTF-8", "LC_CTYPE": "C.UTF-8",
@@ -430,6 +433,31 @@ def test_the_script_reports_nothing_changed_when_the_check_fails(tmp_path):
     assert rc == 1
     assert "old cluster disabled" not in out and "moved" not in out
     assert (data / "global" / "pg_control").exists()
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash")
+def test_a_refusal_at_the_start_does_not_report_what_an_earlier_run_left(tmp_path):
+    """Measured in a container (2026-11-15): with an earlier --link run's kept
+    directory still there, the refusal also printed "old cluster disabled" and
+    "data directories swapped", which apply would read as this run's doing."""
+    def earlier_link_run(data):
+        keep = data.parent / "data.pg12" / "global"
+        keep.mkdir(parents=True)
+        (keep / "pg_control.old").write_text("x")
+
+    rc, out, _ = _script(tmp_path, "ok", prepare=earlier_link_run)
+    assert rc == 2 and "already exists; refusing" in out
+    assert not any(said in out for said in ("old cluster disabled", "swapped", "moved"))
+
+
+@pytest.mark.skipif(BASH is None, reason="no bash")
+def test_a_cluster_an_earlier_link_disabled_is_refused_and_named(tmp_path):
+    def disabled(data):
+        (data / "global" / "pg_control").rename(data / "global" / "pg_control.old")
+
+    rc, out, _ = _script(tmp_path, "ok", prepare=disabled)
+    assert rc == 2 and "an earlier pg_upgrade --link disabled this cluster" in out
+    assert "old cluster disabled:" not in out
 
 
 @pytest.mark.skipif(BASH is None, reason="no bash")

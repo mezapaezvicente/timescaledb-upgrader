@@ -16,7 +16,9 @@
 #
 # On failure the EXIT trap says what was changed ("old cluster disabled:",
 # "old data directory moved:", "data directories swapped:", "old WAL directory
-# moved:"), which apply turns into how to go back.
+# moved:"), which apply turns into how to go back. It reports only once this
+# run has started changing the disks: a refusal at the start says nothing, so
+# what an earlier run left is never reported as this run's doing.
 set -euo pipefail
 : "${FROM:?}" "${TO:?}" "${PG_BIN_OLD:?}" "${PG_BIN_NEW:?}" "${DATA:?}" "${LINK?}"
 : "${ENCODING:?}" "${LC_COLLATE:?}" "${LC_CTYPE:?}" "${LOCALE_PROVIDER:?}" "${PROVIDER_LOCALE?}"
@@ -28,10 +30,11 @@ if [ -L "$data/pg_wal" ]; then
   wal_new="$wal.new"; wal_keep="$wal.pg$FROM"
 fi
 cd "$(dirname "$data")"
+changing=""
 
 on_exit() {
   local rc=$? d
-  if [ "$rc" -ne 0 ]; then
+  if [ "$rc" -ne 0 ] && [ -n "$changing" ]; then
     for d in "$data" "$keep"; do
       if [ -e "$d/global/pg_control.old" ]; then echo "old cluster disabled: $d/global/pg_control.old"; fi
     done
@@ -47,6 +50,9 @@ for b in "$old_bin" "$new_bin"; do
   [ -x "$b/pg_upgrade" ] || [ -x "$b/postgres" ] || { echo "this image has no $b"; exit 2; }
 done
 [ -e "$keep" ] && { echo "$keep already exists; refusing to overwrite it"; exit 2; }
+[ -e "$data/global/pg_control.old" ] && {
+  echo "$data/global/pg_control.old exists: an earlier pg_upgrade --link disabled this cluster;" \
+       "rename it back to $data/global/pg_control before upgrading again"; exit 2; }
 if [ -n "$wal" ]; then
   [ -d "$wal" ] || { echo "$data/pg_wal points to $wal, which is not there"; exit 2; }
   [ -e "$wal_keep" ] && { echo "$wal_keep already exists; refusing to overwrite it"; exit 2; }
@@ -81,6 +87,8 @@ report() {
 upgrade=("$new_bin/pg_upgrade" -b "$old_bin" -B "$new_bin" -d "$data" -D "$new" -U postgres)
 if [ -n "$LINK" ]; then upgrade+=(--link); fi
 "${upgrade[@]}" --check || { report --check; exit 1; }
+# From here on the old cluster can change (--link renames its pg_control).
+changing=1
 "${upgrade[@]}" || { report ""; exit 1; }
 mv "$data" "$keep"
 mv "$new" "$data"
