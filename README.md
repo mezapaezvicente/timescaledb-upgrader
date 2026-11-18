@@ -1,18 +1,38 @@
 # timescaledb-upgrader
 
-A toolkit for upgrading and rolling back **self-hosted TimescaleDB on
-Kubernetes**, under Patroni — plus a local test harness to rehearse the whole
-thing before you touch a cluster that matters.
+Upgrade and roll back **self-hosted TimescaleDB on Kubernetes under Patroni**:
+the extension, the image, and the PostgreSQL major with `pg_upgrade`.
+
+- **`preflight`** reads what is actually running, per instance and per
+  database, and checks the target image, disk, other extensions, collations
+  and version drift. It is read-only, and PostgreSQL enforces that.
+- **`plan`** picks a route through intermediate images and releases, pinned to
+  the route its matrix row was verified on, as a runbook or a script you run
+  yourself.
+- **`apply`** and **`rollback`** carry it out on a Patroni StatefulSet. They
+  refuse before changing anything if a check does not hold.
+- Python 3.8+, standard library only, plus `kubectl` and `bash`. Every route
+  in the matrix was run on a local kind cluster, and `make up` gives you one to
+  rehearse on.
 
 Built for people running TimescaleDB on their own clusters, often on the
 [archived Timescale Helm charts](https://github.com/timescale/helm-charts) or a
 fork of them. Nothing here depends on those charts. The tooling talks to a live
 cluster and a live database, not to chart values.
 
+**Reading this as a work sample?** The thinking is in three places:
+[Why this exists](#why-this-exists) and its note on the matrix;
+[Known limits](#known-limits), which separates what was measured from what was
+inferred; and the test names, which state the rules
+(`test_rollback_refuses_what_it_cannot_undo`,
+`test_every_verified_row_agrees_with_its_evidence`). Every matrix verdict rests
+on run records committed under [`verify/evidence/`](verify/evidence/), and a
+test fails when a verdict and its records disagree.
+
 > **Status:** preflight, `plan`, `apply` and `rollback` are complete: extension
-> updates, image rollouts and PostgreSQL major upgrades with `pg_upgrade`, each
-> plan pinned to the route its matrix row was verified on. All 131 rows of the
-> matrix are established, 126 by running them with this tool. `apply` drives a
+> updates, image rollouts and PostgreSQL major upgrades with `pg_upgrade`. At
+> `v0.2.0` all 131 rows of the matrix are established, 126 by running them with
+> this tool. `apply` drives a
 > Patroni StatefulSet laid out like the `timescaledb-ha` image's defaults; the
 > archived chart's own layout is not supported yet — see
 > [Who can use it today](#who-can-use-it-today).
@@ -543,7 +563,7 @@ database and once on a seeded one, and for a PostgreSQL major change both again
 with `pg_upgrade --link`. Documentation and changelogs are cited, never taken as
 proof. The one exception is `no_image`, which the container registry answers.
 
-All 131 rows are verified: 126 by running them (98 same-PG, 28 that change
+The matrix is established per release. As of `v0.2.0`, all 131 rows are verified: 126 by running them (98 same-PG, 28 that change
 major) and 5 `no_image` rows by the registry. Every record names one commit, on
 a clean tree, and each row's route is pinned by digest. Each row is proven at
 the PostgreSQL minors and image digests its records name, on a fixture of about
@@ -607,6 +627,17 @@ aggregate on the way (see [Old continuous aggregates](#old-continuous-aggregates
 ---
 
 ## Try it locally
+
+The test suite needs no cluster, no Docker and no network:
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+```
+
+Tests that run a real `timescaledb-ha` container skip themselves when Docker or
+the image is missing. Establishing matrix rows is a separate, much longer run
+on kind (below).
 
 ```bash
 make up      # a kind cluster with TimescaleDB under Patroni
