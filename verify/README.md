@@ -11,6 +11,8 @@ fixture/check.sql   integrity checks, run at the target version after the upgrad
 fixture/views.sql   optional layer: a user view on every timescaledb_information view
 fixture/try.sh      proves the fixture at given versions on one image (not an upgrade)
 evidence/           one JSON record per row and mode, committed
+probe_sessions.py   measures open sessions across an extension update (not a row)
+probes/sessions/    one JSON record per probe case, committed
 out/                full logs, plans and apply reports, local only (gitignored)
 ```
 
@@ -273,3 +275,43 @@ loose on purpose — required fields only, anything else passes through:
 Records are evidence, not verdicts. A verdict is written into the matrix from
 its row's records, and `tests/test_shipped_data.py` checks that each verified
 row agrees with them (`test_every_verified_row_agrees_with_its_evidence`).
+
+## Probes
+
+A probe measures a property of TimescaleDB that the tool's behaviour or
+messages rest on. It is not a matrix row and writes nothing under `evidence/`.
+
+`probe_sessions.py` measures what sessions do across an extension update, the
+two rules preflight prints and the reason `apply` cycles sessions. Per case,
+on the same disposable kind cluster as the harness (primary and replica):
+
+1. `verify` is seeded at the source release, and one session on each pod
+   loads the library and waits;
+2. the update runs from a fresh `psql -X` session on the primary, and the
+   replica replays it;
+3. each waiting session runs the same statements twice; the library it has
+   mapped is read from `/proc/<pid>/maps` before the update, after it, and
+   after the statements; fresh sessions run the statements once;
+4. `verify` is staged at the source again, and the update is run in a
+   session that has already loaded the library.
+
+```bash
+python verify/probe_sessions.py --list
+python verify/probe_sessions.py --case pg15-2.20.3-2.28.3
+```
+
+What the four cases (2.5.2 → 2.11.2 on PostgreSQL 12, 2.20.3 → 2.28.3 on 15,
+2.25.2 → 2.30.1 and 2.30.0 → 2.30.1 on 17) showed, every time:
+
+- a session open during the update keeps the old library mapped, on the
+  replica as on the primary, and the server ends it at its next statement,
+  whatever the statement, with `FATAL: "timescaledb" already loaded with a
+  different version`. It fails once and is gone; it does not keep failing;
+- a fresh session works on every instance;
+- an update in a session that has loaded the library is refused with
+  `cannot be updated after the old version has already been loaded`, and the
+  version stays where it was.
+
+Not measured: a session inside an open transaction at the time of the update,
+and what a connection pool does with the ended sessions.
+`tests/test_session_probes.py` fails if a record stops showing the above.

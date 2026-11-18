@@ -103,8 +103,8 @@ VERIFICATION = "verification"
 BLOCKED = "blocked"
 UNESTABLISHED = "unestablished"
 
-# Carried into every update step, because each has bitten someone. See
-# UPGRADE-RESEARCH.md §10.6, traps 5 and 6.
+# Carried into every update step, because each has bitten someone. The
+# first-statement rule is measured: verify/probes/sessions/.
 _SESSION_RULES = (
     "run once in every database that has timescaledb installed",
     "use psql -X, so no .psqlrc loads the old library first",
@@ -589,8 +589,9 @@ def build_plan(
                 {
                     "hop": i,
                     "action": "cycle_sessions",
-                    "why": "existing sessions, replicas included, keep the old "
-                    "shared object loaded until they reconnect",
+                    "why": "sessions open during the update, replicas included, "
+                    "still have the old library loaded, and the server would end "
+                    "each one at its next statement; this ends them now instead",
                 },
                 {"hop": i, "action": "verify_version", "expect": hop.to_version},
             ]

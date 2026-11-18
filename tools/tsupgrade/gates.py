@@ -715,15 +715,17 @@ DUMP_RESTORE_PROCEDURE = (
     "ALTER EXTENSION timescaledb UPDATE  -- only now, and only if wanted",
 )
 
-# The single most repeated piece of advice in the whole issue corpus.
+# The single most repeated piece of advice in the whole issue corpus. Both
+# measured from 2.5 to 2.30 on PostgreSQL 12 to 17: verify/probes/sessions/.
 SESSION_RULES = (
-    "Run ALTER EXTENSION as the first statement in its session, via psql -X; a "
-    ".psqlrc that touches the extension loads the old library first and the "
-    "update then refuses with 'cannot be updated after the old version has "
+    "Run ALTER EXTENSION as the first statement in its session, via psql -X; "
+    "after any statement that loads the library, one from a .psqlrc included, "
+    "the update refuses with 'cannot be updated after the old version has "
     "already been loaded'.",
-    "Existing connections keep the old shared object and keep failing until "
-    "they are cycled -- on replicas too, since the catalog change arrives by "
-    "WAL while each replica's sessions hold their own library.",
+    "Sessions open during the update keep the old library loaded, on replicas "
+    "too, and the server ends each one at its next statement with "
+    "'\"timescaledb\" already loaded with a different version'; their clients "
+    "have to reconnect.",
 )
 
 

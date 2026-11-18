@@ -1,0 +1,212 @@
+{
+ "probe": "old-sessions-after-extension-update",
+ "case": "pg12-2.5.2-2.11.2",
+ "image": "timescale/timescaledb-ha:pg12.22-ts2.11.2@sha256:08a3d85f2ff671bd2dd6d75bc02c7e8b998be13e56efe5788dcaa83ae74fde61",
+ "server_version": "12.22 (Ubuntu 12.22-2.pgdg22.04+1)",
+ "from": "2.5.2",
+ "to": "2.11.2",
+ "replicas": 2,
+ "seeded": true,
+ "upgrader": {
+  "commit": "5cf3ac2fa086f9b9aa86ba832b0f96753ef36575",
+  "dirty": true
+ },
+ "recorded_at": "2026-11-18T04:12:50Z",
+ "update": {
+  "exit": 0,
+  "output": ""
+ },
+ "replica_caught_up": true,
+ "old_sessions": {
+  "tsdb-0": {
+   "role": "primary",
+   "exit": 2,
+   "libraries_before_update": {
+    "pid": 177,
+    "libraries": [
+     "timescaledb-2.5.2.so",
+     "timescaledb-tsl-2.5.2.so",
+     "timescaledb.so"
+    ],
+    "note": null
+   },
+   "libraries_after_update": {
+    "pid": 177,
+    "libraries": [
+     "timescaledb-2.5.2.so",
+     "timescaledb-tsl-2.5.2.so",
+     "timescaledb.so"
+    ],
+    "note": null
+   },
+   "libraries_after_statements": {
+    "pid": null,
+    "libraries": null,
+    "note": "sessions named probe-old: "
+   },
+   "steps": [
+    {
+     "step": "warm.pid",
+     "output": "177"
+    },
+    {
+     "step": "warm.extversion",
+     "output": "2.5.2"
+    },
+    {
+     "step": "warm.hypertable",
+     "output": "50400"
+    },
+    {
+     "step": "warm.time_bucket",
+     "output": "2026-01-01 00:00:00+00"
+    },
+    {
+     "step": "warm.cagg",
+     "output": "840"
+    },
+    {
+     "step": "r1.pid",
+     "output": "FATAL:  \"timescaledb\" already loaded with a different version\nDETAIL:  The new version is \"2.11.2\", this session is using version \"2.5.2\". The session will be restarted.\nserver closed the connection unexpectedly\n\tThis probably means the server terminated abnormally\n\tbefore or while processing the request.\nconnection to server was lost\ncommand terminated with exit code 2"
+    }
+   ]
+  },
+  "tsdb-1": {
+   "role": "replica",
+   "exit": 2,
+   "libraries_before_update": {
+    "pid": 65,
+    "libraries": [
+     "timescaledb-2.5.2.so",
+     "timescaledb-tsl-2.5.2.so",
+     "timescaledb.so"
+    ],
+    "note": null
+   },
+   "libraries_after_update": {
+    "pid": 65,
+    "libraries": [
+     "timescaledb-2.5.2.so",
+     "timescaledb-tsl-2.5.2.so",
+     "timescaledb.so"
+    ],
+    "note": null
+   },
+   "libraries_after_statements": {
+    "pid": null,
+    "libraries": null,
+    "note": "sessions named probe-old: "
+   },
+   "steps": [
+    {
+     "step": "warm.pid",
+     "output": "65"
+    },
+    {
+     "step": "warm.extversion",
+     "output": "2.5.2"
+    },
+    {
+     "step": "warm.hypertable",
+     "output": "50400"
+    },
+    {
+     "step": "warm.time_bucket",
+     "output": "2026-01-01 00:00:00+00"
+    },
+    {
+     "step": "warm.cagg",
+     "output": "840"
+    },
+    {
+     "step": "r1.pid",
+     "output": "FATAL:  \"timescaledb\" already loaded with a different version\nDETAIL:  The new version is \"2.11.2\", this session is using version \"2.5.2\". The session will be restarted.\nserver closed the connection unexpectedly\n\tThis probably means the server terminated abnormally\n\tbefore or while processing the request.\nconnection to server was lost\ncommand terminated with exit code 2"
+    }
+   ]
+  }
+ },
+ "fresh_sessions": {
+  "tsdb-0": {
+   "exit": 0,
+   "steps": [
+    {
+     "step": "pid",
+     "output": "289"
+    },
+    {
+     "step": "extversion",
+     "output": "2.11.2"
+    },
+    {
+     "step": "hypertable",
+     "output": "50400"
+    },
+    {
+     "step": "time_bucket",
+     "output": "2026-01-01 00:00:00+00"
+    },
+    {
+     "step": "cagg",
+     "output": "840"
+    },
+    {
+     "step": "information",
+     "output": "1"
+    },
+    {
+     "step": "insert",
+     "output": "INSERT 0 1"
+    }
+   ],
+   "role": "primary"
+  },
+  "tsdb-1": {
+   "exit": 0,
+   "steps": [
+    {
+     "step": "pid",
+     "output": "162"
+    },
+    {
+     "step": "extversion",
+     "output": "2.11.2"
+    },
+    {
+     "step": "hypertable",
+     "output": "50401"
+    },
+    {
+     "step": "time_bucket",
+     "output": "2026-01-01 00:00:00+00"
+    },
+    {
+     "step": "cagg",
+     "output": "841"
+    },
+    {
+     "step": "information",
+     "output": "1"
+    }
+   ],
+   "role": "replica"
+  }
+ },
+ "same_session_update": {
+  "exit": 0,
+  "steps": [
+   {
+    "step": "load",
+    "output": "50400"
+   },
+   {
+    "step": "update",
+    "output": "ERROR:  extension \"timescaledb\" cannot be updated after the old version has already been loaded\nHINT:  Start a new session and execute ALTER EXTENSION as the first command. Make sure to pass the \"-X\" flag to psql."
+   },
+   {
+    "step": "extversion",
+    "output": "2.5.2"
+   }
+  ],
+  "extversion_after": "2.5.2"
+ }
+}
