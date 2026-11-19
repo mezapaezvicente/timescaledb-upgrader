@@ -88,3 +88,21 @@ def test_reference_labels():
     assert reference_label(
         "https://registry-1.docker.io/v2/timescale/timescaledb-ha/tags/list?n=10000") == "registry"
     assert reference_label("https://www.tigerdata.com/docs/x") == "docs"
+
+
+def test_a_control_reads_as_the_documented_failure_never_as_a_pass(tmp_path):
+    """A direct control exists to break. Its cell must not read like a failed
+    upgrade, nor, if it ever goes through, like a green one."""
+    evidence = dict(EVIDENCE, **{"direct-history-seeded": "ev/2.20-to-2.28.direct-history-seeded.json"})
+    for mode in ("empty", "seeded"):
+        path = tmp_path / evidence[mode]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(_record(mode, "pass")), encoding="utf-8")
+    control = tmp_path / evidence["direct-history-seeded"]
+    for result, stage, says in (("fail", "apply", "errored as documented"),
+                                ("pass", "done", "did not error"),
+                                ("fail", "check", "fail")):
+        doc = dict(_record("history-seeded", result, stage=stage), control="direct", history="2.13.1")
+        control.write_text(json.dumps(doc), encoding="utf-8")
+        row = _row(render_markdown(Matrix([_entry(evidence=evidence)]), root=tmp_path))
+        assert "[direct-history-seeded: {0}]".format(says) in row, row

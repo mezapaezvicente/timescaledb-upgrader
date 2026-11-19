@@ -563,6 +563,19 @@ database and once on a seeded one, and for a PostgreSQL major change both again
 with `pg_upgrade --link`. Documentation and changelogs are cited, never taken as
 proof. The one exception is `no_image`, which the container registry answers.
 
+**Tests, verification runs and the matrix are three different things.**
+
+- The **test suite** (`python -m pytest`) checks the code and the shipped data.
+  It needs no cluster, and it is green or the change does not go in.
+- A **verification run** (`verify/harness.py`) runs one matrix row end to end
+  with `plan` and `apply` on a kind cluster, then checks the data. It is the
+  end-to-end test of the tool, and it leaves a **record** in
+  [`verify/evidence/`](verify/evidence/): what happened, and whether the
+  checks held. A record is an observation, not a test result: a control's
+  record shows an update breaking, because that is what it is for.
+- The **matrix** holds one verdict per row, written from that row's records.
+  The test suite fails when a verdict and its records disagree.
+
 The matrix is established per release. As of `v0.2.0`, all 131 rows are verified: 126 by running them (98 same-PG, 28 that change
 major) and 5 `no_image` rows by the registry. Every record names one commit, on
 a clean tree, and each row's route is pinned by digest. Each row is proven at

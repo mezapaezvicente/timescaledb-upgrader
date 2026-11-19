@@ -12,7 +12,7 @@ import warnings
 
 import pytest
 
-from tsupgrade.evidence import load_record, staleness
+from tsupgrade.evidence import EvidenceError, load_record, staleness
 from tsupgrade.images import load_catalog
 from tsupgrade.matrix import VERDICTS, default_matrix_path, load_matrix
 
@@ -106,6 +106,21 @@ def test_every_verified_row_agrees_with_its_evidence():
                        for d in runs.values()), where
         else:
             pytest.fail("no evidence rule for verdict {0!r} ({1})".format(entry.verdict, where))
+
+
+def test_every_shipped_record_validates():
+    """Cited or not, every record under verify/evidence/ is one this version
+    reads. Records no row cites (the flag runs) are checked nowhere else."""
+    paths = sorted((REPO / "verify" / "evidence").glob("pg*/*.json"))
+    assert paths
+    problems = []
+    for path in paths:
+        try:
+            load_record(path)
+        except EvidenceError as exc:
+            problems.append(str(exc))
+    assert not problems, "{0} of {1} records do not validate; first: {2}".format(
+        len(problems), len(paths), problems[0])
 
 
 def test_a_cited_control_shows_the_failure_it_controls_for():

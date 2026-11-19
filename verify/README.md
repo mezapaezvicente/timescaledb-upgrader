@@ -4,6 +4,11 @@ A matrix row is verified only by running that migration with this tool, once on
 an empty database and once on a seeded one. This directory holds what those
 runs need and what they leave behind.
 
+These runs are not the test suite (`python -m pytest`, no cluster needed). A
+run is the end-to-end test of the tool on a real cluster, and its record is an
+observation that a matrix verdict is written from. The test suite then holds
+each verdict to its records.
+
 ```
 harness.py          runs matrix rows end to end with plan + apply, writes evidence
 fixture/seed.sql    the seeded fixture, creatable at every source version 1.7 .. 2.29
@@ -139,9 +144,11 @@ python verify/harness.py --pg 12 --from 2.11 --to-pg 13 --mirror-refused
 
 **Old continuous aggregates.** Every run also passes `--migrate-caggs`: a route
 that reaches 2.25 with the old-format aggregate of a pre-2.7 seed migrates it on
-the way, and the fixture checks judge the result. `--caggs-refused --mode seeded`
-is the same without the flag, and passes only if `apply` stops before changing
-anything and names the aggregate (`caggs-refused-seeded`). No row cites it.
+the way, and the fixture checks judge the result. `--caggs-refused` is the same
+without the flag. Seeded, it passes only if `apply` stops before changing
+anything and names the aggregate (`caggs-refused-seeded`); empty, there is no
+aggregate to stop for, and it passes only if the upgrade goes through
+(`caggs-refused-empty`). No row cites them.
 
 **Aggregates on `time_bucket_ng`.** `--ng` adds the `ng.sql` layer (below) to
 the staged database, at a source from 2.8 to 2.14. No update past 2.14 gets
@@ -243,6 +250,15 @@ check that errors prints nothing, and a missing line counts as a failure:
 | `decompress` | compressed chunks decompress and give back the baseline exactly |
 | `jobs` | both jobs are still registered, and their stats still show the success and the failure (`job_errors` is not compared: from 2.15 it reads a table the update rebuilds) |
 
+The three aggregate checks read only what is materialized, since a real-time
+aggregate would otherwise compute missing buckets on the fly and hide a loss.
+`check.sql` first sets `materialized_only`. An aggregate in the old
+(non-finalized) format cannot be altered from 2.14.0 ("Continuous Aggregates
+with partials is not supported anymore"), so for one of those the checks read
+the view below the aggregate's watermark instead, which is exactly the part a
+real-time view takes from the materialization, and say so in their detail
+(`old format, cannot be altered: read below the watermark`).
+
 The fixture was proven at every source version the matrix needs before any
 upgrade was attempted with it: seeded at the newest patch of each series on
 that row's own image, then, for 2.x, checked at the same version (1.x can only
@@ -259,7 +275,7 @@ Written by the harness, one per row and mode, at
 `empty`, `seeded`, `link-empty`, `link-seeded`, `history-empty`,
 `history-seeded`, a control's `direct-history-empty` /
 `direct-history-seeded`, or one of the flag runs' keys named above
-(`rollback-*`, `mirror-*`, `caggs-refused-seeded`, `ng-*`). A re-run
+(`rollback-*`, `mirror-*`, `caggs-refused-*`, `ng-*`). A re-run
 overwrites; git keeps the earlier record. The format is defined and validated
 in [`tools/tsupgrade/evidence.py`](../tools/tsupgrade/evidence.py) and kept
 loose on purpose — required fields only, anything else passes through:

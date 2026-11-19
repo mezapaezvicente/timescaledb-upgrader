@@ -64,9 +64,10 @@ nothing (``mirror-refused-empty``, ``mirror-refused-seeded``). No row cites them
 
 Every run also passes ``--migrate-caggs``, so a route that reaches 2.25 with the
 old-format aggregate of a pre-2.7 seed migrates it on the way, and the checks
-judge the result. ``--caggs-refused`` is the same without it, and passes only if
-``apply`` stops before changing anything and names the aggregate
-(``caggs-refused-seeded``). No row cites it.
+judge the result. ``--caggs-refused`` is the same without it. Seeded, it passes
+only if ``apply`` stops before changing anything and names the aggregate
+(``caggs-refused-seeded``); empty, with no aggregate to stop for, only if the
+upgrade goes through (``caggs-refused-empty``). No row cites them.
 
 ``--ng`` adds aggregates on ``time_bucket_ng`` (``fixture/ng.sql``) to the staged
 database, empty or seeded, at a source from 2.8 to 2.14. No update past 2.14
@@ -192,12 +193,16 @@ class Run:
             return "mirror-" + base
         return "history-" + base if self.history else base
 
-    @property
-    def end(self) -> str:
+    def must_stop(self, base: str) -> bool:
+        """Whether ``apply`` has to stop before changing anything. Without
+        --migrate-caggs only a seeded database has an old aggregate to stop
+        for; an empty one must go through."""
+        return self.refused or self.ng_refused or (self.caggs_refused and base == "seeded")
+
+    def end(self, base: str) -> str:
         """The release the run must end at: the target, or after a rollback
         the source again, or the source still if it had to stop."""
-        return (self.source if self.rollback or self.refused or self.caggs_refused or self.ng_refused
-                else self.target)
+        return self.source if self.rollback or self.must_stop(base) else self.target
 
     @property
     def cross(self) -> bool:
@@ -529,7 +534,7 @@ def judge(
     A failed check quotes its own line and whatever the server said while
     check.sql ran: the check line says what was wrong, the server says why.
     """
-    if run.caggs_refused or run.refused or run.ng_refused:
+    if run.must_stop(mode):
         refusal = (judge_cagg_refusal(apply_stderr, report, pg_version, run) if run.caggs_refused
                    else judge_ng_refusal(apply_stderr, report, pg_version, run) if run.ng_refused
                    else judge_refusal(report, pg_version, run))
@@ -553,10 +558,10 @@ def judge(
         failure = (back or {}).get("failure") or {}
         return (False, "rollback failed: {0}".format(failure.get("summary") or "no result"),
                 error_lines(failure.get("error") or []) or "rollback failed", "rollback")
-    if reached != run.end:
+    if reached != run.end(mode):
         return (False,
                 "{0} reported success but the database is at {1}, not {2}".format(
-                    "rollback" if run.rollback else "apply", reached, run.end),
+                    "rollback" if run.rollback else "apply", reached, run.end(mode)),
                 "extversion {0}".format(reached), "verify")
     if mode == "seeded":
         checks = checks or {}
@@ -1095,8 +1100,8 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
     pg_version = server_version(cluster, log)
     checks, check_err = None, ""
     if base == "seeded" and reached is not None:
-        log.section("check.sql, expect {0}".format(run.end))
-        rc, out, check_err = cluster.psql(DATABASE, "-qtA", "-F", "|", "-v", "expect=" + run.end,
+        log.section("check.sql, expect {0}".format(run.end(base)))
+        rc, out, check_err = cluster.psql(DATABASE, "-qtA", "-F", "|", "-v", "expect=" + run.end(base),
                                   "-f", "-", stdin=(FIXTURE / "check.sql").read_text(encoding="utf-8"),
                                   log=log)
         checks = parse_checks(out)
@@ -1123,7 +1128,7 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         route = record_route(run, plan, contents)
         if route is not None:
             extra["route"] = route
-        if run.cross and not run.refused and not run.caggs_refused and not run.ng_refused:
+        if run.cross and not run.must_stop(base):
             extra["major_upgrades"] = major_upgrades(report)
         if run.mirror:
             extra["image_registry"] = MIRROR
@@ -1133,7 +1138,7 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
     record = build_record(
         transition=run.transition, mode=mode,
         images=[{"reference": i, "digest": local_digest(i, contents)} for i in images],
-        pg_version=pg_version or start_pg, source=run.source, target=run.end,
+        pg_version=pg_version or start_pg, source=run.source, target=run.end(base),
         reached=reached, passed=passed, log=log.path.relative_to(REPO).as_posix(),
         explanation=explanation, error=error, upgrader=revision,
         stage=stopped, started_at=started, finished_at=_now(),
@@ -1302,7 +1307,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             "  (created at {0})".format(run.history) if run.history else "",
             "  CONTROL {0}".format(run.control) if run.control else "",
             "  --link" if run.link else "  then rollback" if run.rollback
-            else "  must stop" if run.refused or run.caggs_refused or run.ng_refused
+            else "  must stop" if run.refused or run.ng_refused
+            else "  without --migrate-caggs (seeded must stop)" if run.caggs_refused
             else "  from " + MIRROR if run.mirror else "  with time_bucket_ng" if run.ng else ""))
     for skip in skipped:
         e = skip.entry

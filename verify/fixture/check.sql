@@ -14,9 +14,10 @@
 -- A step a check depends on (a refresh, an insert) is tracked with psql's
 -- :ERROR, and its failure fails the check. Otherwise a real-time aggregate
 -- "matches" a fresh query with no refresh having worked at all, because the
--- view computes unmaterialized buckets on the fly. For the same reason the
--- aggregate is switched to materialized_only first, so every aggregate check
--- reads what was actually materialized.
+-- view computes unmaterialized buckets on the fly. For the same reason every
+-- aggregate check reads only what was actually materialized: the aggregate is
+-- switched to materialized_only first, or, when it cannot be, read below its
+-- watermark (see below).
 
 \set ON_ERROR_STOP off
 
@@ -57,21 +58,32 @@ SELECT 'check', 'still_compressed',
   FROM (SELECT count(*) AS n FROM timescaledb_information.chunks
          WHERE hypertable_name = 'fx_metrics' AND is_compressed) c, fx_baseline b;
 
--- From here on the aggregate shows only what is materialized.
+-- From here on the aggregate checks read only what is materialized.
+--
+-- An aggregate in the old format (created before 2.7, never migrated) cannot
+-- be altered from 2.14.0: "Continuous Aggregates with
+-- partials is not supported anymore". Its view stays real-time, and a
+-- real-time view takes buckets below the watermark from the materialization
+-- and computes only those at or above it from the hypertable. So :materialized
+-- is a filter that keeps the materialized rows either way, read again at each
+-- query because a refresh moves the watermark. The watermark functions are in
+-- _timescaledb_functions from 2.12, below every release that refuses the ALTER.
 ALTER MATERIALIZED VIEW fx_hourly SET (timescaledb.materialized_only = true);
 \if :ERROR
-\set materialized_only false
+SELECT mat_hypertable_id AS fx_mat FROM _timescaledb_catalog.continuous_agg
+ WHERE user_view_name = 'fx_hourly' \gset
+\set materialized 'bucket < _timescaledb_functions.to_timestamp(_timescaledb_functions.cagg_watermark(' :fx_mat '))'
+\set how ' (old format, cannot be altered: read below the watermark)'
 \else
-\set materialized_only true
+\set materialized true
+\set how ''
 \endif
 
 -- The materialization survived, before anything refreshes it.
 SELECT 'check', 'cagg_survived',
-       CASE WHEN :'materialized_only'::boolean AND n = b.cagg_rows THEN 'pass' ELSE 'fail' END,
-       format('%s materialized rows; seeded %s%s', n, b.cagg_rows,
-              CASE WHEN :'materialized_only'::boolean THEN ''
-                   ELSE ' (could not set materialized_only; count includes real-time rows)' END)
-  FROM (SELECT count(*) AS n FROM fx_hourly) c, fx_baseline b;
+       CASE WHEN n = b.cagg_rows THEN 'pass' ELSE 'fail' END,
+       format('%s materialized rows; seeded %s%s', n, b.cagg_rows, :'how')
+  FROM (SELECT count(*) AS n FROM fx_hourly WHERE :materialized) c, fx_baseline b;
 
 -- The aggregate still refreshes, and matches the same query run fresh.
 CALL refresh_continuous_aggregate('fx_hourly', NULL, NULL);
@@ -86,17 +98,16 @@ WITH fresh AS (
          round(avg(value)::numeric, 6) AS a, count(*) AS n
     FROM fx_metrics GROUP BY 1, 2
 ), agg AS (
-  SELECT bucket, device, round(avg_value::numeric, 6) AS a, n FROM fx_hourly
+  SELECT bucket, device, round(avg_value::numeric, 6) AS a, n FROM fx_hourly WHERE :materialized
 ), diff AS (
   (SELECT * FROM fresh EXCEPT SELECT * FROM agg)
   UNION ALL
   (SELECT * FROM agg EXCEPT SELECT * FROM fresh)
 )
 SELECT 'check', 'cagg_matches',
-       CASE WHEN :'materialized_only'::boolean AND :'refreshed'::boolean AND count(*) = 0
-            THEN 'pass' ELSE 'fail' END,
-       format('%s differing buckets; refresh %s', count(*),
-              CASE WHEN :'refreshed'::boolean THEN 'ran' ELSE 'FAILED' END)
+       CASE WHEN :'refreshed'::boolean AND count(*) = 0 THEN 'pass' ELSE 'fail' END,
+       format('%s differing buckets; refresh %s%s', count(*),
+              CASE WHEN :'refreshed'::boolean THEN 'ran' ELSE 'FAILED' END, :'how')
   FROM diff;
 
 -- New writes land, and a refresh picks them up.
@@ -119,13 +130,13 @@ CALL refresh_continuous_aggregate('fx_hourly', TIMESTAMPTZ '2026-01-08 00:00:00+
 
 SELECT 'check', 'write_and_refresh',
        CASE WHEN :'wrote'::boolean AND :'refreshed_window'::boolean
-                 AND :'materialized_only'::boolean AND count(*) = 1 AND min(n) = 60
+                 AND count(*) = 1 AND min(n) = 60
             THEN 'pass' ELSE 'fail' END,
-       format('insert %s, refresh %s; %s new buckets, %s rows in them',
+       format('insert %s, refresh %s; %s new buckets, %s rows in them%s',
               CASE WHEN :'wrote'::boolean THEN 'ok' ELSE 'FAILED' END,
               CASE WHEN :'refreshed_window'::boolean THEN 'ok' ELSE 'FAILED' END,
-              count(*), coalesce(sum(n), 0))
-  FROM fx_hourly WHERE bucket = TIMESTAMPTZ '2026-01-08 00:00:00+00';
+              count(*), coalesce(sum(n), 0), :'how')
+  FROM fx_hourly WHERE bucket = TIMESTAMPTZ '2026-01-08 00:00:00+00' AND :materialized;
 
 -- Compressed chunks still decompress, and give back exactly what went in.
 SELECT count(*) AS decompressed

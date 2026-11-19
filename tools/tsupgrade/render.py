@@ -85,6 +85,19 @@ def _pg_cell(records: Dict[str, Optional[Dict[str, Any]]]) -> str:
     return " / ".join(minors) if minors else "—"
 
 
+def _status(doc: Dict[str, Any]) -> str:
+    """What a record's cell says. A control exists to break: one that errored
+    in the update is the documented failure, never a green ``pass``; one that
+    went through no longer shows what it was cited for."""
+    if "control" not in doc:
+        return doc["result"]
+    if doc["result"] == "fail" and doc.get("stage") == "apply":
+        return "errored as documented"
+    if doc["result"] == "pass":
+        return "did not error"
+    return doc["result"]
+
+
 def _evidence_cell(
     entry: MatrixEntry, records: Dict[str, Optional[Dict[str, Any]]], link_prefix: str
 ) -> str:
@@ -95,7 +108,7 @@ def _evidence_cell(
         if mode in records and records[mode] is None:
             status = "missing"
         elif mode in records:
-            status = records[mode]["result"]
+            status = _status(records[mode])
         else:
             status = "?"
         cells.append("[{0}: {1}]({2}{3})".format(mode, status, link_prefix, entry.evidence[mode]))
@@ -180,11 +193,17 @@ def render_markdown(
         out.append(
             "A verdict is established only by running that migration with the "
             "upgrader itself (`verify/harness.py`), once on an empty database and "
-            "once on a seeded one. **Evidence** links both records and **PG** is "
+            "once on a seeded one. Those runs are not the test suite: each leaves "
+            "a record of what happened, and the verdict is written from the "
+            "records. **Evidence** links both records and **PG** is "
             "the exact PostgreSQL minor they ran on: a row keyed by a PostgreSQL "
             "major is proven only at that minor. A row that changes PostgreSQL "
             "major ran both ways again with `pg_upgrade --link` (`link-` records), "
-            "since `apply` offers it. `no image` rows are verified "
+            "since `apply` offers it. A `direct-history-` record is a control: the "
+            "same update without the stop `tsupgrade plan` inserts, run to show "
+            "the stop is needed. It reads `errored as documented` when it broke "
+            "the way the row's reason says, and never counts toward the verdict. "
+            "`no image` rows are verified "
             "against the container registry: no such tag is published. "
             "**References** are upstream issues, "
             "pull requests and release notes that explain a verdict or a caveat; "

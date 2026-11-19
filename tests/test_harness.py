@@ -311,9 +311,9 @@ def test_the_mirror_cannot_ever_answer():
 
 def test_mirror_runs_name_their_records_and_never_a_rows():
     run = harness.with_mirror(CROSS)
-    assert (run.mode("seeded"), run.end) == ("mirror-seeded", CROSS.target)
+    assert (run.mode("seeded"), run.end("seeded")) == ("mirror-seeded", CROSS.target)
     refused = harness.with_mirror(CROSS, refused=True)
-    assert (refused.mode("empty"), refused.end) == ("mirror-refused-empty", CROSS.source)
+    assert (refused.mode("empty"), refused.end("empty")) == ("mirror-refused-empty", CROSS.source)
     assert isinstance(harness.with_mirror(RUN), harness.Unrunnable)
     assert isinstance(harness.with_mirror(harness.with_link(CROSS)), harness.Unrunnable)
 
@@ -555,7 +555,7 @@ CROSS = harness.resolve(_row("12", "2.11", "2.15", target_pg="13"), XPG)
 def test_rollback_runs_are_copy_mode_major_changes_that_end_at_the_source():
     run = harness.with_rollback(CROSS)
     assert run.rollback and run.key("empty") == "rollback-empty"
-    assert run.end == run.source and CROSS.end == CROSS.target
+    assert run.end("seeded") == run.source and CROSS.end("seeded") == CROSS.target
     assert "major change" in harness.with_rollback(RUN).reason
     assert "copy" in harness.with_rollback(harness.with_link(CROSS)).reason
 
@@ -577,16 +577,26 @@ def test_a_route_runs_migrating_old_aggregates_unless_it_has_to_stop():
     assert "--migrate-caggs" in harness.apply_arguments(CROSS, "p", "r", "ctx")
     run = harness.with_caggs_refused(CROSS)
     assert "--migrate-caggs" not in harness.apply_arguments(run, "p", "r", "ctx")
-    assert (run.mode("seeded"), run.end) == ("caggs-refused-seeded", CROSS.source)
+    assert (run.mode("seeded"), run.end("seeded")) == ("caggs-refused-seeded", CROSS.source)
     assert isinstance(harness.with_caggs_refused(harness.with_link(CROSS)), harness.Unrunnable)
+
+
+def test_without_migrate_caggs_an_empty_database_has_nothing_to_stop_for():
+    run = harness.with_caggs_refused(CROSS)
+    assert (run.must_stop("empty"), run.must_stop("seeded")) == (False, True)
+    assert (run.mode("empty"), run.end("empty")) == ("caggs-refused-empty", CROSS.target)
+    assert harness.judge(run, "empty", 0, "", {"result": "pass"}, run.target, None)[0] is True
+    # Stopping where there was nothing to stop for is the failure here.
+    stopped = harness.judge(run, "empty", 2, "refused: nothing was written\n", None, run.source, None)
+    assert stopped[0] is False and stopped[3] == "apply"
 
 
 def test_a_cagg_refusal_passes_only_if_it_stopped_and_said_what_it_found():
     run = harness.with_caggs_refused(CROSS)
     said = ("refused: nothing was written\nThis comes from a read-only check. Nothing has been changed.\n"
             "  verify: public.fx_hourly\n    built on public.fx_metrics\nrun apply again with --migrate-caggs")
-    args = (run, "empty", 3)
-    assert harness.judge(*args, said, None, run.source, None, pg_version=run.start_pg)[0] is True
-    assert harness.judge(*args, "refused", None, run.source, None, pg_version=run.start_pg)[0] is False
-    assert harness.judge(*args, said, {"result": "fail"}, run.source, None, pg_version=run.start_pg)[0] is False
-    assert harness.judge(*args, said, None, run.source, None, pg_version="13.22")[0] is False
+    args = (run, "seeded", 3)
+    assert harness.judge(*args, said, None, run.source, ALL_PASS, pg_version=run.start_pg)[0] is True
+    assert harness.judge(*args, "refused", None, run.source, ALL_PASS, pg_version=run.start_pg)[0] is False
+    assert harness.judge(*args, said, {"result": "fail"}, run.source, ALL_PASS, pg_version=run.start_pg)[0] is False
+    assert harness.judge(*args, said, None, run.source, ALL_PASS, pg_version="13.22")[0] is False
