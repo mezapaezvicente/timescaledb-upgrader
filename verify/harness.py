@@ -655,10 +655,16 @@ class Log:
 
 def _run(argv: Sequence[str], input: Optional[str] = None, timeout: float = 900,
          env: Optional[Dict[str, str]] = None, log: Optional[Log] = None) -> Tuple[int, str, str]:
+    """Run ``argv`` and capture what it says. Without ``input`` its stdin is
+    empty, never the terminal this harness runs in: ``tsupgrade apply`` asks a
+    question when stdin is a terminal, and a run would wait for an answer until
+    it timed out."""
     if log:
         log.write("$ " + " ".join(argv))
     try:
-        done = subprocess.run(list(argv), input=input, capture_output=True, text=True,
+        done = subprocess.run(list(argv), input=input,
+                              stdin=subprocess.DEVNULL if input is None else None,
+                              capture_output=True, text=True,
                               encoding="utf-8", errors="replace", timeout=timeout, env=env)
     except subprocess.TimeoutExpired as exc:
         out = "timed out after {0:.0f}s".format(timeout)

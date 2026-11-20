@@ -291,6 +291,24 @@ def test_a_run_after_a_major_change_gets_a_fresh_namespace(monkeypatch):
     assert cluster.used is False
 
 
+def test_a_command_never_gets_the_terminal_as_its_stdin(monkeypatch, tmp_path):
+    """apply asks before migrating aggregates when stdin is a terminal. A run
+    launched from a console handed it that terminal, and both refusal runs
+    waited for an answer until they timed out (measured: caggs-refused-seeded
+    and ng-refused-empty, 3600s each)."""
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(kwargs)
+        return harness.subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(harness.subprocess, "run", run)
+    harness.tsupgrade(["apply", "plan.json"], harness.Log(tmp_path / "log"))
+    harness._run(["psql"], input="SELECT 1")
+    assert seen[0]["stdin"] is harness.subprocess.DEVNULL
+    assert seen[1]["input"] == "SELECT 1" and seen[1]["stdin"] is None
+
+
 CROSS = harness.resolve(_row("12", "2.11", "2.15", target_pg="13"), harness.load_contents())
 
 
