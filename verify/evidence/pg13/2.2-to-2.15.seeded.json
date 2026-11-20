@@ -20,19 +20,15 @@
     "reached": "2.15.3"
   },
   "upgrader": {
-    "commit": "35ff46348a3f964cdfc0e9fe9a22a7021ec65a76",
+    "commit": "cb08277a0e889f14eaa557cc410c2b92c03e1a72",
     "dirty": false
   },
-  "result": "fail",
+  "result": "pass",
   "log": "verify/out/pg13/2.2-to-2.15.seeded.log",
-  "recorded_at": "2026-11-15T11:36:09Z",
-  "failure": {
-    "explanation": "fixture checks failed after the upgrade: cagg_survived, cagg_matches, write_and_refresh",
-    "error": "check|cagg_survived|fail|840 materialized rows; seeded 840 (could not set materialized_only; count includes real-time rows)\ncheck|cagg_matches|fail|0 differing buckets; refresh ran\ncheck|write_and_refresh|fail|insert ok, refresh ok; 1 new buckets, 60 rows in them\npsql:<stdin>:61: ERROR:  invalid continuous aggregate query\nDETAIL:  Continuous Aggregates with partials is not supported anymore.\nHINT:  Define the Continuous Aggregate with \"finalized\" parameter set to true."
-  },
-  "stage": "check",
-  "started_at": "2026-11-15T11:35:48Z",
-  "finished_at": "2026-11-15T11:36:09Z",
+  "recorded_at": "2026-11-19T17:12:03Z",
+  "stage": "done",
+  "started_at": "2026-11-19T17:11:33Z",
+  "finished_at": "2026-11-19T17:12:03Z",
   "source_pg_version": "13.22",
   "replicas": 2,
   "pods": [
@@ -40,14 +36,14 @@
       "pod": "tsdb-0",
       "role": "primary",
       "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3@sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
-      "image_id": "docker.io/library/import-2026-11-15@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
       "server_version": "13.22"
     },
     {
       "pod": "tsdb-1",
       "role": "replica",
       "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3@sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
-      "image_id": "docker.io/library/import-2026-11-15@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
+      "image_id": "docker.io/library/import-2026-10-29@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
       "server_version": "13.22"
     }
   ],
@@ -70,16 +66,16 @@
       "detail": "3 compressed chunks; seeded 3"
     },
     "cagg_survived": {
-      "status": "fail",
-      "detail": "840 materialized rows; seeded 840 (could not set materialized_only; count includes real-time rows)"
+      "status": "pass",
+      "detail": "840 materialized rows; seeded 840 (old format, cannot be altered: read below the watermark)"
     },
     "cagg_matches": {
-      "status": "fail",
-      "detail": "0 differing buckets; refresh ran"
+      "status": "pass",
+      "detail": "0 differing buckets; refresh ran (old format, cannot be altered: read below the watermark)"
     },
     "write_and_refresh": {
-      "status": "fail",
-      "detail": "insert ok, refresh ok; 1 new buckets, 60 rows in them"
+      "status": "pass",
+      "detail": "insert ok, refresh ok; 1 new buckets, 60 rows in them (old format, cannot be altered: read below the watermark)"
     },
     "decompress": {
       "status": "pass",

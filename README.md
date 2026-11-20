@@ -577,8 +577,8 @@ proof. The one exception is `no_image`, which the container registry answers.
   The test suite fails when a verdict and its records disagree.
 
 The matrix is established per release. As of `v0.2.0`, all 131 rows are verified: 126 by running them (98 same-PG, 28 that change
-major) and 5 `no_image` rows by the registry. Every record names one commit, on
-a clean tree, and each row's route is pinned by digest. Each row is proven at
+major) and 5 `no_image` rows by the registry. Every record names the commit it
+ran from, on a clean tree, and each row's route is pinned by digest. Each row is proven at
 the PostgreSQL minors and image digests its records name, on a fixture of about
 50,000 rows: it shows that the route works, not how long it takes on your data.
 
@@ -587,12 +587,13 @@ On a development branch the tests only warn about stale records; `make
 release-check`, and the tests on a tagged release, fail on them. A release
 re-runs what is stale first ([details](docs/matrix-method.md#what-makes-a-row-verified)).
 
-Verified does not mean every run passed. On ten rows (pg13 2.1-2.6 and pg14
-2.5-2.6 same-PG, pg11 2.1 to pg13 and pg14) the seeded run fails the three
-fixture checks that need to alter a continuous aggregate created before 2.7.
-The upgrade completes and the data is intact; the row says so and gives the
-step. pg11 2.1 to pg15-pg18 pass seeded because those routes have to migrate the
-aggregate on the way (see [Old continuous aggregates](#old-continuous-aggregates)).
+Every run a verdict cites passed; the test suite fails otherwise. A pass can
+still carry a caveat, written in the row's reason. On ten rows (pg13 2.1-2.6 and
+pg14 2.5-2.6 same-PG, pg11 2.1 to pg13 and pg14) a continuous aggregate created
+before 2.7 comes through intact but can no longer be altered from 2.14.0, so
+the seeded checks read it below its watermark; the row says so and gives the
+step. pg11 2.1 to pg15-pg18 migrate the aggregate on the way (see
+[Old continuous aggregates](#old-continuous-aggregates)).
 
 ---
 

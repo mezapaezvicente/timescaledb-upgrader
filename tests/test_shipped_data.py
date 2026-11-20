@@ -78,9 +78,9 @@ def _records(entry):
 def test_every_verified_row_agrees_with_its_evidence():
     """A verdict says what the runs showed, and nothing they did not.
 
-    * ``in_place``: the upgrade itself completed in both runs and the empty run
-      passed. A seeded run may fail only in the fixture checks after the
-      upgrade, and only with the caveat written in ``reason``.
+    * ``in_place``: every run it cites reached the target and passed, the
+      seeded checks included. A caveat goes in ``reason``; it never excuses a
+      failed run. A control is not a run of the row and is not judged here.
     * ``unsupported``: some run failed before the upgrade completed, or the
       planner refused it outright.
     """
@@ -89,18 +89,11 @@ def test_every_verified_row_agrees_with_its_evidence():
             continue
         records = _records(entry)
         runs = {k: d for k, d in records.items() if "control" not in d}
-        controls = {k: d for k, d in records.items() if "control" in d}
         where = entry.transition
         if entry.verdict == "in_place":
-            for doc in runs.values():
-                assert doc["versions"]["reached"] == doc["versions"]["target"], where
-            for prefix in ("", "history-", "link-"):
-                empty, seeded = runs.get(prefix + "empty"), runs.get(prefix + "seeded")
-                if empty is not None:
-                    assert empty["result"] == "pass", (where, prefix)
-                if seeded is not None and seeded["result"] != "pass":
-                    assert seeded["stage"] == "check", (where, prefix)
-                    assert entry.reason, where
+            for mode, doc in runs.items():
+                assert doc["versions"]["reached"] == doc["versions"]["target"], (where, mode)
+                assert doc["result"] == "pass", (where, mode)
         elif entry.verdict == "unsupported":
             assert any(d["result"] == "fail" and d["stage"] in ("plan", "apply")
                        for d in runs.values()), where
