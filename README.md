@@ -31,7 +31,7 @@ test fails when a verdict and its records disagree.
 
 > **Status:** preflight, `plan`, `apply` and `rollback` are complete: extension
 > updates, image rollouts and PostgreSQL major upgrades with `pg_upgrade`. At
-> `v0.2.0` all 131 rows of the matrix are established, 126 by running them with
+> `v0.2.1` all 131 rows of the matrix are established, 126 by running them with
 > this tool. `apply` drives a
 > Patroni StatefulSet laid out like the `timescaledb-ha` image's defaults; the
 > archived chart's own layout is not supported yet — see
@@ -576,7 +576,7 @@ proof. The one exception is `no_image`, which the container registry answers.
 - The **matrix** holds one verdict per row, written from that row's records.
   The test suite fails when a verdict and its records disagree.
 
-The matrix is established per release. As of `v0.2.0`, all 131 rows are verified: 126 by running them (98 same-PG, 28 that change
+The matrix is established per release. As of `v0.2.1`, all 131 rows are verified: 126 by running them (98 same-PG, 28 that change
 major) and 5 `no_image` rows by the registry. Every record names the commit it
 ran from, on a clean tree, and each row's route is pinned by digest. Each row is proven at
 the PostgreSQL minors and image digests its records name, on a fixture of about
