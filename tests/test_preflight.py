@@ -403,7 +403,7 @@ class ArchiveKube:
     ("", 1, UNKNOWN),
 ])
 def test_archiving_before_a_pg_upgrade_is_flagged_never_failed(answer, rc, status):
-    """R11: the archive and backups stop matching; the tool cannot see the
+    """The archive and backups stop matching; the tool cannot see the
     backup setup, so it says so rather than failing."""
     result = check_archiving(ArchiveKube(answer, rc), PreflightOptions("x"), INSTANCES)
     assert result.status == status
@@ -412,7 +412,7 @@ def test_archiving_before_a_pg_upgrade_is_flagged_never_failed(answer, rc, statu
 
 
 # --------------------------------------------------------------------------
-# Other extensions (R9): what pg_upgrade --check would find, found first
+# Other extensions: what pg_upgrade --check would find, found first
 # --------------------------------------------------------------------------
 
 RUN13 = "timescale/timescaledb-ha:pg13.22-ts2.15.3"
@@ -481,7 +481,7 @@ def test_an_image_measured_before_extensions_were_recorded_is_unknown(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# Collation across a glibc change (R8)
+# Collation across a glibc change
 # --------------------------------------------------------------------------
 
 OLD_IMG = "timescale/timescaledb-ha:pg12.6-ts2.1.1-p2"

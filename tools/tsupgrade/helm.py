@@ -9,7 +9,7 @@ refuses the directory ("database files are incompatible with server") and
 the pod never becomes ready; nothing on the disk changes, and setting the new
 image back starts it again. Nothing here refuses:
 preflight reports the ownership, and the runbook, the script and ``apply``'s
-report end with the values to change (R28).
+report end with the values to change.
 
 Helm marks what it manages with the ``app.kubernetes.io/managed-by: Helm``
 label and the ``meta.helm.sh/release-name`` annotation (Helm 3); either one

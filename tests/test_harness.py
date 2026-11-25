@@ -565,7 +565,7 @@ def test_routes_are_written_only_where_every_record_agrees(tmp_path):
     assert any("not every record" in p and "seeded" in p for p in problems)
 
 
-# --- forward, then rollback (R21's evidence) ---------------------------------
+# --- forward, then rollback --------------------------------------------------
 
 CROSS = harness.resolve(_row("12", "2.11", "2.15", target_pg="13"), XPG)
 

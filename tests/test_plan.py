@@ -184,7 +184,7 @@ def test_runbook_is_loud_in_verification_mode_only():
 
 
 # --------------------------------------------------------------------------
-# The verified route, pinned (R1)
+# The verified route, pinned
 # --------------------------------------------------------------------------
 
 # The pg15 bridge row as verified: 2.20.3 on the 2.20 image, then the 2.27.2
@@ -422,7 +422,7 @@ def test_cli_verification_run_writes_the_plan_and_announces_itself(offline_profi
 
 
 # --------------------------------------------------------------------------
-# A source off the rows (R12): refused, but the two plans are named
+# A source off the rows: refused, but the two plans are named
 # --------------------------------------------------------------------------
 
 def test_an_off_row_source_is_refused_with_the_two_verified_plans_named():

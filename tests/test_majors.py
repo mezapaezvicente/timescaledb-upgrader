@@ -242,7 +242,7 @@ def test_a_major_downgrade_is_refused():
 
 def test_every_pg_upgrade_is_preceded_by_a_preflight_with_its_mode():
     """Nothing checked the cluster before the first stop; now each major hop
-    starts with a preflight against the image it restarts on (R3)."""
+    starts with a preflight against the image it restarts on."""
     plan = _plan("pg16.15-ts2.30.1", link=True)
     assert plan["steps"][0]["action"] == "preflight"
     steps = plan["steps"]

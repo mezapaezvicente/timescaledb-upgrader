@@ -155,9 +155,9 @@ def test_the_view_advice_works_as_written(box, kind):
 
 
 
-# --- R30: beyond one aggregate per database ---------------------------------------
-# Measured overnight 2026-11-11 on this image; OVERNIGHT-BLOCKERS-3.md has the
-# transcripts. Each case is an aggregate created at 2.1.1 (the old format),
+# --- beyond one aggregate per database --------------------------------------------
+# Measured 2026-11-11 on this image. Each case is an aggregate created at 2.1.1
+# (the old format),
 # updated to 2.15.3 and migrated by apply's own step.
 
 DAILY = ("CREATE MATERIALIZED VIEW fx_daily WITH (timescaledb.continuous) AS "

@@ -171,7 +171,7 @@ def test_bridge_stops_below_the_hole_instead_of_at_the_ceiling():
 
 
 def test_a_database_on_2_0_cannot_cross_the_hole_with_these_two_images():
-    """Recorded because TODO.md assumed it could (the pg12 2.0 -> 2.11 row)."""
+    """Recorded because an earlier plan assumed it could (the pg12 2.0 -> 2.11 row)."""
     contents = _contents()
     target = contents.profile(REPO + "pg12.22-ts2.11.2", 12)
     bridge_image = contents.profile(REPO + "pg12.6-ts2.0.1-p0", 12)
@@ -270,7 +270,7 @@ def test_parse_measurement_needs_both_script_and_object():
 
 
 def test_the_listings_also_say_what_other_extensions_and_libraries_a_major_ships():
-    """R9: what pg_upgrade --check would look for, known before the outage."""
+    """What pg_upgrade --check would look for, known before the outage."""
     share = ["postgis.control", "postgis--3.4.2.sql", "postgis--3.4.1--3.4.2.sql",
              "postgis-3.control", "postgis-3--3.4.2.sql", "plpgsql.control", "plpgsql--1.0.sql",
              "pg_stat_statements.control", "pg_stat_statements--1.4.sql",
