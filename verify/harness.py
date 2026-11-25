@@ -5,6 +5,7 @@
     python verify/harness.py --pg 15 [--from 2.13] [--mode both] [--cluster tsdb-verify]
     python verify/harness.py --pg 15 --from 2.20 --history 2.13.1 [--control direct]
     python verify/harness.py --pg 12 --from 2.11 --to-pg 16 [--link]
+    python verify/harness.py --times
 
 For each matrix row (same-PG, or with ``--to-pg`` the ones changing to that
 major) it picks images from the measured contents
@@ -98,13 +99,15 @@ import json
 import os
 import re
 import shutil
+import statistics
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
 REPO = Path(__file__).resolve().parents[1]
 TOOLS = REPO / "tools"
@@ -112,7 +115,7 @@ sys.path.insert(0, str(TOOLS))
 
 from tsupgrade.contents import ImageContents, load_contents  # noqa: E402
 from tsupgrade.evidence import (  # noqa: E402
-    EvidenceError, build_record, evidence_key, load_record, record_path, staleness,
+    EvidenceError, build_record, evidence_key, load_record, record_path, stage_seconds, staleness,
     upgrader_revision, write_record)
 from tsupgrade.matrix import MatrixEntry, default_matrix_path, load_matrix, route_problems  # noqa: E402
 from tsupgrade.images import mirrored, node_image_name  # noqa: E402
@@ -639,6 +642,19 @@ def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+@contextmanager
+def timed(timings: Dict[str, Dict[str, str]], stage: str) -> Iterator[None]:
+    """Put the stage's UTC start and end in ``timings[stage]``, also when it
+    raises. A record's ``timings`` say how long the upgrade itself took,
+    apart from the cluster reset, staging and seeding that ``started_at`` and
+    ``finished_at`` include."""
+    started = _now()
+    try:
+        yield
+    finally:
+        timings[stage] = {"started_at": started, "finished_at": _now()}
+
+
 class Log:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -1080,21 +1096,26 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
     start_pg = server_version(cluster, log) or run.start_pg
 
     back: Optional[Dict[str, Any]] = None  # tsupgrade rollback's result, on a rollback run
+    timings: Dict[str, Dict[str, str]] = {}
     if run.control:
-        apply_rc, report, apply_err = direct_update(cluster, run, log)
+        with timed(timings, "forward"):
+            apply_rc, report, apply_err = direct_update(cluster, run, log)
     else:
         log.section("apply")
         report_path = out_dir / (stem + ".report.json")
         if report_path.exists():
             report_path.unlink()
-        apply_rc, _, apply_err = tsupgrade(apply_arguments(run, plan_path, report_path, cluster.context), log)
+        with timed(timings, "forward"):
+            apply_rc, _, apply_err = tsupgrade(
+                apply_arguments(run, plan_path, report_path, cluster.context), log)
         report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.exists() else None
         if run.rollback and report and report.get("result") == "pass":
             log.section("rollback")
-            rb_rc, rb_out, _ = tsupgrade(
-                ["rollback", "--report", str(report_path), "--discard-writes-since-upgrade",
-                 "--context", cluster.context, "--namespace", NAMESPACE, "--selector", SELECTOR,
-                 "--json"], log)
+            with timed(timings, "rollback"):
+                rb_rc, rb_out, _ = tsupgrade(
+                    ["rollback", "--report", str(report_path), "--discard-writes-since-upgrade",
+                     "--context", cluster.context, "--namespace", NAMESPACE, "--selector", SELECTOR,
+                     "--json"], log)
             try:
                 back = json.loads(rb_out)
             except ValueError:
@@ -1147,7 +1168,7 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         pg_version=pg_version or start_pg, source=run.source, target=run.end(base),
         reached=reached, passed=passed, log=log.path.relative_to(REPO).as_posix(),
         explanation=explanation, error=error, upgrader=revision,
-        stage=stopped, started_at=started, finished_at=_now(),
+        stage=stopped, started_at=started, finished_at=_now(), timings=timings,
         source_pg_version=start_pg, replicas=cluster.replicas,
         pods=final.get("instances"), baseline=baseline,
         checks={k: {"status": s, "detail": d} for k, (s, d) in checks.items()} if checks else None,
@@ -1218,6 +1239,48 @@ def routes_for(entries: Sequence[MatrixEntry], root: Path = REPO) -> Tuple[Dict[
     return routes, problems
 
 
+MODES_IN_ORDER = ("empty", "seeded", "link-empty", "link-seeded", "rollback-empty", "rollback-seeded")
+
+
+def _spread(seconds: Sequence[int]) -> str:
+    return "{0} ({1}-{2})".format(_fmt(statistics.median(seconds)), min(seconds), max(seconds))
+
+
+def _fmt(value: float) -> str:
+    return str(int(value)) if value == int(value) else "{0:.1f}".format(value)
+
+
+def measured_times(root: Path = EVIDENCE) -> List[Tuple[str, int, str, str]]:
+    """(kind of run, runs, forward, rollback) from every passing record with
+    ``timings``, controls apart: each time is the median and range in seconds,
+    rollback "-" where the run has none. What the README's measured times are
+    computed from."""
+    groups: Dict[Tuple[str, bool], Dict[str, List[int]]] = {}
+    for path in sorted(root.glob("pg*/*.json")):
+        doc = load_record(path)
+        if doc["result"] != "pass" or "control" in doc or not doc.get("timings"):
+            continue
+        t = doc["transition"]
+        group = groups.setdefault((doc["mode"], t["source_pg"] != t["target_pg"]), {})
+        for stage, timing in doc["timings"].items():
+            group.setdefault(stage, []).append(stage_seconds(timing))
+    order = {m: i for i, m in enumerate(MODES_IN_ORDER)}
+    rows = []
+    for (mode, cross), stages in sorted(groups.items(), key=lambda g: (g[0][1], order.get(g[0][0], 99), g[0][0])):
+        rows.append(("{0}, {1}".format(mode, "major change" if cross else "same major"),
+                     len(stages["forward"]), _spread(stages["forward"]),
+                     _spread(stages["rollback"]) if "rollback" in stages else "-"))
+    return rows
+
+
+def print_times(root: Path = EVIDENCE) -> int:
+    print("| Run | Runs | apply, median (range) s | rollback, median (range) s |")
+    print("|---|---:|---:|---:|")
+    for kind, runs, forward, back in measured_times(root):
+        print("| {0} | {1} | {2} | {3} |".format(kind, runs, forward, back))
+    return 0
+
+
 def write_routes(path: Optional[Path] = None) -> int:
     """Copy each verified row's route from its records into the matrix."""
     path = path or default_matrix_path()
@@ -1280,10 +1343,14 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "(needs --history)")
     ap.add_argument("--write-routes", action="store_true", dest="write_routes",
                     help="copy each verified row's route from its records into the matrix, and stop")
+    ap.add_argument("--times", action="store_true",
+                    help="print how long apply and rollback took, per kind of run, from the records, and stop")
     args = ap.parse_args(argv)
 
     if args.write_routes:
         return write_routes()
+    if args.times:
+        return print_times()
     contents = load_contents()
     rows = select_rows(load_matrix().entries, args.pg, args.sources, args.to_pgs)
     resolved = [resolve(e, contents) for e in rows]

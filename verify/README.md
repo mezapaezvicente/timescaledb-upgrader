@@ -178,8 +178,8 @@ Records carry the fields `evidence.py` requires, plus:
 | `pods` | each instance afterwards: role, image, `imageID` digest, server version |
 | `checks` | the fixture checks, seeded runs only |
 | `baseline` | the seed's own summary line |
-| `plan`, `apply_exit`, `replicas`, `started_at`, `finished_at` | as named |
-
+| `plan`, `apply_exit`, `replicas`, `started_at`, `finished_at` | as named; the run's start and end include the cluster reset, staging and seeding |
+| `timings` | UTC start and end, to the second, of `forward` (the `apply` process, or a control's one ALTER) and, on a rollback run, `rollback`; records made before 2026-11-25 have none |
 | `route` | the route the plan took, as the matrix row cites it: the start image, then each update and `pg_upgrade`, every image pinned by digest |
 
 A record's `log` and `plan.path` point into `verify/out/`, which is

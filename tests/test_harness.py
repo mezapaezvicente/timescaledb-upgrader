@@ -618,3 +618,49 @@ def test_a_cagg_refusal_passes_only_if_it_stopped_and_said_what_it_found():
     assert harness.judge(*args, "refused", None, run.source, ALL_PASS, pg_version=run.start_pg)[0] is False
     assert harness.judge(*args, said, {"result": "fail"}, run.source, ALL_PASS, pg_version=run.start_pg)[0] is False
     assert harness.judge(*args, said, None, run.source, ALL_PASS, pg_version="13.22")[0] is False
+
+
+# --- measured times ---------------------------------------------------------
+
+def test_a_stage_is_timed_even_when_it_raises(monkeypatch):
+    clock = iter(["2026-11-25T10:00:00Z", "2026-11-25T10:00:16Z"])
+    monkeypatch.setattr(harness, "_now", lambda: next(clock))
+    timings = {}
+    with pytest.raises(RuntimeError):
+        with harness.timed(timings, "forward"):
+            raise RuntimeError("apply crashed")
+    assert timings == {"forward": {"started_at": "2026-11-25T10:00:00Z",
+                                   "finished_at": "2026-11-25T10:00:16Z"}}
+
+
+def test_measured_times_come_from_passing_timed_records_only(tmp_path):
+    from tsupgrade.evidence import build_record, record_path, write_record
+
+    def record(row, mode, seconds, passed=True, rollback=None, **extra):
+        timings = {"forward": {"started_at": "2026-11-25T10:00:00Z",
+                               "finished_at": "2026-11-25T10:{0:02d}:{1:02d}Z".format(*divmod(seconds, 60))}}
+        if rollback is not None:
+            timings["rollback"] = {"started_at": "2026-11-25T11:00:00Z",
+                                   "finished_at": "2026-11-25T11:00:{0:02d}Z".format(rollback)}
+        doc = build_record(
+            transition=row.transition, mode=mode,
+            images=[{"reference": row.target_image, "digest": "sha256:bb"}],
+            pg_version="15.18", source=row.source, target=row.target,
+            reached=row.target if passed else None, passed=passed, log="verify/out/x.log",
+            explanation=None if passed else "apply failed", error=None if passed else "boom",
+            upgrader={"commit": "abc", "dirty": False}, timings=timings, **extra)
+        write_record(record_path(tmp_path, row.transition, mode), doc)
+
+    record(RUN, "seeded", 16)
+    record(LATE, "seeded", 11)
+    record(BRIDGED, "seeded", 600, passed=False)          # a failure is no measure
+    record(BRIDGED, "empty", 20)
+    write_record(record_path(tmp_path, LATE.transition, "empty"), build_record(  # no timings
+        transition=LATE.transition, mode="empty",
+        images=[{"reference": LATE.target_image, "digest": "sha256:bb"}], pg_version="15.18",
+        source=LATE.source, target=LATE.target, reached=LATE.target, passed=True,
+        log="verify/out/x.log", upgrader={"commit": "abc", "dirty": False}))
+    assert harness.measured_times(tmp_path) == [
+        ("empty, same major", 1, "20 (20-20)", "-"),
+        ("seeded, same major", 2, "13.5 (11-16)", "-"),
+    ]

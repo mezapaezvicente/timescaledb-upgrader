@@ -67,6 +67,12 @@ a harness can add what turns out to matter without a schema change:
                     every update and ``pg_upgrade``, each image pinned by
                     digest. A row's ``route`` is copied from its records
 
+``timings``         optional; when present, ``{forward, rollback}`` (rollback
+                    on a rollback run only), each ``{started_at, finished_at}``
+                    in UTC to the second: the wall time of ``apply`` (or a
+                    control's one ALTER) and of ``tsupgrade rollback``, without
+                    the cluster reset, staging and seeding
+
 Optional and unchecked beyond being present: ``checks`` (the fixture's check
 lines on a seeded run), ``started_at``/``finished_at``, ``plan``, ``notes``.
 
@@ -309,8 +315,44 @@ def validate_record(doc: Any) -> List[str]:
     if "route" in doc:
         problems.extend(route_problems(doc["route"]))
 
+    if "timings" in doc:
+        problems.extend(timing_problems(doc["timings"]))
+
     if not doc.get("log"):
         problems.append("log must point at the full log")
+    return problems
+
+
+TIMING_STAGES = ("forward", "rollback")
+TIMESTAMP = "%Y-%m-%dT%H:%M:%SZ"
+
+
+def stage_seconds(timing: Dict[str, str]) -> int:
+    """Seconds from a stage's ``started_at`` to its ``finished_at``."""
+    started, finished = (datetime.strptime(timing[k], TIMESTAMP)
+                         for k in ("started_at", "finished_at"))
+    return int((finished - started).total_seconds())
+
+
+def timing_problems(timings: Any) -> List[str]:
+    """What is wrong with a record's ``timings``, so every duration in it can
+    be computed again: known stages, UTC to the second, an end not before the
+    start."""
+    if not isinstance(timings, dict):
+        return ["timings must be an object"]
+    problems = []
+    for stage, timing in timings.items():
+        if stage not in TIMING_STAGES:
+            problems.append("timings.{0} is not one of {1}".format(stage, ", ".join(TIMING_STAGES)))
+            continue
+        try:
+            seconds = stage_seconds(timing)
+        except (TypeError, KeyError, ValueError):
+            problems.append("timings.{0} needs started_at and finished_at as {1}".format(
+                stage, TIMESTAMP.replace("%", "")))
+            continue
+        if seconds < 0:
+            problems.append("timings.{0} finished before it started".format(stage))
     return problems
 
 
