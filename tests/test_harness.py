@@ -685,3 +685,16 @@ def test_route_shape_counts_images_on_one_major_and_pg_upgrades_across():
     assert harness.route_shape({"route": {"start": start, "steps": [update("x:pg15.18-ts2.28.3")]}})[1] == "2 images"
     assert harness.route_shape({"route": {"start": start, "steps": [hop, hop]}})[1] == "2 pg_upgrades"
     assert harness.route_shape({})[1] == "route not recorded"
+
+
+def test_an_import_is_waited_for_until_the_node_sees_it(monkeypatch):
+    monkeypatch.setenv("HARNESS_BASH", "bash")
+    cluster = harness.Cluster("tsdb-verify", 2, PG15)
+    clock = iter(range(0, 10000, 5))
+    monkeypatch.setattr(harness.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(harness.time, "sleep", lambda s: None)
+    answers = iter([False, False, True])
+    monkeypatch.setattr(cluster, "loaded", lambda image: next(answers))
+    assert cluster.await_loaded("x:pg15.18-ts2.28.3")          # seen on the third look
+    monkeypatch.setattr(cluster, "loaded", lambda image: False)
+    assert not cluster.await_loaded("x:pg15.18-ts2.28.3", timeout=60)  # never: still a failure

@@ -829,6 +829,17 @@ class Cluster:
                          "crictl", "inspecti", image])
         return rc == 0
 
+    def await_loaded(self, image: str, timeout: float = 300) -> bool:
+        """Whether the node has ``image`` within ``timeout``. After an
+        import that succeeded, the CRI can take minutes to see it (measured on
+        a fresh cluster): checking once called a loaded image missing."""
+        deadline = time.monotonic() + timeout
+        while not self.loaded(image):
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(5)
+        return True
+
     def load(self, image: str, log: Log) -> None:
         """Side-load ``image`` (``tag`` or ``tag@digest``) into the node."""
         if self.loaded(image):
@@ -875,7 +886,7 @@ class Cluster:
         rc, _, err = _run(["docker", "exec", self.name + "-control-plane", "ctr",
                            "--namespace=k8s.io", "images", "tag", "--force",
                            containerd_name(tag), "{0}@{1}".format(repo, digest)], log=log)
-        if rc != 0 or not self.loaded("{0}@{1}".format(tag, digest)):
+        if rc != 0 or not self.await_loaded("{0}@{1}".format(tag, digest)):
             raise HarnessError("cannot name {0} by {1} in kind: {2}".format(tag, digest, err))
 
     def _load(self, image: str, log: Log) -> None:
@@ -884,7 +895,7 @@ class Cluster:
             if _run(["docker", "pull", image], timeout=3600, log=log)[0] != 0:
                 raise HarnessError("cannot pull " + image)
         if _run(["kind", "load", "docker-image", image, "--name", self.name],
-                timeout=3600, log=log)[0] == 0:
+                timeout=3600, log=log)[0] == 0 and self.await_loaded(image):
             return
         # With Docker's containerd image store, a multi-platform image is
         # saved as its whole index but only this platform's layers exist, and
@@ -908,7 +919,7 @@ class Cluster:
         saver.wait(timeout=60)
         log.write((save_err + loader.stderr + loader.stdout)[-2000:] or "(no output)")
         log.write("(exit {0}/{1})".format(saver.returncode, loader.returncode))
-        return saver.returncode == 0 and loader.returncode == 0 and self.loaded(image)
+        return saver.returncode == 0 and loader.returncode == 0 and self.await_loaded(image)
 
     def ensure(self, image: str, log: Log) -> None:
         """Leave the cluster healthy on ``image``, TimescaleDB in no database
