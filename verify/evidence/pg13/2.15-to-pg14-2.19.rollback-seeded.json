@@ -1,0 +1,159 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "13",
+    "source_ts": "2.15",
+    "target_pg": "14",
+    "target_ts": "2.19"
+  },
+  "mode": "rollback-seeded",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+      "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg14.19-ts2.19.3-all",
+      "digest": "sha256:127e0220562ee2e5b1abe001deb87670465bc55fca75aeaeaaf861b55734af47"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+      "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+    }
+  ],
+  "pg_version": "13.22",
+  "versions": {
+    "source": "2.15.3",
+    "target": "2.15.3",
+    "reached": "2.15.3"
+  },
+  "upgrader": {
+    "commit": "df7a1b34bab1433468a1afc6735ac874d7798230",
+    "dirty": false
+  },
+  "result": "pass",
+  "log": "verify/out/pg13/2.15-to-pg14-2.19.rollback-seeded.log",
+  "recorded_at": "2026-11-25T09:30:57Z",
+  "stage": "done",
+  "started_at": "2026-11-25T09:20:21Z",
+  "finished_at": "2026-11-25T09:30:57Z",
+  "timings": {
+    "forward": {
+      "started_at": "2026-11-25T09:29:07Z",
+      "finished_at": "2026-11-25T09:30:16Z"
+    },
+    "rollback": {
+      "started_at": "2026-11-25T09:30:16Z",
+      "finished_at": "2026-11-25T09:30:56Z"
+    }
+  },
+  "source_pg_version": "13.22",
+  "replicas": 2,
+  "pods": [
+    {
+      "pod": "tsdb-0",
+      "role": "primary",
+      "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3@sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+      "image_id": "docker.io/library/import-2026-11-25@sha256:cd92b26829bbca55db23f9cb5b59d55e23a5eb413ef3fc0cdf4bf88d2f736012",
+      "server_version": "14.19"
+    },
+    {
+      "pod": "tsdb-1",
+      "role": "replica",
+      "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3@sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+      "image_id": "docker.io/library/import-2026-11-25@sha256:cd92b26829bbca55db23f9cb5b59d55e23a5eb413ef3fc0cdf4bf88d2f736012",
+      "server_version": "14.19"
+    }
+  ],
+  "baseline": "seeded|2.15.3|50400|2521572.95|840|3|2",
+  "checks": {
+    "version": {
+      "status": "pass",
+      "detail": "extversion 2.15.3, expected 2.15.3"
+    },
+    "rows": {
+      "status": "pass",
+      "detail": "50400 rows, sum 2521572.95; seeded 50400 rows, sum 2521572.95 at 2.15.3"
+    },
+    "jobs": {
+      "status": "pass",
+      "detail": "2 jobs registered, seeded 2; fx_job_ok 1 runs, fx_job_fail 1 failures"
+    },
+    "still_compressed": {
+      "status": "pass",
+      "detail": "3 compressed chunks; seeded 3"
+    },
+    "cagg_survived": {
+      "status": "pass",
+      "detail": "840 materialized rows; seeded 840"
+    },
+    "cagg_matches": {
+      "status": "pass",
+      "detail": "0 differing buckets; refresh ran"
+    },
+    "write_and_refresh": {
+      "status": "pass",
+      "detail": "insert ok, refresh ok; 1 new buckets, 60 rows in them"
+    },
+    "decompress": {
+      "status": "pass",
+      "detail": "3 chunks decompressed; 50400 rows, sum 2521572.95 before the new writes"
+    }
+  },
+  "apply_exit": 0,
+  "plan": {
+    "hops": 2,
+    "path": "verify/out/pg13/2.15-to-pg14-2.19.plan.json"
+  },
+  "route": {
+    "start": {
+      "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3",
+      "digest": "sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602"
+    },
+    "steps": [
+      {
+        "action": "major_upgrade",
+        "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3-all",
+        "digest": "sha256:127e0220562ee2e5b1abe001deb87670465bc55fca75aeaeaaf861b55734af47",
+        "from_pg": 13,
+        "to_pg": 14,
+        "ts": "2.15.3",
+        "run_image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+        "run_digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d"
+      },
+      {
+        "action": "update",
+        "image": "timescale/timescaledb-ha:pg14.19-ts2.19.3",
+        "digest": "sha256:5ef42f688483721ed7e315ec868c1cfb85e270a26e25a6413d1ace53111fa32d",
+        "to": "2.19.3"
+      }
+    ]
+  },
+  "major_upgrades": [
+    {
+      "from_pg": 13,
+      "to_pg": 14,
+      "files": "copy",
+      "shared_inodes": 0
+    }
+  ],
+  "forward": {
+    "target": "2.19.3",
+    "apply_exit": 0
+  },
+  "rollback": {
+    "rollback_format": 1,
+    "from_pg": 14,
+    "to_pg": 13,
+    "lost": "every write made since the upgrade is lost: the old data directory is the cluster as it was when pg_upgrade ran, extension updates included",
+    "output": [
+      "going back from PostgreSQL 14 (system identifier 7712038845781438488) to 13: every write made since the upgrade is lost: the old data directory is the cluster as it was when pg_upgrade ran, extension updates included",
+      "scaled statefulset/tsdb to 0",
+      "PostgreSQL 14's data directory is now /home/postgres/pgdata/data.rolled-back-pg14-7712038845781438488; PostgreSQL 13's is back at /home/postgres/pgdata/data",
+      "deleted pgdata-tsdb-1",
+      "reset Patroni's state for scope tsdb: endpoints/tsdb, endpoints/tsdb-config",
+      "back: primary tsdb-0 on PostgreSQL 13, system identifier 7712036868014608410 (the old cluster's)"
+    ],
+    "result": "pass"
+  }
+}

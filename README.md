@@ -606,6 +606,102 @@ the seeded checks read it below its watermark; the row says so and gives the
 step. pg11 2.1 to pg15-pg18 migrate the aggregate on the way (see
 [Old continuous aggregates](#old-continuous-aggregates)).
 
+### Measured times
+
+How long `apply` and `rollback` took on the seeded verification runs: the wall
+time of the `tsupgrade` process, in seconds, without the cluster setup, staging
+and seeding around it. Each record keeps the UTC start and end of both
+(`timings`), and `python verify/harness.py --times` computes these tables from
+[`verify/evidence/`](verify/evidence/). The test suite fails if a row here
+differs from what it prints.
+
+| Run | Runs | apply, median (range) s | rollback, median (range) s |
+|---|---:|---:|---:|
+| seeded, same major | 98 | 15 (12-183) | - |
+| seeded, major change | 28 | 142 (60-392) | - |
+| link-seeded, major change | 28 | 141 (60-389) | - |
+| rollback-seeded, major change | 5 | 67 (62-188) | 40 (36-154) |
+
+The time follows the route, not the data:
+
+| Run | Runs | apply, median (range) s | rollback, median (range) s |
+|---|---:|---:|---:|
+| seeded, same major, one image | 93 | 15 (12-24) | - |
+| seeded, same major, 2 images | 5 | 180 (49-183) | - |
+| seeded, major change, 1 pg_upgrade | 11 | 70 (60-188) | - |
+| seeded, major change, 2 pg_upgrades | 9 | 142 (135-261) | - |
+| seeded, major change, 3 pg_upgrades | 5 | 322 (314-327) | - |
+| seeded, major change, 4 pg_upgrades | 3 | 389 (386-392) | - |
+
+- On one image, `apply` updates the extension in place. A second image means
+  restarting every pod onto it.
+- Every `pg_upgrade` stops the cluster, upgrades it and starts it again. The
+  pg12 → pg13 hop is the slow one: 188-189 s in all three of its runs (copy,
+  `--link`, rollback). The routes through it are the slow end of the
+  2-pg_upgrade range.
+- `--link` saves nothing at 50,400 rows: they are too few files for copying
+  them to matter. The size runs below show where it starts to.
+- The longest rollback, 154 s for pg11 → pg12 (the others took 36-40 s), is
+  one run, and the record does not show which step took the time.
+- The 5 rollback rows have one `pg_upgrade` each: pg11 → 12, 12 → 13, 13 → 14,
+  15 → 16 and 17 → 18.
+
+**With more data.** Four of those rows, seeded again with 100 and 1,000 times
+the fixture (`verify/harness.py --devices 500` and `--devices 5000`). One run
+per size, so each number is a time, not a median:
+
+| Row | Route | Files | Rows | apply s |
+|---|---|---|---:|---:|
+| pg15 2.27 -> 2.28 | one image | - | 50,400 | 14 |
+| pg15 2.27 -> 2.28 | one image | - | 5,040,000 | 14 |
+| pg15 2.27 -> 2.28 | one image | - | 50,400,000 | 20 |
+| pg15 2.12 -> 2.28 | 2 images | - | 50,400 | 183 |
+| pg15 2.12 -> 2.28 | 2 images | - | 5,040,000 | 181 |
+| pg15 2.12 -> 2.28 | 2 images | - | 50,400,000 | 199 |
+| pg15 2.28 -> pg16 2.30 | 1 pg_upgrade | copy | 50,400 | 72 |
+| pg15 2.28 -> pg16 2.30 | 1 pg_upgrade | copy | 5,040,000 | 70 |
+| pg15 2.28 -> pg16 2.30 | 1 pg_upgrade | copy | 50,400,000 | 182 |
+| pg15 2.28 -> pg16 2.30 | 1 pg_upgrade | link | 50,400 | 70 |
+| pg15 2.28 -> pg16 2.30 | 1 pg_upgrade | link | 5,040,000 | 69 |
+| pg15 2.28 -> pg16 2.30 | 1 pg_upgrade | link | 50,400,000 | 125 |
+
+- Up to 5M rows nothing changes. The time is restarts and `pg_upgrade`'s own
+  work, whatever the data.
+- At 50M an update on one image or two takes 6-16 s longer. A major change
+  takes about 2.5 times as long as at 5M rows or fewer with a copy (182 s),
+  and still 1.8 times with `--link` (125 s). Linking saves copying the files,
+  but either way `apply` deletes the replica's volume and waits while it
+  clones again from the primary.
+- The first 50M copy run failed its checks. `apply` finished (163 s, every row
+  intact), then PostgreSQL was shut down inside the pod a minute into the
+  checks, with no OOM kill or failed probe and etcd answering slowly. Its pod
+  logs were gone before the cause could be read. The re-run above passed with
+  nothing restarted. Both records are in git (`22f0f47` keeps the failed one).
+
+Measured on 2026-11-25. The route runs come from commit `df7a1b3` (pg15
+2.27 → 2.28 was re-run at `b62c9e2`), the size runs from `b62c9e2` (the 50M
+copy re-run at `22f0f47`). The cluster was kind (one node, `kindest/node`
+v1.37.0) running two PostgreSQL instances, in Docker Desktop 29.7.2. Its WSL2
+VM had 16 CPUs and 7.5 GB. The machine was Windows 11 on an AMD Ryzen 9 5980HS
+(8 cores, 16 threads) with 15.4 GB RAM and an NVMe SSD. No other cluster ran
+during the timed stages.
+
+**These times are this laptop's.** They show what each route costs and how
+that grows with data, not how long your upgrade will take. For a number for
+your own database, measure on the server that will run it, the one hosting
+the database or your Kubernetes nodes:
+
+- **The tool's cost per route at your size.** Run `verify/harness.py` there on
+  your route, with `--devices` set to your row count divided by 10,080. For
+  example, `--devices 2000` is about 20M rows. It needs Docker and kind, and it
+  starts its own cluster, which competes for CPU and disk. Run it on that
+  server outside serving hours, or on an identical one.
+- **The number to plan downtime on.** Rehearse the real upgrade: `tsupgrade
+  plan` and `apply` against a copy of your cluster restored from backup, on
+  the same storage class and node size. Kind runs on one node with local
+  disks, so it shows nothing of network storage, scheduling, image pulls, or
+  a replica cloned over the network.
+
 ---
 
 ## Known limits

@@ -136,6 +136,8 @@ CHECKS = (
 NG_CHECKS = ("ng_rows", "ng_bucket", "ng_kept", "ng_refresh")
 MODES = ("empty", "seeded")
 CONTROLS = ("direct",)
+ROWS_PER_DEVICE = 7 * 1440  # seed.sql: one row a minute for 7 days per device
+SEED_DEVICES = 5
 FIXTURE = REPO / "verify" / "fixture"
 EVIDENCE = REPO / "verify" / "evidence"
 OUT = REPO / "verify" / "out"
@@ -173,13 +175,21 @@ class Run:
     caggs_refused: bool = False       # without --migrate-caggs: must stop, nothing changed
     ng: bool = False                  # aggregates on time_bucket_ng too: apply rebuilds them
     ng_refused: bool = False          # the same without --migrate-caggs: must stop, nothing changed
+    devices: Optional[int] = None     # a size run: the fixture with this many devices
 
     @property
     def major(self) -> int:
         return int(self.entry.source_pg)
 
+    @property
+    def rows(self) -> Optional[int]:
+        """The seed's row count on a size run."""
+        return self.devices * ROWS_PER_DEVICE if self.devices else None
+
     def mode(self, base: str) -> str:
         """The record mode for a base mode (empty or seeded)."""
+        if self.devices:
+            return "scale-" + ("link-" if self.link else "") + base
         if self.link:
             return "link-" + base
         if self.rollback:
@@ -213,7 +223,7 @@ class Run:
 
     def key(self, base: str) -> str:
         """What the record is filed and cited as."""
-        return evidence_key(self.mode(base), self.control)
+        return evidence_key(self.mode(base), self.control, self.rows)
 
     @property
     def transition(self) -> Dict[str, str]:
@@ -382,6 +392,16 @@ def with_rollback(run: Run) -> Union[Run, Unrunnable]:
     if run.link or run.history or run.control:
         return Unrunnable(run.entry, "--rollback is for a copy, without --history or --control")
     return replace(run, rollback=True)
+
+
+def with_devices(run: Run, devices: int) -> Union[Run, Unrunnable]:
+    """The same row, seeded with a larger fixture, to see how its time grows
+    with the data. Seeded only, copy or --link, nothing else combined."""
+    if run.rollback or run.mirror or run.history or run.control or run.caggs_refused or run.ng:
+        return Unrunnable(run.entry, "--devices is for a plain run, with --link at most")
+    if devices <= SEED_DEVICES:
+        return Unrunnable(run.entry, "--devices must be above the fixture's {0}".format(SEED_DEVICES))
+    return replace(run, devices=devices)
 
 
 def with_history(run: Run, version: str, contents: ImageContents) -> Union[Run, Unrunnable]:
@@ -829,6 +849,17 @@ class Cluster:
                          "crictl", "inspecti", image])
         return rc == 0
 
+    def await_loaded(self, image: str, timeout: float = 300) -> bool:
+        """Whether the node has ``image`` within ``timeout``. After an
+        import that succeeded, the CRI can take minutes to see it (measured on
+        a fresh cluster): checking once called a loaded image missing."""
+        deadline = time.monotonic() + timeout
+        while not self.loaded(image):
+            if time.monotonic() > deadline:
+                return False
+            time.sleep(5)
+        return True
+
     def load(self, image: str, log: Log) -> None:
         """Side-load ``image`` (``tag`` or ``tag@digest``) into the node."""
         if self.loaded(image):
@@ -875,7 +906,7 @@ class Cluster:
         rc, _, err = _run(["docker", "exec", self.name + "-control-plane", "ctr",
                            "--namespace=k8s.io", "images", "tag", "--force",
                            containerd_name(tag), "{0}@{1}".format(repo, digest)], log=log)
-        if rc != 0 or not self.loaded("{0}@{1}".format(tag, digest)):
+        if rc != 0 or not self.await_loaded("{0}@{1}".format(tag, digest)):
             raise HarnessError("cannot name {0} by {1} in kind: {2}".format(tag, digest, err))
 
     def _load(self, image: str, log: Log) -> None:
@@ -884,7 +915,7 @@ class Cluster:
             if _run(["docker", "pull", image], timeout=3600, log=log)[0] != 0:
                 raise HarnessError("cannot pull " + image)
         if _run(["kind", "load", "docker-image", image, "--name", self.name],
-                timeout=3600, log=log)[0] == 0:
+                timeout=3600, log=log)[0] == 0 and self.await_loaded(image):
             return
         # With Docker's containerd image store, a multi-platform image is
         # saved as its whole index but only this platform's layers exist, and
@@ -908,7 +939,7 @@ class Cluster:
         saver.wait(timeout=60)
         log.write((save_err + loader.stderr + loader.stdout)[-2000:] or "(no output)")
         log.write("(exit {0}/{1})".format(saver.returncode, loader.returncode))
-        return saver.returncode == 0 and loader.returncode == 0 and self.loaded(image)
+        return saver.returncode == 0 and loader.returncode == 0 and self.await_loaded(image)
 
     def ensure(self, image: str, log: Log) -> None:
         """Leave the cluster healthy on ``image``, TimescaleDB in no database
@@ -1016,9 +1047,11 @@ def stage(cluster: Cluster, run: Run, mode: str, log: Log) -> Optional[str]:
         raise HarnessError("staging did not leave {0} at {1}".format(DATABASE, created))
     baseline = None
     if mode == "seeded":
-        log.section("seed")
+        log.section("seed" + (" {0} devices, {1} rows".format(run.devices, run.rows) if run.devices else ""))
         seed = (FIXTURE / "seed.sql").read_text(encoding="utf-8")
-        rc, out, err = cluster.psql(DATABASE, "-qtA", "-f", "-", stdin=seed, log=log)
+        size = ["-v", "devices={0}".format(run.devices)] if run.devices else []
+        rc, out, err = cluster.psql(DATABASE, "-qtA", *size, "-f", "-", stdin=seed, log=log,
+                                    timeout=psql_timeout(run))
         if rc != 0:
             raise HarnessError("seeding at {0} failed: {1}".format(
                 created, error_lines(err.splitlines(), 3)))
@@ -1041,6 +1074,12 @@ def stage(cluster: Cluster, run: Run, mode: str, log: Log) -> Optional[str]:
             raise HarnessError("history update {0} -> {1} failed: {2}".format(
                 run.history, run.source, error_lines(err.splitlines(), 3)))
     return baseline
+
+
+def psql_timeout(run: Run) -> float:
+    """Seconds for seeding and for check.sql: ten minutes for the fixture, ten
+    more for every million rows of a size run's seed."""
+    return 600 + 600 * (run.rows or 0) / 1e6
 
 
 def extversion(cluster: Cluster, log: Log) -> Optional[str]:
@@ -1130,7 +1169,7 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         log.section("check.sql, expect {0}".format(run.end(base)))
         rc, out, check_err = cluster.psql(DATABASE, "-qtA", "-F", "|", "-v", "expect=" + run.end(base),
                                   "-f", "-", stdin=(FIXTURE / "check.sql").read_text(encoding="utf-8"),
-                                  log=log)
+                                  log=log, timeout=psql_timeout(run))
         checks = parse_checks(out)
     if run.ng and reached is not None:
         rebuilt = "false" if run.ng_refused else "true"
@@ -1148,6 +1187,8 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
     extra: Dict[str, Any] = {}
     if run.history:
         extra["history"] = run.history
+    if run.devices:
+        extra["seed"] = {"devices": run.devices, "rows": run.rows}
     if run.control:
         extra["control"] = run.control
     else:
@@ -1250,34 +1291,96 @@ def _fmt(value: float) -> str:
     return str(int(value)) if value == int(value) else "{0:.1f}".format(value)
 
 
-def measured_times(root: Path = EVIDENCE) -> List[Tuple[str, int, str, str]]:
+def route_shape(doc: Dict[str, Any]) -> Tuple[int, str]:
+    """(sort key, name) of what a record's route does, which is what its time
+    follows: on one major, how many images it runs on (more than one restarts
+    every pod); across majors, how many pg_upgrades."""
+    route = doc.get("route")
+    if not route:
+        return (99, "route not recorded")
+    steps = route.get("steps") or []
+    hops = sum(1 for s in steps if s.get("action") == "major_upgrade")
+    if hops:
+        return (10 + hops, "{0} pg_upgrade{1}".format(hops, "" if hops == 1 else "s"))
+    images = {(route.get("start") or {}).get("image")} | {s.get("image") for s in steps if s.get("image")}
+    return (len(images), "one image" if len(images) == 1 else "{0} images".format(len(images)))
+
+
+def measured_times(root: Path = EVIDENCE, by_route: bool = False) -> List[Tuple[str, int, str, str]]:
     """(kind of run, runs, forward, rollback) from every passing record with
-    ``timings``, controls apart: each time is the median and range in seconds,
-    rollback "-" where the run has none. What the README's measured times are
-    computed from."""
-    groups: Dict[Tuple[str, bool], Dict[str, List[int]]] = {}
+    ``timings``, controls and size runs apart: each time is the median and range in seconds,
+    rollback "-" where the run has none; ``by_route`` splits each kind by
+    :func:`route_shape`. What the README's measured times are computed from."""
+    order = {m: i for i, m in enumerate(MODES_IN_ORDER)}
+    groups: Dict[Tuple[Any, ...], Dict[str, List[int]]] = {}
     for path in sorted(root.glob("pg*/*.json")):
         doc = load_record(path)
-        if doc["result"] != "pass" or "control" in doc or not doc.get("timings"):
+        if (doc["result"] != "pass" or "control" in doc or not doc.get("timings")
+                or doc.get("seed")):  # size runs: size_times, one row at a time
             continue
         t = doc["transition"]
-        group = groups.setdefault((doc["mode"], t["source_pg"] != t["target_pg"]), {})
+        cross = t["source_pg"] != t["target_pg"]
+        name = "{0}, {1}".format(doc["mode"], "major change" if cross else "same major")
+        shape = route_shape(doc) if by_route else (0, "")
+        if by_route:
+            name += ", " + shape[1]
+        group = groups.setdefault((cross, order.get(doc["mode"], 99), doc["mode"], shape[0], name), {})
         for stage, timing in doc["timings"].items():
             group.setdefault(stage, []).append(stage_seconds(timing))
-    order = {m: i for i, m in enumerate(MODES_IN_ORDER)}
+    return [(key[-1], len(stages["forward"]), _spread(stages["forward"]),
+             _spread(stages["rollback"]) if "rollback" in stages else "-")
+            for key, stages in sorted(groups.items())]
+
+
+def size_times(root: Path = EVIDENCE) -> List[Tuple[str, str, str, str, int]]:
+    """(row, route, files, rows, apply seconds) for every row a size run was
+    made for: its passing, timed seeded and link-seeded runs on the usual
+    fixture, and its size runs. One run each, so a time, not a median."""
+    found: Dict[Tuple[str, ...], List[Dict[str, Any]]] = {}
+    for path in sorted(root.glob("pg*/*.json")):
+        doc = load_record(path)
+        if doc["mode"] in ("seeded", "link-seeded", "scale-seeded", "scale-link-seeded"):
+            found.setdefault(tuple(sorted(doc["transition"].items())), []).append(doc)
     rows = []
-    for (mode, cross), stages in sorted(groups.items(), key=lambda g: (g[0][1], order.get(g[0][0], 99), g[0][0])):
-        rows.append(("{0}, {1}".format(mode, "major change" if cross else "same major"),
-                     len(stages["forward"]), _spread(stages["forward"]),
-                     _spread(stages["rollback"]) if "rollback" in stages else "-"))
-    return rows
+    for docs in found.values():
+        if not any(d["mode"].startswith("scale-") for d in docs):
+            continue
+        for doc in docs:
+            if doc["result"] != "pass" or not doc.get("timings"):
+                continue
+            t = doc["transition"]
+            name = "pg{0} {1} -> {2}".format(
+                t["source_pg"], t["source_ts"],
+                t["target_ts"] if t["source_pg"] == t["target_pg"]
+                else "pg{0} {1}".format(t["target_pg"], t["target_ts"]))
+            seeded = (doc.get("seed") or {}).get("rows", SEED_DEVICES * ROWS_PER_DEVICE)
+            files = "link" if "link-" in doc["mode"] else "copy" if t["source_pg"] != t["target_pg"] else "-"
+            rows.append((name, route_shape(doc)[1], files, seeded,
+                         stage_seconds(doc["timings"]["forward"])))
+    rows.sort(key=lambda r: (r[1] != "one image", r[0], r[2], r[3]))
+    return [(name, route, files, "{0:,}".format(n), s) for name, route, files, n, s in rows]
+
+
+def times_lines(root: Path = EVIDENCE) -> List[str]:
+    """``--times``: the measured times as Markdown tables, per kind of run,
+    then per kind of run and route, then (where there are size runs) per row
+    and seed size."""
+    lines: List[str] = []
+    for by_route in (False, True):
+        if lines:
+            lines.append("")
+        lines += ["| Run | Runs | apply, median (range) s | rollback, median (range) s |",
+                  "|---|---:|---:|---:|"]
+        lines += ["| {0} | {1} | {2} | {3} |".format(*row) for row in measured_times(root, by_route)]
+    sizes = size_times(root)
+    if sizes:
+        lines += ["", "| Row | Route | Files | Rows | apply s |", "|---|---|---|---:|---:|"]
+        lines += ["| {0} | {1} | {2} | {3} | {4} |".format(*row) for row in sizes]
+    return lines
 
 
 def print_times(root: Path = EVIDENCE) -> int:
-    print("| Run | Runs | apply, median (range) s | rollback, median (range) s |")
-    print("|---|---:|---:|---:|")
-    for kind, runs, forward, back in measured_times(root):
-        print("| {0} | {1} | {2} | {3} |".format(kind, runs, forward, back))
+    print("\n".join(times_lines(root)))
     return 0
 
 
@@ -1343,6 +1446,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "(needs --history)")
     ap.add_argument("--write-routes", action="store_true", dest="write_routes",
                     help="copy each verified row's route from its records into the matrix, and stop")
+    ap.add_argument("--devices", type=int, metavar="N",
+                    help="seed N devices of 10,080 rows instead of 5 (seeded only); a size run, "
+                         "evidence for --times, never a row's verdict")
     ap.add_argument("--times", action="store_true",
                     help="print how long apply and rollback took, per kind of run, from the records, and stop")
     args = ap.parse_args(argv)
@@ -1369,6 +1475,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     for r in resolved]
     if args.control:
         resolved = [as_control(r, args.control) if isinstance(r, Run) else r for r in resolved]
+    if args.devices is not None:
+        resolved = [with_devices(r, args.devices) if isinstance(r, Run) else r for r in resolved]
+        args.mode = "seeded"
     runs = run_order([r for r in resolved if isinstance(r, Run)])
     skipped = [r for r in resolved if isinstance(r, Unrunnable)]
 
@@ -1379,10 +1488,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             else " then " + run.target_image.split(":")[-1],
             "  (created at {0})".format(run.history) if run.history else "",
             "  CONTROL {0}".format(run.control) if run.control else "",
-            "  --link" if run.link else "  then rollback" if run.rollback
+            ("  {0:,} rows".format(run.rows) if run.devices else "")
+            + ("  --link" if run.link else "  then rollback" if run.rollback
             else "  must stop" if run.refused or run.ng_refused
             else "  without --migrate-caggs (seeded must stop)" if run.caggs_refused
-            else "  from " + MIRROR if run.mirror else "  with time_bucket_ng" if run.ng else ""))
+            else "  from " + MIRROR if run.mirror else "  with time_bucket_ng" if run.ng else "")))
     for skip in skipped:
         e = skip.entry
         print("{0:<18} skipped: {1}".format(

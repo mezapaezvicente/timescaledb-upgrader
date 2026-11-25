@@ -664,3 +664,76 @@ def test_measured_times_come_from_passing_timed_records_only(tmp_path):
         ("empty, same major", 1, "20 (20-20)", "-"),
         ("seeded, same major", 2, "13.5 (11-16)", "-"),
     ]
+
+
+def test_the_readme_times_are_computed_from_the_records():
+    """Every row of the README's measured-times tables is one --times prints
+    from verify/evidence/ as it is now."""
+    readme = (_PATH.parents[1] / "README.md").read_text(encoding="utf-8")
+    section = readme.split("### Measured times", 1)[1].split("\n## ", 1)[0]
+    rows = [l for l in section.splitlines() if l.startswith("| ") and not l.startswith("| Run |")]
+    assert rows, "no measured-times table in the README"
+    printed = set(harness.times_lines())
+    assert [r for r in rows if r not in printed] == []
+
+
+def test_route_shape_counts_images_on_one_major_and_pg_upgrades_across():
+    start = {"image": "x:pg15.13-ts2.20.3", "digest": "sha256:aa"}
+    update = lambda image: {"action": "update", "image": image, "to": "2.28.3"}  # noqa: E731
+    hop = {"action": "major_upgrade", "image": "x:pg16.15-ts2.30.1"}
+    assert harness.route_shape({"route": {"start": start, "steps": [update(start["image"])]}})[1] == "one image"
+    assert harness.route_shape({"route": {"start": start, "steps": [update("x:pg15.18-ts2.28.3")]}})[1] == "2 images"
+    assert harness.route_shape({"route": {"start": start, "steps": [hop, hop]}})[1] == "2 pg_upgrades"
+    assert harness.route_shape({})[1] == "route not recorded"
+
+
+def test_an_import_is_waited_for_until_the_node_sees_it(monkeypatch):
+    monkeypatch.setenv("HARNESS_BASH", "bash")
+    cluster = harness.Cluster("tsdb-verify", 2, PG15)
+    clock = iter(range(0, 10000, 5))
+    monkeypatch.setattr(harness.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(harness.time, "sleep", lambda s: None)
+    answers = iter([False, False, True])
+    monkeypatch.setattr(cluster, "loaded", lambda image: next(answers))
+    assert cluster.await_loaded("x:pg15.18-ts2.28.3")          # seen on the third look
+    monkeypatch.setattr(cluster, "loaded", lambda image: False)
+    assert not cluster.await_loaded("x:pg15.18-ts2.28.3", timeout=60)  # never: still a failure
+
+
+def test_a_size_run_is_a_plain_seeded_run_keyed_by_its_rows():
+    big = harness.with_devices(LATE, 500)
+    assert big.rows == 5040000
+    assert big.mode("seeded") == "scale-seeded" and big.key("seeded") == "scale-seeded-5040000"
+    assert isinstance(harness.with_devices(LATE, 5), harness.Unrunnable)
+    assert isinstance(harness.with_devices(harness.replace(LATE, history="2.27.0"), 500), harness.Unrunnable)
+    assert isinstance(harness.with_devices(harness.replace(LATE, rollback=True), 500), harness.Unrunnable)
+    assert harness.psql_timeout(LATE) == 600
+    assert harness.psql_timeout(big) > harness.psql_timeout(LATE)
+
+
+def test_the_size_table_sets_a_rows_size_runs_beside_its_usual_one(tmp_path):
+    from tsupgrade.evidence import build_record, record_path, write_record
+
+    def record(run, mode, seconds, seed=None):
+        extra = {"seed": seed} if seed else {}
+        doc = build_record(
+            transition=run.transition, mode=mode,
+            images=[{"reference": run.target_image, "digest": "sha256:bb"}],
+            pg_version="15.18", source=run.source, target=run.target, reached=run.target,
+            passed=True, log="verify/out/x.log", upgrader={"commit": "abc", "dirty": False},
+            timings={"forward": {"started_at": "2026-11-25T10:00:00Z",
+                                 "finished_at": "2026-11-25T10:{0:02d}:{1:02d}Z".format(*divmod(seconds, 60))}},
+            route={"start": {"image": run.target_image, "digest": "sha256:" + "b" * 64},
+                   "steps": [{"action": "update", "image": run.target_image,
+                              "digest": "sha256:" + "b" * 64, "to": run.target}]},
+            **extra)
+        key = harness.evidence_key(mode, rows=(seed or {}).get("rows"))
+        write_record(record_path(tmp_path, run.transition, key), doc)
+
+    record(LATE, "seeded", 15)
+    record(LATE, "scale-seeded", 40, {"devices": 500, "rows": 5040000})
+    record(RUN, "seeded", 16)                      # no size run: not in the table
+    assert harness.size_times(tmp_path) == [
+        ("pg15 2.27 -> 2.28", "one image", "-", "50,400", 15),
+        ("pg15 2.27 -> 2.28", "one image", "-", "5,040,000", 40),
+    ]
