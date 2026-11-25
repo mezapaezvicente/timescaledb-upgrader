@@ -28,23 +28,19 @@
     "reached": "2.30.1"
   },
   "upgrader": {
-    "commit": "b62c9e2aa97bca3f4a3691712d83d7d7caa6b528",
+    "commit": "22f0f471b4a20d750e73e2b8ab956918f852b3db",
     "dirty": false
   },
-  "result": "fail",
+  "result": "pass",
   "log": "verify/out/pg15/2.28-to-pg16-2.30.scale-seeded-50400000.log",
-  "recorded_at": "2026-11-25T18:37:38Z",
-  "failure": {
-    "explanation": "fixture checks failed after the upgrade: cagg_matches, write_and_refresh, decompress",
-    "error": "check|cagg_matches|missing|printed nothing (errored)\ncheck|write_and_refresh|missing|printed nothing (errored)\ncheck|decompress|missing|printed nothing (errored)\npsql:<stdin>:111: FATAL:  terminating connection due to administrator command\npsql:<stdin>:111: error: connection to server was lost"
-  },
-  "stage": "check",
-  "started_at": "2026-11-25T18:17:08Z",
-  "finished_at": "2026-11-25T18:37:38Z",
+  "recorded_at": "2026-11-25T19:50:19Z",
+  "stage": "done",
+  "started_at": "2026-11-25T19:26:55Z",
+  "finished_at": "2026-11-25T19:50:19Z",
   "timings": {
     "forward": {
-      "started_at": "2026-11-25T18:34:11Z",
-      "finished_at": "2026-11-25T18:36:54Z"
+      "started_at": "2026-11-25T19:41:59Z",
+      "finished_at": "2026-11-25T19:45:01Z"
     }
   },
   "source_pg_version": "15.18",
@@ -86,6 +82,18 @@
     "cagg_survived": {
       "status": "pass",
       "detail": "840000 materialized rows; seeded 840000"
+    },
+    "cagg_matches": {
+      "status": "pass",
+      "detail": "0 differing buckets; refresh ran"
+    },
+    "write_and_refresh": {
+      "status": "pass",
+      "detail": "insert ok, refresh ok; 1 new buckets, 60 rows in them"
+    },
+    "decompress": {
+      "status": "pass",
+      "detail": "3 chunks decompressed; 50400000 rows, sum 2521511525.06 before the new writes"
     }
   },
   "apply_exit": 0,

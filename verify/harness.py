@@ -1280,8 +1280,7 @@ def routes_for(entries: Sequence[MatrixEntry], root: Path = REPO) -> Tuple[Dict[
     return routes, problems
 
 
-MODES_IN_ORDER = ("empty", "seeded", "link-empty", "link-seeded", "rollback-empty", "rollback-seeded",
-                  "scale-seeded", "scale-link-seeded")
+MODES_IN_ORDER = ("empty", "seeded", "link-empty", "link-seeded", "rollback-empty", "rollback-seeded")
 
 
 def _spread(seconds: Sequence[int]) -> str:
@@ -1309,25 +1308,23 @@ def route_shape(doc: Dict[str, Any]) -> Tuple[int, str]:
 
 def measured_times(root: Path = EVIDENCE, by_route: bool = False) -> List[Tuple[str, int, str, str]]:
     """(kind of run, runs, forward, rollback) from every passing record with
-    ``timings``, controls apart: each time is the median and range in seconds,
+    ``timings``, controls and size runs apart: each time is the median and range in seconds,
     rollback "-" where the run has none; ``by_route`` splits each kind by
     :func:`route_shape`. What the README's measured times are computed from."""
     order = {m: i for i, m in enumerate(MODES_IN_ORDER)}
     groups: Dict[Tuple[Any, ...], Dict[str, List[int]]] = {}
     for path in sorted(root.glob("pg*/*.json")):
         doc = load_record(path)
-        if doc["result"] != "pass" or "control" in doc or not doc.get("timings"):
+        if (doc["result"] != "pass" or "control" in doc or not doc.get("timings")
+                or doc.get("seed")):  # size runs: size_times, one row at a time
             continue
         t = doc["transition"]
         cross = t["source_pg"] != t["target_pg"]
         name = "{0}, {1}".format(doc["mode"], "major change" if cross else "same major")
-        if doc.get("seed"):
-            name += ", {0:,} rows".format(doc["seed"]["rows"])
         shape = route_shape(doc) if by_route else (0, "")
         if by_route:
             name += ", " + shape[1]
-        rows = (doc.get("seed") or {}).get("rows", 0)
-        group = groups.setdefault((cross, order.get(doc["mode"], 99), doc["mode"], rows, shape[0], name), {})
+        group = groups.setdefault((cross, order.get(doc["mode"], 99), doc["mode"], shape[0], name), {})
         for stage, timing in doc["timings"].items():
             group.setdefault(stage, []).append(stage_seconds(timing))
     return [(key[-1], len(stages["forward"]), _spread(stages["forward"]),

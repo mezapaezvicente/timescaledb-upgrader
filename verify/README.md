@@ -118,8 +118,20 @@ until it is run again.
 **Measured times.** `python verify/harness.py --times` prints how long
 `apply` and `rollback` took (each record's `timings`): median and range in
 seconds per kind of run, then per kind of run and route shape. It reads only
-passing, timed records, controls apart. The README's tables are its output, and
-`tests/test_harness.py` fails when they differ.
+passing, timed records, controls and size runs apart. A third table lists each
+row that has size runs, at every size it ran. The README's tables are its
+output, and `tests/test_harness.py` fails when they differ.
+
+**Size runs.** `--devices N` seeds N devices of 10,080 rows each instead of
+5, seeded only, copy or `--link` (records `scale-seeded-<rows>`,
+`scale-link-seeded-<rows>`, which name their `seed`). The checks are the
+usual ones, judged against the larger baseline. Seeding and `check.sql` get
+ten more minutes per million rows. A size run is evidence for `--times`, never
+for a row's verdict.
+
+```sh
+python verify/harness.py --pg 15 --to-pg 16 --devices 5000 --link
+```
 
 **Fresh evidence.** A verdict has to come from the code that ships. Before a
 release is tagged, every row is run again so all records name one commit.
