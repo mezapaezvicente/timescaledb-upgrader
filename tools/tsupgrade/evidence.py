@@ -73,6 +73,12 @@ a harness can add what turns out to matter without a schema change:
                     control's one ALTER) and of ``tsupgrade rollback``, without
                     the cluster reset, staging and seeding
 
+``seed``            on a size run (``scale-seeded``, ``scale-link-seeded``)
+                    only: ``{devices, rows}`` of the fixture it seeded, which
+                    is larger than the usual 5 devices and 50,400 rows. Its
+                    file is keyed ``<mode>-<rows>`` (:func:`evidence_key`). No
+                    row cites a size run
+
 Optional and unchecked beyond being present: ``checks`` (the fixture's check
 lines on a seeded run), ``started_at``/``finished_at``, ``plan``, ``notes``.
 
@@ -124,14 +130,17 @@ MODES = ("empty", "seeded", "history-empty", "history-seeded", "link-empty", "li
          "rollback-empty", "rollback-seeded", "mirror-empty", "mirror-seeded",
          "mirror-refused-empty", "mirror-refused-seeded",
          "caggs-refused-empty", "caggs-refused-seeded",
-         "ng-empty", "ng-seeded", "ng-refused-empty", "ng-refused-seeded")
+         "ng-empty", "ng-seeded", "ng-refused-empty", "ng-refused-seeded",
+         "scale-seeded", "scale-link-seeded")
 CONTROLS = ("direct",)
 RESULTS = ("pass", "fail")
 
 
-def evidence_key(mode: str, control: Optional[str] = None) -> str:
-    """The name a record goes by in a file name and a matrix row's evidence."""
-    return "{0}-{1}".format(control, mode) if control else mode
+def evidence_key(mode: str, control: Optional[str] = None, rows: Optional[int] = None) -> str:
+    """The name a record goes by in a file name and a matrix row's evidence.
+    A size run (``scale-``) names its seed's row count, one record per size."""
+    key = "{0}-{1}".format(control, mode) if control else mode
+    return "{0}-{1}".format(key, rows) if rows else key
 
 
 class EvidenceError(Exception):
@@ -318,6 +327,12 @@ def validate_record(doc: Any) -> List[str]:
     if "timings" in doc:
         problems.extend(timing_problems(doc["timings"]))
 
+    if str(doc.get("mode")).startswith("scale-"):
+        seed = doc.get("seed")
+        if not (isinstance(seed, dict) and all(isinstance(seed.get(k), int) and seed[k] > 0
+                                               for k in ("devices", "rows"))):
+            problems.append("a size run names its seed in seed: devices and rows")
+
     if not doc.get("log"):
         problems.append("log must point at the full log")
     return problems
@@ -363,7 +378,7 @@ def _major_upgrade_problems(doc: Dict[str, Any]) -> List[str]:
     hops = doc.get("major_upgrades")
     if not isinstance(hops, list) or not hops:
         return ["a passing major change lists its pg_upgrade runs in major_upgrades"]
-    link = str(doc.get("mode")).startswith("link-")
+    link = str(doc.get("mode")).startswith(("link-", "scale-link-"))
     want = "link" if link else "copy"
     problems = []
     for i, hop in enumerate(hops):

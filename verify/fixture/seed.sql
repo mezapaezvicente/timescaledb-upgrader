@@ -3,7 +3,8 @@
 -- Creates, at whatever TimescaleDB version is installed in the current
 -- database, the objects an upgrade has to carry across:
 --
---   fx_metrics   hypertable, 7 daily chunks, 5 devices, one row per minute
+--   fx_metrics   hypertable, 7 daily chunks, 5 devices (or :devices), one row
+--                per minute
 --   fx_hourly    continuous aggregate (hourly avg and count per device)
 --   compression  enabled, the oldest 3 chunks compressed
 --   jobs         fx_job_ok and fx_job_fail, each run once by the scheduler,
@@ -52,12 +53,19 @@ SELECT create_hypertable('fx_metrics', by_range('time', INTERVAL '1 day'));
 SELECT create_hypertable('fx_metrics', 'time', chunk_time_interval => INTERVAL '1 day');
 \endif
 
+-- devices: how many series, each 10,080 rows. 5 (50,400 rows) unless a size
+-- run passes -v devices=N (harness --devices); the first 5 are the same rows.
+\if :{?devices}
+\else
+\set devices 5
+\endif
+
 INSERT INTO fx_metrics (time, device, value)
 SELECT TIMESTAMPTZ '2026-01-01 00:00:00+00' + (m * INTERVAL '1 minute'),
        d,
        ((m * 7919 + d * 104729) % 10007)::double precision / 100.0
   FROM generate_series(0, 7 * 1440 - 1) AS m,
-       generate_series(1, 5) AS d;
+       generate_series(1, :devices) AS d;
 
 \if :ts1
 CREATE VIEW fx_hourly

@@ -136,6 +136,8 @@ CHECKS = (
 NG_CHECKS = ("ng_rows", "ng_bucket", "ng_kept", "ng_refresh")
 MODES = ("empty", "seeded")
 CONTROLS = ("direct",)
+ROWS_PER_DEVICE = 7 * 1440  # seed.sql: one row a minute for 7 days per device
+SEED_DEVICES = 5
 FIXTURE = REPO / "verify" / "fixture"
 EVIDENCE = REPO / "verify" / "evidence"
 OUT = REPO / "verify" / "out"
@@ -173,13 +175,21 @@ class Run:
     caggs_refused: bool = False       # without --migrate-caggs: must stop, nothing changed
     ng: bool = False                  # aggregates on time_bucket_ng too: apply rebuilds them
     ng_refused: bool = False          # the same without --migrate-caggs: must stop, nothing changed
+    devices: Optional[int] = None     # a size run: the fixture with this many devices
 
     @property
     def major(self) -> int:
         return int(self.entry.source_pg)
 
+    @property
+    def rows(self) -> Optional[int]:
+        """The seed's row count on a size run."""
+        return self.devices * ROWS_PER_DEVICE if self.devices else None
+
     def mode(self, base: str) -> str:
         """The record mode for a base mode (empty or seeded)."""
+        if self.devices:
+            return "scale-" + ("link-" if self.link else "") + base
         if self.link:
             return "link-" + base
         if self.rollback:
@@ -213,7 +223,7 @@ class Run:
 
     def key(self, base: str) -> str:
         """What the record is filed and cited as."""
-        return evidence_key(self.mode(base), self.control)
+        return evidence_key(self.mode(base), self.control, self.rows)
 
     @property
     def transition(self) -> Dict[str, str]:
@@ -382,6 +392,16 @@ def with_rollback(run: Run) -> Union[Run, Unrunnable]:
     if run.link or run.history or run.control:
         return Unrunnable(run.entry, "--rollback is for a copy, without --history or --control")
     return replace(run, rollback=True)
+
+
+def with_devices(run: Run, devices: int) -> Union[Run, Unrunnable]:
+    """The same row, seeded with a larger fixture, to see how its time grows
+    with the data. Seeded only, copy or --link, nothing else combined."""
+    if run.rollback or run.mirror or run.history or run.control or run.caggs_refused or run.ng:
+        return Unrunnable(run.entry, "--devices is for a plain run, with --link at most")
+    if devices <= SEED_DEVICES:
+        return Unrunnable(run.entry, "--devices must be above the fixture's {0}".format(SEED_DEVICES))
+    return replace(run, devices=devices)
 
 
 def with_history(run: Run, version: str, contents: ImageContents) -> Union[Run, Unrunnable]:
@@ -1027,9 +1047,11 @@ def stage(cluster: Cluster, run: Run, mode: str, log: Log) -> Optional[str]:
         raise HarnessError("staging did not leave {0} at {1}".format(DATABASE, created))
     baseline = None
     if mode == "seeded":
-        log.section("seed")
+        log.section("seed" + (" {0} devices, {1} rows".format(run.devices, run.rows) if run.devices else ""))
         seed = (FIXTURE / "seed.sql").read_text(encoding="utf-8")
-        rc, out, err = cluster.psql(DATABASE, "-qtA", "-f", "-", stdin=seed, log=log)
+        size = ["-v", "devices={0}".format(run.devices)] if run.devices else []
+        rc, out, err = cluster.psql(DATABASE, "-qtA", *size, "-f", "-", stdin=seed, log=log,
+                                    timeout=psql_timeout(run))
         if rc != 0:
             raise HarnessError("seeding at {0} failed: {1}".format(
                 created, error_lines(err.splitlines(), 3)))
@@ -1052,6 +1074,12 @@ def stage(cluster: Cluster, run: Run, mode: str, log: Log) -> Optional[str]:
             raise HarnessError("history update {0} -> {1} failed: {2}".format(
                 run.history, run.source, error_lines(err.splitlines(), 3)))
     return baseline
+
+
+def psql_timeout(run: Run) -> float:
+    """Seconds for seeding and for check.sql: ten minutes for the fixture, ten
+    more for every million rows of a size run's seed."""
+    return 600 + 600 * (run.rows or 0) / 1e6
 
 
 def extversion(cluster: Cluster, log: Log) -> Optional[str]:
@@ -1141,7 +1169,7 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
         log.section("check.sql, expect {0}".format(run.end(base)))
         rc, out, check_err = cluster.psql(DATABASE, "-qtA", "-F", "|", "-v", "expect=" + run.end(base),
                                   "-f", "-", stdin=(FIXTURE / "check.sql").read_text(encoding="utf-8"),
-                                  log=log)
+                                  log=log, timeout=psql_timeout(run))
         checks = parse_checks(out)
     if run.ng and reached is not None:
         rebuilt = "false" if run.ng_refused else "true"
@@ -1159,6 +1187,8 @@ def run_one(run: Run, base: str, plan: Optional[Dict[str, Any]], plan_path: Opti
     extra: Dict[str, Any] = {}
     if run.history:
         extra["history"] = run.history
+    if run.devices:
+        extra["seed"] = {"devices": run.devices, "rows": run.rows}
     if run.control:
         extra["control"] = run.control
     else:
@@ -1250,7 +1280,8 @@ def routes_for(entries: Sequence[MatrixEntry], root: Path = REPO) -> Tuple[Dict[
     return routes, problems
 
 
-MODES_IN_ORDER = ("empty", "seeded", "link-empty", "link-seeded", "rollback-empty", "rollback-seeded")
+MODES_IN_ORDER = ("empty", "seeded", "link-empty", "link-seeded", "rollback-empty", "rollback-seeded",
+                  "scale-seeded", "scale-link-seeded")
 
 
 def _spread(seconds: Sequence[int]) -> str:
@@ -1290,10 +1321,13 @@ def measured_times(root: Path = EVIDENCE, by_route: bool = False) -> List[Tuple[
         t = doc["transition"]
         cross = t["source_pg"] != t["target_pg"]
         name = "{0}, {1}".format(doc["mode"], "major change" if cross else "same major")
+        if doc.get("seed"):
+            name += ", {0:,} rows".format(doc["seed"]["rows"])
         shape = route_shape(doc) if by_route else (0, "")
         if by_route:
             name += ", " + shape[1]
-        group = groups.setdefault((cross, order.get(doc["mode"], 99), doc["mode"], shape[0], name), {})
+        rows = (doc.get("seed") or {}).get("rows", 0)
+        group = groups.setdefault((cross, order.get(doc["mode"], 99), doc["mode"], rows, shape[0], name), {})
         for stage, timing in doc["timings"].items():
             group.setdefault(stage, []).append(stage_seconds(timing))
     return [(key[-1], len(stages["forward"]), _spread(stages["forward"]),
@@ -1301,9 +1335,39 @@ def measured_times(root: Path = EVIDENCE, by_route: bool = False) -> List[Tuple[
             for key, stages in sorted(groups.items())]
 
 
+def size_times(root: Path = EVIDENCE) -> List[Tuple[str, str, str, str, int]]:
+    """(row, route, files, rows, apply seconds) for every row a size run was
+    made for: its passing, timed seeded and link-seeded runs on the usual
+    fixture, and its size runs. One run each, so a time, not a median."""
+    found: Dict[Tuple[str, ...], List[Dict[str, Any]]] = {}
+    for path in sorted(root.glob("pg*/*.json")):
+        doc = load_record(path)
+        if doc["mode"] in ("seeded", "link-seeded", "scale-seeded", "scale-link-seeded"):
+            found.setdefault(tuple(sorted(doc["transition"].items())), []).append(doc)
+    rows = []
+    for docs in found.values():
+        if not any(d["mode"].startswith("scale-") for d in docs):
+            continue
+        for doc in docs:
+            if doc["result"] != "pass" or not doc.get("timings"):
+                continue
+            t = doc["transition"]
+            name = "pg{0} {1} -> {2}".format(
+                t["source_pg"], t["source_ts"],
+                t["target_ts"] if t["source_pg"] == t["target_pg"]
+                else "pg{0} {1}".format(t["target_pg"], t["target_ts"]))
+            seeded = (doc.get("seed") or {}).get("rows", SEED_DEVICES * ROWS_PER_DEVICE)
+            files = "link" if "link-" in doc["mode"] else "copy" if t["source_pg"] != t["target_pg"] else "-"
+            rows.append((name, route_shape(doc)[1], files, seeded,
+                         stage_seconds(doc["timings"]["forward"])))
+    rows.sort(key=lambda r: (r[1] != "one image", r[0], r[2], r[3]))
+    return [(name, route, files, "{0:,}".format(n), s) for name, route, files, n, s in rows]
+
+
 def times_lines(root: Path = EVIDENCE) -> List[str]:
-    """``--times``: the measured times as two Markdown tables, per kind of run
-    and then per kind of run and route."""
+    """``--times``: the measured times as Markdown tables, per kind of run,
+    then per kind of run and route, then (where there are size runs) per row
+    and seed size."""
     lines: List[str] = []
     for by_route in (False, True):
         if lines:
@@ -1311,6 +1375,10 @@ def times_lines(root: Path = EVIDENCE) -> List[str]:
         lines += ["| Run | Runs | apply, median (range) s | rollback, median (range) s |",
                   "|---|---:|---:|---:|"]
         lines += ["| {0} | {1} | {2} | {3} |".format(*row) for row in measured_times(root, by_route)]
+    sizes = size_times(root)
+    if sizes:
+        lines += ["", "| Row | Route | Files | Rows | apply s |", "|---|---|---|---:|---:|"]
+        lines += ["| {0} | {1} | {2} | {3} | {4} |".format(*row) for row in sizes]
     return lines
 
 
@@ -1381,6 +1449,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                          "(needs --history)")
     ap.add_argument("--write-routes", action="store_true", dest="write_routes",
                     help="copy each verified row's route from its records into the matrix, and stop")
+    ap.add_argument("--devices", type=int, metavar="N",
+                    help="seed N devices of 10,080 rows instead of 5 (seeded only); a size run, "
+                         "evidence for --times, never a row's verdict")
     ap.add_argument("--times", action="store_true",
                     help="print how long apply and rollback took, per kind of run, from the records, and stop")
     args = ap.parse_args(argv)
@@ -1407,6 +1478,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                     for r in resolved]
     if args.control:
         resolved = [as_control(r, args.control) if isinstance(r, Run) else r for r in resolved]
+    if args.devices is not None:
+        resolved = [with_devices(r, args.devices) if isinstance(r, Run) else r for r in resolved]
+        args.mode = "seeded"
     runs = run_order([r for r in resolved if isinstance(r, Run)])
     skipped = [r for r in resolved if isinstance(r, Unrunnable)]
 
@@ -1417,10 +1491,11 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             else " then " + run.target_image.split(":")[-1],
             "  (created at {0})".format(run.history) if run.history else "",
             "  CONTROL {0}".format(run.control) if run.control else "",
-            "  --link" if run.link else "  then rollback" if run.rollback
+            ("  {0:,} rows".format(run.rows) if run.devices else "")
+            + ("  --link" if run.link else "  then rollback" if run.rollback
             else "  must stop" if run.refused or run.ng_refused
             else "  without --migrate-caggs (seeded must stop)" if run.caggs_refused
-            else "  from " + MIRROR if run.mirror else "  with time_bucket_ng" if run.ng else ""))
+            else "  from " + MIRROR if run.mirror else "  with time_bucket_ng" if run.ng else "")))
     for skip in skipped:
         e = skip.entry
         print("{0:<18} skipped: {1}".format(

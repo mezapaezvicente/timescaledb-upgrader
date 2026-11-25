@@ -698,3 +698,42 @@ def test_an_import_is_waited_for_until_the_node_sees_it(monkeypatch):
     assert cluster.await_loaded("x:pg15.18-ts2.28.3")          # seen on the third look
     monkeypatch.setattr(cluster, "loaded", lambda image: False)
     assert not cluster.await_loaded("x:pg15.18-ts2.28.3", timeout=60)  # never: still a failure
+
+
+def test_a_size_run_is_a_plain_seeded_run_keyed_by_its_rows():
+    big = harness.with_devices(LATE, 500)
+    assert big.rows == 5040000
+    assert big.mode("seeded") == "scale-seeded" and big.key("seeded") == "scale-seeded-5040000"
+    assert isinstance(harness.with_devices(LATE, 5), harness.Unrunnable)
+    assert isinstance(harness.with_devices(harness.replace(LATE, history="2.27.0"), 500), harness.Unrunnable)
+    assert isinstance(harness.with_devices(harness.replace(LATE, rollback=True), 500), harness.Unrunnable)
+    assert harness.psql_timeout(LATE) == 600
+    assert harness.psql_timeout(big) > harness.psql_timeout(LATE)
+
+
+def test_the_size_table_sets_a_rows_size_runs_beside_its_usual_one(tmp_path):
+    from tsupgrade.evidence import build_record, record_path, write_record
+
+    def record(run, mode, seconds, seed=None):
+        extra = {"seed": seed} if seed else {}
+        doc = build_record(
+            transition=run.transition, mode=mode,
+            images=[{"reference": run.target_image, "digest": "sha256:bb"}],
+            pg_version="15.18", source=run.source, target=run.target, reached=run.target,
+            passed=True, log="verify/out/x.log", upgrader={"commit": "abc", "dirty": False},
+            timings={"forward": {"started_at": "2026-11-25T10:00:00Z",
+                                 "finished_at": "2026-11-25T10:{0:02d}:{1:02d}Z".format(*divmod(seconds, 60))}},
+            route={"start": {"image": run.target_image, "digest": "sha256:" + "b" * 64},
+                   "steps": [{"action": "update", "image": run.target_image,
+                              "digest": "sha256:" + "b" * 64, "to": run.target}]},
+            **extra)
+        key = harness.evidence_key(mode, rows=(seed or {}).get("rows"))
+        write_record(record_path(tmp_path, run.transition, key), doc)
+
+    record(LATE, "seeded", 15)
+    record(LATE, "scale-seeded", 40, {"devices": 500, "rows": 5040000})
+    record(RUN, "seeded", 16)                      # no size run: not in the table
+    assert harness.size_times(tmp_path) == [
+        ("pg15 2.27 -> 2.28", "one image", "-", "50,400", 15),
+        ("pg15 2.27 -> 2.28", "one image", "-", "5,040,000", 40),
+    ]

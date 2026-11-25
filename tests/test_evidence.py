@@ -237,3 +237,23 @@ def test_timings_when_present_can_be_computed_again():
     assert any("needs started_at and finished_at" in p for p in validate_record(doc))
     doc["timings"] = {"forward": {"started_at": ok["finished_at"], "finished_at": ok["started_at"]}}
     assert any("finished before it started" in p for p in validate_record(doc))
+
+
+def test_a_size_run_names_its_seed_and_files_apart_per_size():
+    with pytest.raises(EvidenceError, match="names its seed"):
+        _record(mode="scale-seeded")
+    doc = _record(mode="scale-seeded", seed={"devices": 500, "rows": 5040000})
+    assert validate_record(doc) == []
+    assert evidence_key("scale-seeded", rows=5040000) == "scale-seeded-5040000"
+    assert evidence_key("seeded") == "seeded"
+
+
+def test_a_size_run_with_link_must_have_linked():
+    row = dict(ROW, target_pg="16", target_ts="2.30")
+    copy = [{"from_pg": 15, "to_pg": 16, "files": "copy", "shared_inodes": 0}]
+    link = [{"from_pg": 15, "to_pg": 16, "files": "link", "shared_inodes": 40}]
+    seed = {"devices": 500, "rows": 5040000}
+    assert _record(transition=row, mode="scale-link-seeded", seed=seed, major_upgrades=link)
+    with pytest.raises(EvidenceError, match="link of the relation"):
+        _record(transition=row, mode="scale-link-seeded", seed=seed, major_upgrades=copy)
+    assert _record(transition=row, mode="scale-seeded", seed=seed, major_upgrades=copy)
