@@ -664,3 +664,24 @@ def test_measured_times_come_from_passing_timed_records_only(tmp_path):
         ("empty, same major", 1, "20 (20-20)", "-"),
         ("seeded, same major", 2, "13.5 (11-16)", "-"),
     ]
+
+
+def test_the_readme_times_are_computed_from_the_records():
+    """Every row of the README's measured-times tables is one --times prints
+    from verify/evidence/ as it is now."""
+    readme = (_PATH.parents[1] / "README.md").read_text(encoding="utf-8")
+    section = readme.split("### Measured times", 1)[1].split("\n## ", 1)[0]
+    rows = [l for l in section.splitlines() if l.startswith("| ") and not l.startswith("| Run |")]
+    assert rows, "no measured-times table in the README"
+    printed = set(harness.times_lines())
+    assert [r for r in rows if r not in printed] == []
+
+
+def test_route_shape_counts_images_on_one_major_and_pg_upgrades_across():
+    start = {"image": "x:pg15.13-ts2.20.3", "digest": "sha256:aa"}
+    update = lambda image: {"action": "update", "image": image, "to": "2.28.3"}  # noqa: E731
+    hop = {"action": "major_upgrade", "image": "x:pg16.15-ts2.30.1"}
+    assert harness.route_shape({"route": {"start": start, "steps": [update(start["image"])]}})[1] == "one image"
+    assert harness.route_shape({"route": {"start": start, "steps": [update("x:pg15.18-ts2.28.3")]}})[1] == "2 images"
+    assert harness.route_shape({"route": {"start": start, "steps": [hop, hop]}})[1] == "2 pg_upgrades"
+    assert harness.route_shape({})[1] == "route not recorded"

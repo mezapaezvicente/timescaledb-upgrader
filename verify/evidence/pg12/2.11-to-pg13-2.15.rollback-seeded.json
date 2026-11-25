@@ -28,15 +28,25 @@
     "reached": "2.11.2"
   },
   "upgrader": {
-    "commit": "cb08277a0e889f14eaa557cc410c2b92c03e1a72",
+    "commit": "df7a1b34bab1433468a1afc6735ac874d7798230",
     "dirty": false
   },
   "result": "pass",
   "log": "verify/out/pg12/2.11-to-pg13-2.15.rollback-seeded.log",
-  "recorded_at": "2026-11-20T03:11:09Z",
+  "recorded_at": "2026-11-25T09:20:20Z",
   "stage": "done",
-  "started_at": "2026-11-20T03:05:14Z",
-  "finished_at": "2026-11-20T03:11:09Z",
+  "started_at": "2026-11-25T09:09:54Z",
+  "finished_at": "2026-11-25T09:20:20Z",
+  "timings": {
+    "forward": {
+      "started_at": "2026-11-25T09:16:31Z",
+      "finished_at": "2026-11-25T09:19:39Z"
+    },
+    "rollback": {
+      "started_at": "2026-11-25T09:19:39Z",
+      "finished_at": "2026-11-25T09:20:19Z"
+    }
+  },
   "source_pg_version": "12.22",
   "replicas": 2,
   "pods": [
@@ -44,14 +54,14 @@
       "pod": "tsdb-0",
       "role": "primary",
       "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3@sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
-      "image_id": "docker.io/library/import-2026-10-29@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
+      "image_id": "docker.io/library/import-2026-11-25@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
       "server_version": "13.22"
     },
     {
       "pod": "tsdb-1",
       "role": "replica",
       "image": "timescale/timescaledb-ha:pg13.22-ts2.15.3@sha256:8efd278a83e20695eb36e2b4e3725fb75f72b05bc0d4cc8680f6af6d75a10602",
-      "image_id": "docker.io/library/import-2026-10-29@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
+      "image_id": "docker.io/library/import-2026-11-25@sha256:d477c4c13bce88bad878e8ac3d0679cc78f7e58f747626b6594bedb34b34b3bc",
       "server_version": "13.22"
     }
   ],
@@ -137,12 +147,12 @@
     "to_pg": 12,
     "lost": "every write made since the upgrade is lost: the old data directory is the cluster as it was when pg_upgrade ran, extension updates included",
     "output": [
-      "going back from PostgreSQL 13 (system identifier 7710085539147083800) to 12: every write made since the upgrade is lost: the old data directory is the cluster as it was when pg_upgrade ran, extension updates included",
+      "going back from PostgreSQL 13 (system identifier 7712036101751930904) to 12: every write made since the upgrade is lost: the old data directory is the cluster as it was when pg_upgrade ran, extension updates included",
       "scaled statefulset/tsdb to 0",
-      "PostgreSQL 13's data directory is now /home/postgres/pgdata/data.rolled-back-pg13-7710085539147083800; PostgreSQL 12's is back at /home/postgres/pgdata/data",
+      "PostgreSQL 13's data directory is now /home/postgres/pgdata/data.rolled-back-pg13-7712036101751930904; PostgreSQL 12's is back at /home/postgres/pgdata/data",
       "deleted pgdata-tsdb-1",
       "reset Patroni's state for scope tsdb: endpoints/tsdb, endpoints/tsdb-config",
-      "back: primary tsdb-0 on PostgreSQL 12, system identifier 7710084777500962842 (the old cluster's)"
+      "back: primary tsdb-0 on PostgreSQL 12, system identifier 7712034092507639834 (the old cluster's)"
     ],
     "result": "pass"
   }

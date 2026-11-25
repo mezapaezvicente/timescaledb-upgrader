@@ -597,6 +597,55 @@ the seeded checks read it below its watermark; the row says so and gives the
 step. pg11 2.1 to pg15-pg18 migrate the aggregate on the way (see
 [Old continuous aggregates](#old-continuous-aggregates)).
 
+### Measured times
+
+How long `apply` and `rollback` took on the seeded verification runs: the wall
+time of the `tsupgrade` process, in seconds, without the cluster setup, staging
+and seeding around it. Each record keeps the UTC start and end of both
+(`timings`), and `python verify/harness.py --times` computes these tables from
+[`verify/evidence/`](verify/evidence/). The test suite fails if a row here
+differs from what it prints.
+
+| Run | Runs | apply, median (range) s | rollback, median (range) s |
+|---|---:|---:|---:|
+| seeded, same major | 98 | 15 (12-183) | - |
+| seeded, major change | 28 | 142 (60-392) | - |
+| link-seeded, major change | 28 | 141 (60-389) | - |
+| rollback-seeded, major change | 5 | 67 (62-188) | 40 (36-154) |
+
+The time follows the route, not the data:
+
+| Run | Runs | apply, median (range) s | rollback, median (range) s |
+|---|---:|---:|---:|
+| seeded, same major, one image | 93 | 15 (12-24) | - |
+| seeded, same major, 2 images | 5 | 180 (49-183) | - |
+| seeded, major change, 1 pg_upgrade | 11 | 70 (60-188) | - |
+| seeded, major change, 2 pg_upgrades | 9 | 142 (135-261) | - |
+| seeded, major change, 3 pg_upgrades | 5 | 322 (314-327) | - |
+| seeded, major change, 4 pg_upgrades | 3 | 389 (386-392) | - |
+
+- On one image, `apply` updates the extension in place. A second image means
+  restarting every pod onto it.
+- Every `pg_upgrade` stops the cluster, upgrades it and starts it again. The
+  pg12 → pg13 hop is the slow one: 188-189 s in all three of its runs (copy,
+  `--link`, rollback). The routes through it are the slow end of the
+  2-pg_upgrade range.
+- `--link` saves nothing at this size: 50,400 rows are too few files for
+  copying them to matter. These runs do not show how either mode scales with
+  data.
+- The longest rollback, 154 s for pg11 → pg12 (the others took 36-40 s), is
+  one run, and the record does not show which step took the time.
+- The 5 rollback rows have one `pg_upgrade` each: pg11 → 12, 12 → 13, 13 → 14,
+  15 → 16 and 17 → 18.
+
+Measured on 2026-11-25 from commit `df7a1b3`, on the fixture's 50,400 rows
+(`verify/fixture/seed.sql`). The cluster was kind (one node, `kindest/node`
+v1.37.0) running two PostgreSQL instances, in Docker Desktop 29.7.2. Its WSL2
+VM had 16 CPUs and 7.5 GB. The machine was Windows 11 on an AMD Ryzen 9 5980HS
+(8 cores, 16 threads) with 15.4 GB RAM and an NVMe SSD. No other cluster ran
+during the timed stages. This is the tool's own cost per route on a laptop,
+not a forecast for your database.
+
 ---
 
 ## Known limits

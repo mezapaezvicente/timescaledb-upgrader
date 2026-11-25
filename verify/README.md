@@ -115,6 +115,12 @@ link runs) into `data/upgrade-matrix.json`. A row whose records name no
 route, or different ones, keeps none, and `plan` treats it as unestablished
 until it is run again.
 
+**Measured times.** `python verify/harness.py --times` prints how long
+`apply` and `rollback` took (each record's `timings`): median and range in
+seconds per kind of run, then per kind of run and route shape. It reads only
+passing, timed records, controls apart. The README's tables are its output, and
+`tests/test_harness.py` fails when they differ.
+
 **Fresh evidence.** A verdict has to come from the code that ships. Before a
 release is tagged, every row is run again so all records name one commit.
 `tests/test_shipped_data.py` flags any cited record from a dirty tree, or one

@@ -1250,34 +1250,61 @@ def _fmt(value: float) -> str:
     return str(int(value)) if value == int(value) else "{0:.1f}".format(value)
 
 
-def measured_times(root: Path = EVIDENCE) -> List[Tuple[str, int, str, str]]:
+def route_shape(doc: Dict[str, Any]) -> Tuple[int, str]:
+    """(sort key, name) of what a record's route does, which is what its time
+    follows: on one major, how many images it runs on (more than one restarts
+    every pod); across majors, how many pg_upgrades."""
+    route = doc.get("route")
+    if not route:
+        return (99, "route not recorded")
+    steps = route.get("steps") or []
+    hops = sum(1 for s in steps if s.get("action") == "major_upgrade")
+    if hops:
+        return (10 + hops, "{0} pg_upgrade{1}".format(hops, "" if hops == 1 else "s"))
+    images = {(route.get("start") or {}).get("image")} | {s.get("image") for s in steps if s.get("image")}
+    return (len(images), "one image" if len(images) == 1 else "{0} images".format(len(images)))
+
+
+def measured_times(root: Path = EVIDENCE, by_route: bool = False) -> List[Tuple[str, int, str, str]]:
     """(kind of run, runs, forward, rollback) from every passing record with
     ``timings``, controls apart: each time is the median and range in seconds,
-    rollback "-" where the run has none. What the README's measured times are
-    computed from."""
-    groups: Dict[Tuple[str, bool], Dict[str, List[int]]] = {}
+    rollback "-" where the run has none; ``by_route`` splits each kind by
+    :func:`route_shape`. What the README's measured times are computed from."""
+    order = {m: i for i, m in enumerate(MODES_IN_ORDER)}
+    groups: Dict[Tuple[Any, ...], Dict[str, List[int]]] = {}
     for path in sorted(root.glob("pg*/*.json")):
         doc = load_record(path)
         if doc["result"] != "pass" or "control" in doc or not doc.get("timings"):
             continue
         t = doc["transition"]
-        group = groups.setdefault((doc["mode"], t["source_pg"] != t["target_pg"]), {})
+        cross = t["source_pg"] != t["target_pg"]
+        name = "{0}, {1}".format(doc["mode"], "major change" if cross else "same major")
+        shape = route_shape(doc) if by_route else (0, "")
+        if by_route:
+            name += ", " + shape[1]
+        group = groups.setdefault((cross, order.get(doc["mode"], 99), doc["mode"], shape[0], name), {})
         for stage, timing in doc["timings"].items():
             group.setdefault(stage, []).append(stage_seconds(timing))
-    order = {m: i for i, m in enumerate(MODES_IN_ORDER)}
-    rows = []
-    for (mode, cross), stages in sorted(groups.items(), key=lambda g: (g[0][1], order.get(g[0][0], 99), g[0][0])):
-        rows.append(("{0}, {1}".format(mode, "major change" if cross else "same major"),
-                     len(stages["forward"]), _spread(stages["forward"]),
-                     _spread(stages["rollback"]) if "rollback" in stages else "-"))
-    return rows
+    return [(key[-1], len(stages["forward"]), _spread(stages["forward"]),
+             _spread(stages["rollback"]) if "rollback" in stages else "-")
+            for key, stages in sorted(groups.items())]
+
+
+def times_lines(root: Path = EVIDENCE) -> List[str]:
+    """``--times``: the measured times as two Markdown tables, per kind of run
+    and then per kind of run and route."""
+    lines: List[str] = []
+    for by_route in (False, True):
+        if lines:
+            lines.append("")
+        lines += ["| Run | Runs | apply, median (range) s | rollback, median (range) s |",
+                  "|---|---:|---:|---:|"]
+        lines += ["| {0} | {1} | {2} | {3} |".format(*row) for row in measured_times(root, by_route)]
+    return lines
 
 
 def print_times(root: Path = EVIDENCE) -> int:
-    print("| Run | Runs | apply, median (range) s | rollback, median (range) s |")
-    print("|---|---:|---:|---:|")
-    for kind, runs, forward, back in measured_times(root):
-        print("| {0} | {1} | {2} | {3} |".format(kind, runs, forward, back))
+    print("\n".join(times_lines(root)))
     return 0
 
 

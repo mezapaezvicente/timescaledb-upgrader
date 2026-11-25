@@ -1,0 +1,153 @@
+{
+  "evidence_format": 1,
+  "transition": {
+    "source_pg": "17",
+    "source_ts": "2.30",
+    "target_pg": "18",
+    "target_ts": "2.30"
+  },
+  "mode": "rollback-seeded",
+  "images": [
+    {
+      "reference": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+      "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg18.6-ts2.30.1-all",
+      "digest": "sha256:df13246f8b73705f991d201e64c62426df001f062ce9700e6ee4a1283030f8bb"
+    },
+    {
+      "reference": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+      "digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+    }
+  ],
+  "pg_version": "17.11",
+  "versions": {
+    "source": "2.30.1",
+    "target": "2.30.1",
+    "reached": "2.30.1"
+  },
+  "upgrader": {
+    "commit": "df7a1b34bab1433468a1afc6735ac874d7798230",
+    "dirty": false
+  },
+  "result": "pass",
+  "log": "verify/out/pg17/2.30-to-pg18-2.30.rollback-seeded.log",
+  "recorded_at": "2026-11-25T10:00:11Z",
+  "stage": "done",
+  "started_at": "2026-11-25T09:43:18Z",
+  "finished_at": "2026-11-25T10:00:11Z",
+  "timings": {
+    "forward": {
+      "started_at": "2026-11-25T09:58:28Z",
+      "finished_at": "2026-11-25T09:59:30Z"
+    },
+    "rollback": {
+      "started_at": "2026-11-25T09:59:30Z",
+      "finished_at": "2026-11-25T10:00:10Z"
+    }
+  },
+  "source_pg_version": "17.11",
+  "replicas": 2,
+  "pods": [
+    {
+      "pod": "tsdb-0",
+      "role": "primary",
+      "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1@sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+      "image_id": "docker.io/library/import-2026-11-25@sha256:d0c2997165541bd9b2a3dbe51d1642e3fc18c908a88431e20dc9ac00dfc7340e",
+      "server_version": "18.6"
+    },
+    {
+      "pod": "tsdb-1",
+      "role": "replica",
+      "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1@sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840",
+      "image_id": "docker.io/library/import-2026-11-25@sha256:d0c2997165541bd9b2a3dbe51d1642e3fc18c908a88431e20dc9ac00dfc7340e",
+      "server_version": "18.6"
+    }
+  ],
+  "baseline": "seeded|2.30.1|50400|2521572.95|840|3|2",
+  "checks": {
+    "version": {
+      "status": "pass",
+      "detail": "extversion 2.30.1, expected 2.30.1"
+    },
+    "rows": {
+      "status": "pass",
+      "detail": "50400 rows, sum 2521572.95; seeded 50400 rows, sum 2521572.95 at 2.30.1"
+    },
+    "jobs": {
+      "status": "pass",
+      "detail": "2 jobs registered, seeded 2; fx_job_ok 1 runs, fx_job_fail 1 failures"
+    },
+    "still_compressed": {
+      "status": "pass",
+      "detail": "3 compressed chunks; seeded 3"
+    },
+    "cagg_survived": {
+      "status": "pass",
+      "detail": "840 materialized rows; seeded 840"
+    },
+    "cagg_matches": {
+      "status": "pass",
+      "detail": "0 differing buckets; refresh ran"
+    },
+    "write_and_refresh": {
+      "status": "pass",
+      "detail": "insert ok, refresh ok; 1 new buckets, 60 rows in them"
+    },
+    "decompress": {
+      "status": "pass",
+      "detail": "3 chunks decompressed; 50400 rows, sum 2521572.95 before the new writes"
+    }
+  },
+  "apply_exit": 0,
+  "plan": {
+    "hops": 1,
+    "path": "verify/out/pg17/2.30-to-pg18-2.30.plan.json"
+  },
+  "route": {
+    "start": {
+      "image": "timescale/timescaledb-ha:pg17.11-ts2.30.1",
+      "digest": "sha256:3e3440ab4c2aa585e743b1d8466cda9bbf18b6c598ec7806cf61e02fa5cd1d1a"
+    },
+    "steps": [
+      {
+        "action": "major_upgrade",
+        "image": "timescale/timescaledb-ha:pg18.6-ts2.30.1-all",
+        "digest": "sha256:df13246f8b73705f991d201e64c62426df001f062ce9700e6ee4a1283030f8bb",
+        "from_pg": 17,
+        "to_pg": 18,
+        "ts": "2.30.1",
+        "run_image": "timescale/timescaledb-ha:pg18.6-ts2.30.1",
+        "run_digest": "sha256:131bfdf82ec0dfe42eaa3f4a189f8e04b7b1dc2b27705cfd921e55ebef339840"
+      }
+    ]
+  },
+  "major_upgrades": [
+    {
+      "from_pg": 17,
+      "to_pg": 18,
+      "files": "copy",
+      "shared_inodes": 0
+    }
+  ],
+  "forward": {
+    "target": "2.30.1",
+    "apply_exit": 0
+  },
+  "rollback": {
+    "rollback_format": 1,
+    "from_pg": 18,
+    "to_pg": 17,
+    "lost": "every write made since the upgrade is lost: the old data directory is the cluster as it was when pg_upgrade ran, extension updates included",
+    "output": [
+      "going back from PostgreSQL 18 (system identifier 7712046416011595800) to 17: every write made since the upgrade is lost: the old data directory is the cluster as it was when pg_upgrade ran, extension updates included",
+      "scaled statefulset/tsdb to 0",
+      "PostgreSQL 18's data directory is now /home/postgres/pgdata/data.rolled-back-pg18-7712046416011595800; PostgreSQL 17's is back at /home/postgres/pgdata/data",
+      "deleted pgdata-tsdb-1",
+      "reset Patroni's state for scope tsdb: endpoints/tsdb, endpoints/tsdb-config",
+      "back: primary tsdb-0 on PostgreSQL 17, system identifier 7712043316948516900 (the old cluster's)"
+    ],
+    "result": "pass"
+  }
+}
