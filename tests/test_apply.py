@@ -425,6 +425,7 @@ def test_cli_apply_exit_codes(tmp_path, monkeypatch, capsys):
     plan_path.write_text(json.dumps(_plan()))
     kube = FakeKube(PG15_18, "15.18", {"app": "2.20.3"})
     monkeypatch.setattr(apply_mod, "Kube", lambda *a, **k: kube)
+    monkeypatch.setattr(cli, "Kube", lambda *a, **k: kube)
     monkeypatch.setattr(apply_mod, "run_preflight", _all_pass)
 
     assert cli.main(["apply", str(plan_path)]) == cli.EXIT_CHECK_FAILED
@@ -440,7 +441,7 @@ def test_cli_apply_exit_codes(tmp_path, monkeypatch, capsys):
 
 @pytest.mark.parametrize("strategy", ["RollingUpdate", None])
 def test_a_statefulset_the_controller_rolls_itself_is_refused(strategy):
-    """R10: with RollingUpdate (also the default when unset), set image makes
+    """With RollingUpdate (also the default when unset), set image makes
     the controller replace pods while apply deletes them."""
     kube = FakeKube(PG15_13, "15.18", {"verify": "2.20.3"})
     kube.strategy = strategy
