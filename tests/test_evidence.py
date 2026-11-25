@@ -19,6 +19,7 @@ from tsupgrade.evidence import (
     evidence_key,
     load_record,
     record_path,
+    stage_seconds,
     validate_record,
     write_record,
 )
@@ -223,3 +224,16 @@ def test_a_route_when_present_must_be_pinned():
     assert any("pinned image" in p for p in validate_record(doc))
     doc["route"]["steps"][0]["digest"] = "sha256:" + "1" * 64
     assert validate_record(doc) == []
+
+
+def test_timings_when_present_can_be_computed_again():
+    ok = {"started_at": "2026-11-25T10:00:00Z", "finished_at": "2026-11-25T10:02:24Z"}
+    doc = _record(timings={"forward": ok, "rollback": ok})
+    assert validate_record(doc) == []
+    assert stage_seconds(ok) == 144
+    doc["timings"] = {"apply": ok}
+    assert any("timings.apply is not one of" in p for p in validate_record(doc))
+    doc["timings"] = {"forward": {"started_at": "2026-11-25 10:00", "finished_at": ok["finished_at"]}}
+    assert any("needs started_at and finished_at" in p for p in validate_record(doc))
+    doc["timings"] = {"forward": {"started_at": ok["finished_at"], "finished_at": ok["started_at"]}}
+    assert any("finished before it started" in p for p in validate_record(doc))
