@@ -1,6 +1,6 @@
 """Measure what an open session does after ALTER EXTENSION timescaledb UPDATE.
 
-The claim under test (UPGRADE-RESEARCH.md, trap 6, graded D/C): sessions open
+The claim under test: sessions open
 before the update keep the old shared object loaded and keep failing until
 they are cycled, on replicas too, since the catalog change arrives by WAL.
 ``apply`` cycles sessions after every update on the strength of it, and the
@@ -13,7 +13,7 @@ caught up; then each waiting session runs the same statements twice, and fresh
 sessions run them once. The library each old session has mapped is read from
 ``/proc/<pid>/maps`` before the update, after it, and after the statements.
 
-Then trap 5 (graded D): the database is staged at the source again and the
+Then a second case: the database is staged at the source again and the
 update is run in a session that has already loaded the library.
 
 Writes one JSON record per case under ``verify/probes/sessions/``. This is a

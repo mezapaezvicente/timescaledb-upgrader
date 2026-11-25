@@ -214,8 +214,8 @@ class UpdateHazard(NamedTuple):
     url: str
 
 
-# Measured with plain containers and with the harness (TODO.md findings 2 and
-# 8); the upstream reports are the reference, not the proof.
+# Measured with plain containers and with the harness, as each entry says; the
+# upstream reports are the reference, not the proof.
 UPDATE_HAZARDS: Tuple[UpdateHazard, ...] = (
     # `2.10.1--2.10.2.sql` drops `_timescaledb_internal.ping_data_node(name)`
     # without IF EXISTS, and that function only exists from 2.0.0. Closed

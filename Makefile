@@ -85,7 +85,7 @@ clean: ## Delete the namespace but keep the kind cluster
 test: ## Run the unit test suite
 	@bash scripts/test.sh
 
-# R24: on a development branch a stale evidence record only warns. Here it
+# On a development branch a stale evidence record only warns. Here it
 # fails, as it does on a checkout of a tagged release. Run before tagging.
 release-check: export TSUPGRADE_RELEASE := 1
 release-check: ## Run the suite as a release: a stale evidence record fails

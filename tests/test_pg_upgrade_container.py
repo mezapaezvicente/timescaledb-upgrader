@@ -91,7 +91,7 @@ def test_a_real_check_failure_leaves_the_old_cluster_as_it_was():
 
 
 def test_a_real_upgrade_at_the_charts_data_directory():
-    """R25: the archived chart's PGDATA, /var/lib/postgresql/data, with the
+    """The archived chart's PGDATA, /var/lib/postgresql/data, with the
     volume mounted at /var/lib/postgresql. The kept directory lands beside it."""
     out = _run(data="/var/lib/postgresql/data")
     assert "exit 0" in out, out
@@ -99,7 +99,7 @@ def test_a_real_upgrade_at_the_charts_data_directory():
     assert "upgraded to PostgreSQL 13; the old data directory is /var/lib/postgresql/data.pg12" in out
 
 
-# R26: the archived chart keeps WAL on a second volume, pg_wal a symlink into
+# The archived chart keeps WAL on a second volume, pg_wal a symlink into
 # it. /var/lib/postgresql stands for the data volume, .../wal for the WAL one.
 WAL_CASE = r"""
 set -e

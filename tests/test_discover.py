@@ -1,4 +1,4 @@
-"""R31: the selector, StatefulSet and container, from Patroni's own settings.
+"""The selector, StatefulSet and container, from Patroni's own settings.
 
 The pods here are laid out as the archived ``timescaledb-single`` chart does:
 labels ``app``, ``cluster-name`` and ``release``, none of which the defaults

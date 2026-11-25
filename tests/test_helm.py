@@ -1,4 +1,4 @@
-"""R28: a Helm-owned StatefulSet is reported and warned about, never refused.
+"""A Helm-owned StatefulSet is reported and warned about, never refused.
 
 The next ``helm upgrade`` puts the chart's image back over whatever ``apply``
 set, so every output that changes the image ends with what to put in the

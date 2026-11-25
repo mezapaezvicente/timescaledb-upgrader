@@ -1,4 +1,4 @@
-"""Find the deployment's names from Patroni's own settings (R31).
+"""Find the deployment's names from Patroni's own settings.
 
 ``preflight``, ``apply`` and ``rollback`` need the pods' label selector, the
 StatefulSet and the database container. The defaults are this repository's

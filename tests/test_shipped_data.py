@@ -253,7 +253,7 @@ def stale_records(entries, git=_git):
 
 
 class StaleRecordsWarning(UserWarning):
-    """Cited records that no longer speak for the code (R24)."""
+    """Cited records that no longer speak for the code."""
 
 
 def release_context(environ=None, git=_git):
@@ -284,14 +284,13 @@ def check_freshness(stale, release):
 
 
 def test_every_cited_record_ran_the_code_that_ships():
-    """R5: verdicts must come from the code that ships. Enforced once a
-    release is tagged (every row re-run, then `git tag v...`); until then the
-    re-runs are still to come, which TODO.md tracks. R24: it fails only in a
+    """Verdicts must come from the code that ships. Skipped until a release
+    is tagged (every row re-run, then `git tag v...`). It fails only in a
     release context; on a development branch it warns."""
     if _git("rev-parse", "HEAD") is None:
         pytest.skip("not a git checkout")
     if not _git("tag", "--list", "v*"):
-        pytest.skip("no release tagged yet: re-run every row, then tag (R5)")
+        pytest.skip("no release tagged yet: re-run every row, then tag")
     check_freshness(stale_records(load_matrix()), release_context())
 
 

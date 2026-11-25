@@ -269,7 +269,7 @@ def test_malformed_major_steps_are_refused(mutate, reason):
     assert any(reason in r for r in reasons), reasons
 
 
-# --- the wait, the leftover pod, and what every failure says (R2) ------------
+# --- the wait, the leftover pod, and what every failure says -----------------
 
 def test_a_long_pg_upgrade_is_waited_for_without_a_limit_by_default():
     """Copy mode on a real database outlasts any rollout timeout."""
@@ -344,7 +344,7 @@ def test_every_failure_after_the_scale_to_0_says_how_to_start_again():
         assert any("scale statefulset/tsdb --replicas=2" in l for l in report["failure"]["error"])
 
 
-# --- a failed --link: what the old cluster needs before it starts (R4) -------
+# --- a failed --link: what the old cluster needs before it starts ------------
 
 def test_a_failed_link_after_linking_began_says_to_rename_pg_control_back():
     """pg_upgrade's docs: once linking starts it appends .old to the old
@@ -390,17 +390,23 @@ esac
 """
 
 
+def _executable(path, text):
+    """LF line endings on every OS (write_text's newline= needs Python 3.10),
+    and the exec bit, which Linux and macOS need and Windows ignores."""
+    path.write_bytes(text.encode("utf-8"))
+    path.chmod(0o755)
+
+
 def _fake_cluster(tmp_path):
     old_bin, new_bin = tmp_path / "old", tmp_path / "new"
     for d in (old_bin, new_bin):
         d.mkdir()
-    (old_bin / "pg_controldata").write_text("#!/bin/bash\necho 'Data page checksum version: 1'\n",
-                                           newline="\n")
-    (old_bin / "postgres").write_text("#!/bin/bash\n", newline="\n")
-    (new_bin / "initdb").write_text(
-        "#!/bin/bash\n[ \"$1\" = --help ] && exit 0\necho \"$@\" > \"$(dirname \"$0\")/initdb.args\"\n"
-        "while [ $# -gt 0 ]; do [ \"$1\" = -D ] && mkdir -p \"$2\"; shift; done\n", newline="\n")
-    (new_bin / "pg_upgrade").write_text(FAKE_PG_UPGRADE, newline="\n")
+    _executable(old_bin / "pg_controldata", "#!/bin/bash\necho 'Data page checksum version: 1'\n")
+    _executable(old_bin / "postgres", "#!/bin/bash\n")
+    _executable(new_bin / "initdb",
+                "#!/bin/bash\n[ \"$1\" = --help ] && exit 0\necho \"$@\" > \"$(dirname \"$0\")/initdb.args\"\n"
+                "while [ $# -gt 0 ]; do [ \"$1\" = -D ] && mkdir -p \"$2\"; shift; done\n")
+    _executable(new_bin / "pg_upgrade", FAKE_PG_UPGRADE)
     data = tmp_path / "pgdata" / "data"
     (data / "global").mkdir(parents=True)
     (data / "global" / "pg_control").write_text("x")
@@ -489,7 +495,7 @@ def test_the_script_lists_the_old_directories_left_on_the_disk(tmp_path):
 
 
 def test_the_upgrade_pod_is_scheduled_like_the_database_pods():
-    """R6: on tainted database nodes, behind a node selector or a private
+    """On tainted database nodes, behind a node selector or a private
     registry, a pod without these would sit Pending."""
     kube = MajorKube()
     template = {
@@ -524,7 +530,7 @@ def test_a_finished_pg_upgrade_reports_what_it_means_for_backups():
                for l in report["steps"][0]["output"])
 
 
-# --- initdb takes the old cluster's encoding and locale (R8) -----------------
+# --- initdb takes the old cluster's encoding and locale ----------------------
 
 def test_initdb_gets_template0s_encoding_and_locale_read_before_anything_stops():
     kube = MajorKube()
@@ -546,7 +552,7 @@ def test_the_script_passes_the_old_locale_to_initdb(tmp_path, provider, expect):
     assert expect in (tmp_path / "new" / "initdb.args").read_text()
 
 
-# --- Patroni's DCS state, by name (R7) ---------------------------------------
+# --- Patroni's DCS state, by name --------------------------------------------
 
 def test_patronis_state_is_deleted_by_name_for_its_scope_failover_included():
     """A switchover leaves <scope>-failover behind (measured); it goes too."""
@@ -584,7 +590,7 @@ def test_the_scope_falls_back_to_patronis_rest_api():
 
 
 def test_a_finished_major_upgrade_reports_what_a_rollback_needs():
-    """R14: structured facts in the report, not text to parse back."""
+    """Structured facts in the report, not text to parse back."""
     report = _apply(_plan(), MajorKube())
     detail = report["steps"][0]["detail"]
     assert detail == {
@@ -598,7 +604,7 @@ def test_a_finished_major_upgrade_reports_what_a_rollback_needs():
     assert "detail" not in report["steps"][1]
 
 
-# --- each stage's failure, and one instance (R16) ----------------------------
+# --- each stage's failure, and one instance ----------------------------------
 
 def test_a_failed_switchover_stops_nothing():
     kube = MajorKube(primary=1)
@@ -662,7 +668,7 @@ def test_one_instance_has_no_replica_disk_to_delete():
     assert report["steps"][0]["detail"]["replicas"] == 1
 
 
-# --- R25: the data directory comes from the cluster -----------------------------
+# --- the data directory comes from the cluster ----------------------------------
 
 CHART_DATA = "/var/lib/postgresql/data"
 
@@ -754,7 +760,7 @@ def test_a_plan_without_a_major_upgrade_does_not_read_the_data_directory():
     assert "data_directory" not in report
 
 
-# --- R26: every volume claim, and WAL on its own volume ---------------------------
+# --- every volume claim, and WAL on its own volume --------------------------------
 
 def _chart_kube_with_wal(**kw):
     """The chart's default: WAL on a second claim, pg_wal a symlink into it."""
