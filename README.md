@@ -53,6 +53,15 @@ versions you are running right now, knowing whether the target image exists,
 knowing whether you have the disk headroom, and having rehearsed the procedure
 somewhere it does not matter. That is what this repo is about.
 
+It came out of a production upgrade I ran: a large multi-database TimescaleDB
+deployment on Kubernetes under Patroni, inside a three-hour window. The method
+came from that work: read-only checks first, rehearsals on a copy shaped like
+production, go/no-go gates, and a rollback cut-off set from measured rehearsal
+times. Several checks here exist because that work found the problem: catalog
+drift between databases, too little disk for the new image, a stale Helm
+release that still listed the StatefulSet, and what open sessions do across an
+extension update.
+
 **A note on the version matrix.** Nothing in this repo asserts a compatibility
 fact it has not established. A transition nobody has run is recorded as
 `verdict: null`, `verified: false`, with no evidence, rather than filled in
