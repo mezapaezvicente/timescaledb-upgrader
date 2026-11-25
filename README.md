@@ -1,5 +1,7 @@
 # timescaledb-upgrader
 
+[![test](https://github.com/mezapaezvicente/timescaledb-upgrader/actions/workflows/test.yml/badge.svg)](https://github.com/mezapaezvicente/timescaledb-upgrader/actions/workflows/test.yml)
+
 Upgrade and roll back **self-hosted TimescaleDB on Kubernetes under Patroni**:
 the extension, the image, and the PostgreSQL major with `pg_upgrade`.
 
